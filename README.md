@@ -40,3 +40,4 @@ For example, running the following command will simulate a basic population spli
 ```
 src/run_trasp -input data/demes/split.yaml -output data/results/simulations/split -mode simulated -L 10000 -delta 100
 ```
+
