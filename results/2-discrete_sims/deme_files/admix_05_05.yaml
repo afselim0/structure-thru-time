@@ -1,0 +1,20 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: main
+  epochs:
+  - {end_time: 2000.0, start_size: 10000.0}
+- name: A
+  ancestors: [main]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: B
+  ancestors: [main]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: C
+  start_time: 100.0
+  ancestors: [A, B]
+  proportions: [0.5, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}

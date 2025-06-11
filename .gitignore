@@ -1,0 +1,16 @@
+# log files
+*.pyc
+*.DS_Store
+job_logs/
+
+## Output dataframes
+*.parquet
+
+## Inferred Trees
+data/trees
+
+## Tests
+tests/
+*old*
+misc/
+local_data/

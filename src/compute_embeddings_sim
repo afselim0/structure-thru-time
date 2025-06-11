@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+#%%
+from plot_params import *
+import os
+import numpy as np # type: ignore
+import pandas as pd
+import msprime
+import argparse
+import demes
+import matplotlib.colors as mcolors
+import demesdraw
+import plotly.express as px
+import plotly.io as pio
+from counting import *
+from latent_embeddings import *
+from sklearn.decomposition import PCA
+
+def run_pca(demes_file_path, n: int = 40, L0: int = 10000, mu= 1e-4):
+    """Runs PCA on the simulated data.
+
+    Args:
+        demes_file_path (str): The demography to be simulated in demes format
+        n (int): number of haploid samples per population in given demography
+        L0 (int): number of independent trees to simulate
+
+    Returns:
+        tuple: A tuple containing the PCA results and metadata.
+    """
+    if "SS" in demes_file_path: ## simulate only 2 samples per deme for stepping stones models
+        n=2
+
+    graph = demes.load(demes_file_path)
+    demography = msprime.Demography.from_demes(graph)
+    K=0
+    samples = {}
+    population_samples_dict = {}
+    extant_populations = []
+    for pop in demography.populations:
+        if pop.default_sampling_time == 0:
+            samples[pop.name] = n
+            extant_populations.append(pop.name)
+            population_samples_dict[pop.name] = np.arange(n*K,n*(K+1))
+            K+=1
+    ts_list = msprime.sim_ancestry(
+        samples = samples,
+        demography = demography,
+        sequence_length=1,
+        ploidy = 1,
+        num_replicates = L0
+        )
+    
+    genotype_matrix = np.zeros((K*n,L0),dtype=bool)
+    for i,ts in tqdm(enumerate(ts_list)):
+        ts = msprime.sim_mutations(ts,rate=mu,model="binary")
+        try:
+            geno = next(ts.variants()).genotypes
+            genotype_matrix[:,i]  = geno
+        except:
+            continue
+    
+    no_muts = np.all(~genotype_matrix,axis=0)
+    fixed_sites = np.all(genotype_matrix,axis=0)
+    
+    removed_sites = np.logical_or(no_muts,fixed_sites)
+    genotype_matrix = genotype_matrix[:,~removed_sites]
+
+    pca = PCA(n_components=2)
+    X = pca.fit_transform(genotype_matrix)
+    pca_df = pd.DataFrame(X, columns=["X1", "X2"])
+    pca_df["sample_id"] = np.arange(K*n)
+    pca_df["population"] = np.repeat(extant_populations,n)
+
+    return pca_df
+
+def prepare_from_simulation(demes_file_path: str, n: int = 40, L0: int = 10000):
+    """prepares an iterator of tree sequences given a demes file to simulate.
+
+    Args:
+        demes_file_path (str): The demography to be simulated in demes format
+        n (int): number of haploid samples per population in given demography
+        L (int): number of independent trees to simulate
+
+    Returns:
+        iterator: an iterator of tree sequences
+        List[int]: a list of size L, where each entry is 2 (a single tree is taken from each simulation to ensure total independence)
+        int: the total number of samples in the simulation
+    """
+    if "SS" in demes_file_path: ## simulate only 2 samples per deme for stepping stones models
+        n=2
+
+    graph = demes.load(demes_file_path)
+    demography = msprime.Demography.from_demes(graph)
+    K=0
+    samples = {}
+    population_samples_dict = {}
+    extant_populations = []
+    for pop in demography.populations:
+        if pop.default_sampling_time == 0:
+            samples[pop.name] = n
+            extant_populations.append(pop.name)
+            population_samples_dict[pop.name] = np.arange(n*K,n*(K+1))
+            K+=1
+
+    cmap = plt.get_cmap("rainbow")
+    colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
+    colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
+
+    ts_list = msprime.sim_ancestry(
+        samples = samples,
+        demography = demography,
+        sequence_length=1,
+        ploidy = 1,
+        num_replicates = int((L0*n*K)/2)
+        )
+    
+    metadata = pd.DataFrame(population_samples_dict)
+    metadata = pd.melt(metadata,var_name="population",value_name="sample_id")
+    metadata["hex_colour"] = metadata["population"].map(colors_dict)
+
+    return ts_list,metadata,population_samples_dict
+
+
+def plot_deme(input,output,times,colors_dict,log_time):
+    graph = demes.load(input)
+    fig,ax_demes = plt.subplots(figsize = (3,5))
+    demesdraw.tubes(graph,ax=ax_demes,max_time=np.max(times),colours = colors_dict,labels="xticks-legend",log_time=log_time)
+    ax_demes.set_title("Simulated Demography")
+    if ax_demes.get_legend() is not None:
+        ax_demes.get_legend().remove()
+    fig.savefig(os.path.join(output,"deme.png"),dpi=500)
+    return fig
+
+def dynamic_3d_plot(embeddings_df, output ,colors_dict):
+    fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=True, color='population',line_group='sample_id',
+        color_discrete_map=colors_dict
+    )
+    fig.update_layout(showlegend=True)
+    # fig.show()
+    pio.write_html(fig, file=os.path.join(output,"dynamic_3d_plot.html"))
+
+    return fig
+
+
+
+def main():
+    # default parameters
+    sim_results_path = "../data/sim_results/"
+    n=40
+    L0=10000
+    delta=100
+    min_time = 10
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", type=str, required=True, help="path to demes file")
+    parser.add_argument("--max_time", type=int, required=True, help="maximum timepoint")
+
+    # loading the arguments
+    args = parser.parse_args()
+    demes_file_path = args.input
+    max_time = args.max_time
+    deme_name = os.path.basename(demes_file_path).split(".")[0]
+    output_path = os.path.join(sim_results_path,deme_name)
+    os.makedirs(output_path,exist_ok=True)
+
+    if "SS" in demes_file_path: ## simulate only 2 samples per deme for stepping stones models
+        n=2
+
+    # Simulate the trees and count events
+    times = np.logspace(np.log10(min_time),np.log10(max_time),100,base=10)
+    ts_list,metadata,population_samples_dict = prepare_from_simulation(demes_file_path, )
+    K = len(population_samples_dict)
+
+    # Simulate the trees
+    print(f"Simulating trees for {deme_name}")
+    trees = (ts.first() for ts in ts_list)
+
+    # Compute the number of coalescent events and uncoalesced lineages through time
+    print(f"Counting coalescent events")
+    N, L = count_coal_events(trees,times, delta)
+    print(f"Computing Embeddings")
+    embeddings_through_time = compute_embeddings_through_time(N, L, times)
+    print(f"Running PCA")
+    pca_df = run_pca(demes_file_path)
+
+    # Saving data
+    counts_df = create_counts_df(N, L, times, population_samples_dict)
+    embeddings_df = create_embeddings_df(embeddings_through_time, times, population_samples_dict)
+
+    counts_df.to_parquet(os.path.join(output_path,"counts.parquet"))
+    embeddings_df.to_parquet(os.path.join(output_path,"embeddings.parquet"))
+    metadata.to_parquet(os.path.join(output_path,"metadata.parquet"))
+    pca_df.to_parquet(os.path.join(output_path,"pca.parquet"))
+
+    # Plotting demography
+    colors_dict = {}
+    for row in metadata[["population","hex_colour"]].drop_duplicates().iterrows():
+        colors_dict[row[1]["population"]] = row[1]["hex_colour"]
+    demes_fig = plot_deme(demes_file_path,output_path,times,colors_dict,log_time=True)
+    dynanimic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
+
+# %%
+if __name__ == "__main__":
+    main()
