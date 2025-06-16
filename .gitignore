@@ -15,3 +15,12 @@ tests/
 *old*
 misc/
 local_data/
+
+## Tree inference
+*.hap
+*.map
+*.mut
+*.sample
+*.trees
+*.anc
+*.vcf

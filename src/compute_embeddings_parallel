@@ -70,22 +70,19 @@ def main():
     for pop in extant_populations:
         population_samples_dict[pop] = metadata[metadata["population"]==pop]["sample_id"].values
 
-    cmap = plt.get_cmap("rainbow")
-    colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
-    colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
-
     # Compute the number of coalescent events and uncoalesced lineages through time
     N = None
     L = None
     for i in range(m):
         print(f"Processing posterior sample {i+1}")
-        ts_files = glob.glob(os.path.join(input,f"*_{i}.trees"))
-        trees = itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files))
-        # trees = itertools.islice(itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files)),0,None,5)
-        l = 0
-        for tree in trees:
-            l+=1
-        print(f"Number of trees in posterior sample {i+1}: {l}")
+        if i==0:
+            ts_files = glob.glob(os.path.join(input,f"*_{i}.trees"))
+            trees = itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files))
+            # trees = itertools.islice(itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files)),0,None,5)
+            l = 0
+            for tree in trees:
+                l+=1
+            print(f"Number of trees in posterior sample {i+1}: {l}")
 
         ts_files = glob.glob(os.path.join(input,f"*_{i}.trees"))
         trees = itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files))

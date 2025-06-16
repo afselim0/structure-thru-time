@@ -58,7 +58,7 @@ def bfgs_optimization(X_init, R, alpha, beta=1, max_iter=10000, tol=1e-3, verbos
     
     return X_optimized, final_loss
 
-def compute_embeddings_through_time(N, L, times ,sample_times = None,n_components = 2, X_init=None):
+def compute_embeddings_through_time(N, L, times ,sample_times = None,n_components = 2, X_init=None, alpha=None):
     if sample_times is None:
         sample_times = np.zeros(N.shape[0])
     n = N.shape[0]
@@ -67,7 +67,8 @@ def compute_embeddings_through_time(N, L, times ,sample_times = None,n_component
         X_init = np.random.rand(n, n_components)
     R = N/(L+1)
     # alpha = np.quantile(R,0.99) # Set alpha to 99th percentile of R
-    alpha = np.quantile(R,0.995)
+    if alpha is None:
+        alpha = np.quantile(R,0.995)
 
 
     n_timepoints = R.shape[-1]
@@ -90,10 +91,16 @@ def compute_embeddings_through_time(N, L, times ,sample_times = None,n_component
             X = np.full((n,n_components),np.nan)
             X[extant_sample_indices, :] = X_extant
             X, _ = bfgs_optimization(X_init, R_t, alpha)
-            # X = procrustes_adjustment(X_init, X)  # Procrustes adjustment to align embeddings
+            X = procrustes_adjustment(X_init, X)  # Procrustes adjustment to align embeddings
 
         X_over_time[:,:,inx] = X
-        X_init = X
+        mean_abs_X = np.mean(np.abs(X_over_time),axis=(0,1))
+        max_mean_abs_X = np.max(mean_abs_X)
+        if np.mean(np.abs(X)) < max_mean_abs_X/10:
+            X_init = np.random.rand(n, n_components)
+        else:
+            jitter = 0.01 * np.std(X) * np.random.randn(*X.shape)
+            X_init = X + jitter
     return X_over_time
 
 def create_embeddings_df(embeddings_through_time, times, population_samples_dict):
@@ -108,7 +115,7 @@ def create_embeddings_df(embeddings_through_time, times, population_samples_dict
     Returns:
         pd.DataFrame: DataFrame with columns [sample_id, population_id, time_inx, time, X1, X2, ...].
     """
-    n, K, num_timepoints = embeddings_through_time.shape
+    n, _, num_timepoints = embeddings_through_time.shape
     sample_ids = np.arange(n)
     time = np.tile(times, n)
     X1_flat = embeddings_through_time[:,0,:].flatten()

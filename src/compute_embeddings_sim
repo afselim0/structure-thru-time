@@ -144,7 +144,7 @@ def dynamic_3d_plot(embeddings_df, output ,colors_dict):
 
 def main():
     # default parameters
-    sim_results_path = "../data/sim_results/"
+    sim_results_path = "outputs/sim"
     n=40
     L0=10000
     delta=100
@@ -201,3 +201,28 @@ def main():
 # %%
 if __name__ == "__main__":
     main()
+
+#%%
+fig = go.Figure()
+
+for population, color in colors_dict.items():
+    df_subset = embeddings_df[embeddings_df["population"] == population]
+    fig.add_trace(go.Scatter3d(
+        x=df_subset["X1"],
+        y=df_subset["X2"],
+        z=df_subset["time"],
+        mode='lines',
+        line=dict(width=0.5, color=color),  # Adjust width here
+        name=population,
+        opacity=0.7
+    ))
+
+fig.update_layout(
+    scene=dict(
+        xaxis_title='X1',
+        yaxis_title='X2',
+        zaxis_title='Time (log)',
+        zaxis_type='log'  # If you still want log scale
+    )
+)
+fig.show()
