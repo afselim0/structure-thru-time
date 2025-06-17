@@ -20,7 +20,7 @@ def compute_loss_gradient(X, R, alpha, beta=1):
    return loss, grad
 
 
-def bfgs_optimization(X_init, R, alpha, beta=1, max_iter=10000, tol=1e-3, verbose=False):
+def bfgs_optimization(X_init, R, alpha, beta=1, max_iter=10000, tol=1e-6, verbose=False):
     # Store original shape
     original_shape = X_init.shape
     

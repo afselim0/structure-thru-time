@@ -136,8 +136,21 @@ def dynamic_3d_plot(embeddings_df, output ,colors_dict):
     fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=True, color='population',line_group='sample_id',
         color_discrete_map=colors_dict
     )
+    x1 = embeddings_df["X1"].values
+    x2 = embeddings_df["X2"].values
+
+    min_value = min(np.min(x1),np.min(x2)) * 1.05
+    max_value = max(np.max(x1),np.max(x2)) * 1.05
+
     fig.update_layout(showlegend=True)
-    # fig.show()
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[min_value, max_value]),
+            yaxis=dict(range=[min_value, max_value]),
+        )
+    )
+
     pio.write_html(fig, file=os.path.join(output,"dynamic_3d_plot.html"))
 
     return fig
@@ -263,3 +276,27 @@ def main():
 # %%
 if __name__ == "__main__":
     main()
+#%%
+
+
+deme = "SS_N100_m_005"
+counts_df = pd.read_parquet(f"../results/2-discrete_sims/outputs/sim/{deme}/counts.parquet")
+metadata = pd.read_parquet(f"../results/2-discrete_sims/outputs/sim/{deme}/metadata.parquet")
+demes_file_path = f"../results/2-discrete_sims/deme_files/{deme}.yaml"
+output_path = f"../results/2-discrete_sims/outputs/sim/{deme}/"
+colors_dict = {}
+for row in metadata[["population","hex_colour"]].drop_duplicates().iterrows():
+    colors_dict[row[1]["population"]] = row[1]["hex_colour"]
+
+ts_list,metadata,population_samples_dict = prepare_from_simulation(demes_file_path)
+N,L,_,_ = extract_matrices(counts_df)
+times = np.unique(counts_df["time"].values)
+
+embeddings_through_time = compute_embeddings_through_time(N, L, times)
+embeddings_df = create_embeddings_df(embeddings_through_time, times, population_samples_dict)
+
+embeddings_df.to_parquet(os.path.join(output_path,"embeddings.parquet"))
+
+dynamic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
+static_fig = static_3d_plot(embeddings_df,output_path,colors_dict)
+# %%
