@@ -10,6 +10,7 @@ import tskit
 import argparse
 import matplotlib.colors as mcolors
 import plotly.express as px
+import plotly.graph_objects as go
 import plotly.io as pio
 from counting import *
 from latent_embeddings import *
@@ -22,6 +23,61 @@ def dynamic_3d_plot(embeddings_df, output ,colors_dict):
     # fig.show()
     pio.write_html(fig, file=os.path.join(output,"dynamic_3d_plot.html"))
 
+    return fig
+
+def static_3d_plot(embeddings_df, output, colors_dict):
+    fig = go.Figure()
+    sample_ids = np.unique(embeddings_df.sample_id.values)
+
+    for sample_id in sample_ids:
+        df_subset = embeddings_df[embeddings_df["sample_id"] == sample_id]
+        fig.add_trace(go.Scatter3d(
+            x=df_subset["X1"],
+            y=df_subset["X2"],
+            z=df_subset["time"],
+            mode='lines',
+            line=dict(width=0.5, color=colors_dict[df_subset["population"].values[0]]),
+            name=f"Sample {sample_id}",
+            opacity= 1
+        ))
+
+    # Get combined min/max from X1 and X2 columns
+    xy_min = min(embeddings_df["X1"].min(), embeddings_df["X2"].min())
+    xy_max = max(embeddings_df["X1"].max(), embeddings_df["X2"].max())
+
+    # Add 10% padding for margins
+    padding = 0.1 * (xy_max - xy_min)
+    xy_range = [xy_min - padding, xy_max + padding]
+
+    fig.update_layout(showlegend=False,
+        margin=dict(l=0, r=0, t=0, b=0),
+        scene=dict(
+            xaxis_title='X1',
+            yaxis_title='X2',
+            zaxis_title='Time (generations ago)',
+            zaxis_type='log'
+        )
+    )
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=xy_range),  # Same range for X
+            yaxis=dict(range=xy_range),  # Same range for Y
+            aspectmode='manual',  # Prevents auto-scaling
+            aspectratio=dict(x=1, y=1, z=0.7),  # X/Y equal, Z scaled down
+        )
+    )
+
+    fig.update_layout(
+        width=600,
+        height=600,
+        scene_camera=dict(
+            eye=dict(x=2, y=2, z=1),  # Diagonal view
+        )
+    )
+
+    fig.write_image(os.path.join(output,"static_3d_plot.png"), scale=3)
+    
     return fig
 
 def main():
@@ -95,8 +151,9 @@ def main():
         cmap = plt.get_cmap("rainbow")
         colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
         colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
-        
-    dynanimic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
+
+    dynamic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
+    static_fig = static_3d_plot(embeddings_df,output_path,colors_dict)
 
 # %%
 if __name__ == "__main__":

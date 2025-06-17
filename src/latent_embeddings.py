@@ -64,6 +64,7 @@ def compute_embeddings_through_time(N, L, times ,sample_times = None,n_component
     n = N.shape[0]
 
     if X_init is None:
+        np.random.seed(42)
         X_init = np.random.rand(n, n_components)
     R = N/(L+1)
     # alpha = np.quantile(R,0.99) # Set alpha to 99th percentile of R
@@ -94,13 +95,14 @@ def compute_embeddings_through_time(N, L, times ,sample_times = None,n_component
             X = procrustes_adjustment(X_init, X)  # Procrustes adjustment to align embeddings
 
         X_over_time[:,:,inx] = X
-        mean_abs_X = np.mean(np.abs(X_over_time),axis=(0,1))
-        max_mean_abs_X = np.max(mean_abs_X)
-        if np.mean(np.abs(X)) < max_mean_abs_X/10:
-            X_init = np.random.rand(n, n_components)
-        else:
-            jitter = 0.01 * np.std(X) * np.random.randn(*X.shape)
-            X_init = X + jitter
+        X_init = X
+        # mean_abs_X = np.mean(np.abs(X_over_time),axis=(0,1))
+        # max_mean_abs_X = np.max(mean_abs_X)
+        # if np.mean(np.abs(X)) < max_mean_abs_X/10:
+        #     X_init = np.random.rand(n, n_components)
+        # else:
+        #     jitter = 0.01 * np.std(X) * np.random.randn(*X.shape)
+        #     X_init = X + jitter
     return X_over_time
 
 def create_embeddings_df(embeddings_through_time, times, population_samples_dict):
