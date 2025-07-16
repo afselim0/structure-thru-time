@@ -10,10 +10,14 @@ sys.path.append("../../src")
 from latent_embeddings import *
 # %%
 def dynamic_3d_plot(embeddings_df, file_name ,colors_dict, dir = "outputs/chr21/subsamples/"):
-    fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=True, color='population',line_group='sample_id',
+    fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time (years ago)",log_z=True, color='population',line_group='sample_id',
         color_discrete_map=colors_dict
     )
     fig.update_layout(showlegend=True)
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[-6.5, 6.5]),
+            yaxis=dict(range=[-6.5, 6.5])))
     # fig.show()
     pio.write_html(fig, file=os.path.join(dir, file_name))
 
@@ -69,7 +73,8 @@ alpha = np.quantile(R_list, 0.995)
 populations = np.unique(metadata["population"].values)
 populations = populations[populations != "W x C"]
 
-max_combinations = len(populations)+1
+# max_combinations = len(populations)+1
+max_combinations = 3
 population_combinations = []
 for r in range(1, max_combinations):
     population_combinations.extend([list(comb) for comb in combinations(populations, r)])
@@ -89,7 +94,8 @@ for i,pop in enumerate(population_combinations):
     N,L,population_samples_dict, sample_id_map = extract_matrices(counts_subset)
 
     embeddings_through_time = compute_embeddings_through_time(N, L, times, alpha=alpha)
-    embeddings_df = create_embeddings_df(embeddings_through_time, times, population_samples_dict)
+    embeddings_df = create_embeddings_df(embeddings_through_time, times*10, population_samples_dict)
+    embeddings_df.rename(columns={"time":"time (years ago)"}, inplace=True)
     embeddings_df["sample_id"] = embeddings_df["sample_id"].map(sample_id_map)
 
 
@@ -97,3 +103,5 @@ for i,pop in enumerate(population_combinations):
     dynamic_3d_plot(embeddings_df, file_name ,colors_dict)
 
 
+
+# %%
