@@ -1,0 +1,18 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: main
+  epochs:
+  - {end_time: 5000.0, start_size: 20000.0}
+- name: A
+  ancestors: [main]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: B
+  ancestors: [main]
+  epochs:
+  - {end_time: 0, start_size: 5000.0}
+migrations:
+- demes: [A, B]
+  rate: 0.0001
+  end_time: 2500.0

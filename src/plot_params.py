@@ -15,11 +15,11 @@ def set_custom_rcparams():
     rcParams['xtick.color'] = 'black'
     rcParams['ytick.color'] = 'black'
     rcParams['xtick.major.width'] = 2
-    rcParams['ytick.major.width'] = 0
+    rcParams['ytick.major.width'] = 2
     rcParams['xtick.major.size'] = 5
-    rcParams['ytick.major.size'] = 0
+    rcParams['ytick.major.size'] = 5
     # -- Fonts --
-    rcParams['font.size'] = 12
+    rcParams['font.size'] = 8
     rcParams['font.family'] = 'sans-serif'
     plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'sans-serif']
     rcParams['text.color'] = 'black'

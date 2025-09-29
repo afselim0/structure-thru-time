@@ -74,7 +74,7 @@ def run_pca(demes_file_path, n: int = 40, L0: int = 10000, mu= 1e-4):
 
     return pca_df
 
-def prepare_from_simulation(demes_file_path: str, n: int = 40, L0: int = 10000):
+def prepare_from_simulation(demography, n: int = 40, L0: int = 10000):
     """prepares an iterator of tree sequences given a demes file to simulate.
 
     Args:
@@ -87,11 +87,6 @@ def prepare_from_simulation(demes_file_path: str, n: int = 40, L0: int = 10000):
         List[int]: a list of size L, where each entry is 2 (a single tree is taken from each simulation to ensure total independence)
         int: the total number of samples in the simulation
     """
-    if "SS" in demes_file_path: ## simulate only 2 samples per deme for stepping stones models
-        n=2
-
-    graph = demes.load(demes_file_path)
-    demography = msprime.Demography.from_demes(graph)
     K=0
     samples = {}
     population_samples_dict = {}
@@ -103,8 +98,10 @@ def prepare_from_simulation(demes_file_path: str, n: int = 40, L0: int = 10000):
             population_samples_dict[pop.name] = np.arange(n*K,n*(K+1))
             K+=1
 
-    cmap = plt.get_cmap("rainbow")
-    colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
+    # cmap = plt.get_cmap("rainbow")
+    cmap = plt.get_cmap("Set1")
+    # colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
+    colors = cmap(np.arange(K))[:,:-1]
     colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
 
     ts_list = msprime.sim_ancestry(
@@ -139,8 +136,11 @@ def dynamic_3d_plot(embeddings_df, output ,colors_dict):
     x1 = embeddings_df["X1"].values
     x2 = embeddings_df["X2"].values
 
-    min_value = min(np.min(x1),np.min(x2)) * 1.05
-    max_value = max(np.max(x1),np.max(x2)) * 1.05
+    # min_value = min(np.min(x1),np.min(x2)) * 1.05
+    # max_value = max(np.max(x1),np.max(x2)) * 1.05
+
+    min_value = min(np.quantile(x1,0.01),np.quantile(x2,0.01)) * 1.05
+    max_value = max(np.quantile(x1,0.99),np.quantile(x2,0.99)) * 1.05
 
     fig.update_layout(showlegend=True)
 
@@ -215,7 +215,7 @@ def main():
     sim_results_path = "../results/2-discrete_sims/outputs/sim"
     n=40
     L0=10000
-    delta=100
+    delta = 100
     min_time = 10
     
     parser = argparse.ArgumentParser()
@@ -232,10 +232,24 @@ def main():
 
     if "SS" in demes_file_path: ## simulate only 2 samples per deme for stepping stones models
         n=2
+    else:
+        n=40
 
     # Simulate the trees and count events
     times = np.logspace(np.log10(min_time),np.log10(max_time),100,base=10)
-    ts_list,metadata,population_samples_dict = prepare_from_simulation(demes_file_path, )
+
+    is_admix = False
+    graph = demes.load(demes_file_path)
+    demography = msprime.Demography.from_demes(graph)
+    for event in demography.events:
+        if isinstance(event, msprime.demography.Admixture):
+            admix_time = event.time
+            census_time = admix_time + 1
+            is_admix = True
+            demography.add_census(census_time)
+            demography.sort_events()
+
+    ts_list,metadata,population_samples_dict = prepare_from_simulation(demography,n=n,L0=L0)
     K = len(population_samples_dict)
 
     # Simulate the trees
@@ -244,9 +258,15 @@ def main():
 
     # Compute the number of coalescent events and uncoalesced lineages through time
     print(f"Counting coalescent events")
-    N, L = count_coal_events(trees, times, delta)
+    if is_admix:
+        population_id_name = {pop.id: pop.name for pop in demography.populations}
+        N, L, population_samples_dict = count_coal_events_admix(trees,times,census_time,population_id_name,delta)
+
+    else:
+        N, L = count_coal_events(trees, times, delta)
+
     print(f"Computing Embeddings")
-    embeddings_through_time = compute_embeddings_through_time(N, L, times)
+    embeddings_through_time = compute_embeddings_through_time(N, L, times,delta=100)
     print(f"Running PCA")
     pca_df = run_pca(demes_file_path)
 
@@ -277,26 +297,3 @@ def main():
 if __name__ == "__main__":
     main()
 #%%
-
-
-deme = "SS_N100_m_005"
-counts_df = pd.read_parquet(f"../results/2-discrete_sims/outputs/sim/{deme}/counts.parquet")
-metadata = pd.read_parquet(f"../results/2-discrete_sims/outputs/sim/{deme}/metadata.parquet")
-demes_file_path = f"../results/2-discrete_sims/deme_files/{deme}.yaml"
-output_path = f"../results/2-discrete_sims/outputs/sim/{deme}/"
-colors_dict = {}
-for row in metadata[["population","hex_colour"]].drop_duplicates().iterrows():
-    colors_dict[row[1]["population"]] = row[1]["hex_colour"]
-
-ts_list,metadata,population_samples_dict = prepare_from_simulation(demes_file_path)
-N,L,_,_ = extract_matrices(counts_df)
-times = np.unique(counts_df["time"].values)
-
-embeddings_through_time = compute_embeddings_through_time(N, L, times)
-embeddings_df = create_embeddings_df(embeddings_through_time, times, population_samples_dict)
-
-embeddings_df.to_parquet(os.path.join(output_path,"embeddings.parquet"))
-
-dynamic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
-static_fig = static_3d_plot(embeddings_df,output_path,colors_dict)
-# %%

@@ -12,11 +12,12 @@ import matplotlib.colors as mcolors
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
-from counting import *
+from counting import * 
 from latent_embeddings import *
+from collections import defaultdict
 
-def dynamic_3d_plot(embeddings_df, output ,colors_dict):
-    fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=True, color='population',line_group='sample_id',
+def dynamic_3d_plot(embeddings_df, output ,colors_dict,log_time=True):
+    fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=log_time, color='population',line_group='sample_id',
         color_discrete_map=colors_dict
     )
     fig.update_layout(showlegend=True)
@@ -25,7 +26,7 @@ def dynamic_3d_plot(embeddings_df, output ,colors_dict):
 
     return fig
 
-def static_3d_plot(embeddings_df, output, colors_dict):
+def static_3d_plot(embeddings_df, output, colors_dict,log_time=True):
     fig = go.Figure()
     sample_ids = np.unique(embeddings_df.sample_id.values)
 
@@ -48,16 +49,18 @@ def static_3d_plot(embeddings_df, output, colors_dict):
     # Add 10% padding for margins
     padding = 0.1 * (xy_max - xy_min)
     xy_range = [xy_min - padding, xy_max + padding]
-
+    
     fig.update_layout(showlegend=False,
         margin=dict(l=0, r=0, t=0, b=0),
         scene=dict(
             xaxis_title='X1',
             yaxis_title='X2',
-            zaxis_title='Time (generations ago)',
-            zaxis_type='log'
+            zaxis_title='Time (generations ago)'
         )
     )
+
+    if log_time:
+        fig.update_layout(scene=dict(zaxis_type="log"))
 
     fig.update_layout(
         scene=dict(
@@ -89,11 +92,11 @@ def main():
     parser.add_argument("--input", type=str, required=True, help="path to directory with inferred trees")    
     parser.add_argument("--output", type=str, required=True, help="output path")
     parser.add_argument("--metadata", type=str, required = False, help="path to metadata file. Must include columns with names [population,sample_id]")
-    parser.add_argument("--min_time", type=float, help="minimum time to start computing rates and embeddings")
+    parser.add_argument("--min_time", default=10, type=float, help="minimum time to start computing rates and embeddings")
     parser.add_argument("--max_time", type=float, help="maximum time to compute rates and embeddings")
     parser.add_argument("--num_timepoints", type=int, default=100, help="number of timepoints to use")
-    parser.add_argument("--delta", type=float, help="the time width of each window")
-    parser.add_argument("--log_time", action="store_true", help="use this flag to have log-spaced time points")
+    parser.add_argument("--delta", default = 100, type=float, help="the time width of each window")
+    parser.add_argument("--no_log_time", action="store_true", help="use this flag to have linear-spaced time points")
 
     args = parser.parse_args()
     
@@ -104,7 +107,7 @@ def main():
     max_time = args.max_time
     num_timepoints = args.num_timepoints
     delta = args.delta
-    log_time = args.log_time
+    log_time = not args.no_log_time
 
     os.makedirs(output_path,exist_ok=True)
 
@@ -118,21 +121,27 @@ def main():
     if "sample_times" not in metadata.columns:
         metadata["sample_times"] = 0
 
+    population_samples_dict = defaultdict(list)
+    for row in metadata.iterrows():
+        population_samples_dict[row[1]["population"]].append(row[1]["sample_id"])
     extant_populations = np.unique(metadata["population"])
     K = len(extant_populations)
-    population_samples_dict = {}
-    for pop in extant_populations:
-        population_samples_dict[pop] = metadata[metadata["population"]==pop]["sample_id"].values
 
-    cmap = plt.get_cmap("rainbow")
-    colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
-    colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
+    # extant_populations = np.unique(metadata["population"])
+    # K = len(extant_populations)
+    # population_samples_dict = {}
+    # for pop in extant_populations:
+    #     population_samples_dict[pop] = metadata[metadata["population"]==pop]["sample_id"].values
+
+    # cmap = plt.get_cmap("rainbow")
+    # colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
+    # colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
 
     # Compute the number of coalescent events and uncoalesced lineages through time
     ts_files = glob.glob(os.path.join(input,"*.trees"))
     trees = itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files))
     N, L = count_coal_events(trees, times, delta)
-    embeddings_through_time = compute_embeddings_through_time(N,L,times,sample_times=metadata["sample_times"].values)
+    embeddings_through_time = compute_embeddings_through_time(N,L,times,delta,sample_times=metadata["sample_times"].values)
 
     # Saving data
     counts_df = create_counts_df(N, L, times, population_samples_dict)
@@ -152,8 +161,8 @@ def main():
         colors = cmap(np.linspace(0,255,K).astype(int))[:,:-1]
         colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(extant_populations)}
 
-    dynamic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict)
-    static_fig = static_3d_plot(embeddings_df,output_path,colors_dict)
+    dynamic_fig = dynamic_3d_plot(embeddings_df,output_path,colors_dict,log_time)
+    static_fig = static_3d_plot(embeddings_df,output_path,colors_dict,log_time)
 
 # %%
 if __name__ == "__main__":
