@@ -105,8 +105,8 @@ fig, ax1 = plt.subplots(figsize=(6, 6), dpi=500)
 
 color = "blue"
 ax1.set_xlabel("Time")
-ax1.set_ylabel(r"$\sqrt{\mathrm{r}}$", color=color)
-ax1.plot(times, np.sqrt(radii), color=color, label="Hull Diameter", lw=2)
+ax1.set_ylabel(r"$\mathrm{r}$", color=color)
+ax1.plot(times, np.array(radii)**2, color=color, label="Hull Radius", lw=2)
 ax1.tick_params(axis='y', labelcolor=color)
 ax1.set_xscale("log")
 
@@ -114,7 +114,7 @@ ax2 = ax1.twinx()
 color = "black"
 ax2.set_ylabel(r"$\ln(\mathrm{N_e})$", color=color)
 # ax2.plot(times, log_Ne_through_time, color=color, label="ln(Ne)",lw=2,ls=":")
-ax2.plot(times, log_Average_Ne_through_time, color=color, label="smoothed ln(Ne)",lw=2,ls = "--")
+ax2.plot(times, Average_Ne_through_time, color=color, label="smoothed ln(Ne)",lw=2,ls = "--")
 ax2.tick_params(axis='y', labelcolor=color)
 ax2.set_xscale("log")
 ax2.spines['right'].set_visible(True)  # Ensure right y-axis line is visible
