@@ -142,13 +142,13 @@ def main():
     trees = itertools.chain.from_iterable((tskit.load(ts_file).trees() for ts_file in ts_files))
     N, L = count_coal_events(trees, times, delta)
     # embeddings_through_time = compute_embeddings_through_time(N,L,times,delta,sample_times=metadata["sample_times"].values)
-    embeddings_through_time = compute_embeddings_through_time(N,L)
+    embeddings_through_time = compute_embeddings_through_time(N,L,delta)
 
     # Saving data
     counts_df = create_counts_df(N, L, times, population_samples_dict)
     embeddings_df = create_embeddings_df(embeddings_through_time, times, population_samples_dict)
 
-    counts_df.to_parquet(os.path.join(output_path,"counts.parquet"))
+    # counts_df.to_parquet(os.path.join(output_path,"counts.parquet"))
     embeddings_df.to_parquet(os.path.join(output_path,"embeddings.parquet"))
     metadata.to_parquet(os.path.join(output_path,"metadata.parquet"))
 

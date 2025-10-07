@@ -4,6 +4,7 @@ from scipy.optimize import minimize
 from tqdm import tqdm
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
+from sklearn.manifold import smacof
 #%%
 def compute_loss_gradient(X_flat, R, N0, d=2):
     # Mask for valid (non-nan) R entries
@@ -32,23 +33,25 @@ def solve(X, R, N0):
     max_iters = 10000
     X_opt = X.copy()
     result = minimize(compute_loss_gradient, X_opt.ravel(), args=(R, N0), method='L-BFGS-B', 
-                     jac=True, options={'maxiter': max_iters, 'disp': True, 'gtol': 1e-6})
+                     jac=True, options={'maxiter': max_iters, 'disp': True, 'gtol': 1e-9})
     return result.x.reshape(X.shape), result.fun
 
-def compute_embeddings_through_time(N, L, n_components = 2):
+def compute_embeddings_through_time(N, L, delta, n_components = 2):
     n = N.shape[0]
     with np.errstate(divide='ignore', invalid='ignore'):
-        R = N/L 
-    R += np.nanmin(R[R!=0])/10
+        R = N/(delta*L) 
+    # R += np.nanmin(R[R!=0])/10
     Ne = 1/R
     N0 = np.nanquantile(Ne[Ne!=np.inf], 0.02)
     n_timepoints = R.shape[-1]
     X_over_time = np.full((n,n_components,n_timepoints),np.nan)
-    X = np.random.rand(n, n_components) * 10000
+    X = np.random.rand(n,n_components)
 
     for k in tqdm(range(n_timepoints)):
         R_t  = R[:,:,k]
         X, _ = solve(X, R_t, N0)
+        if k==0:
+            X -= X.mean(axis=0)
         X_over_time[:,:,k] = X
     return X_over_time
 
