@@ -1,8 +1,8 @@
-from tqdm import tqdm
-import numpy as np # type: ignore
+# from tqdm import tqdm
+import numpy as np 
 import pandas as pd
 from numba import njit
-
+from tqdm import tqdm
 @njit
 def update_matrices(N, C, pair, tmrca, times, times_upper):
     i, j = pair
@@ -107,7 +107,132 @@ def compute_local_ancestry(tree,census_time,population_id_name):
         local_ancestry[leaves] = population_id_name[pop]
     return local_ancestry
 
-def count_coal_events_admix(trees,times,census_time,population_id_name,delta=100):
+def count_coal_events_admix(n_samples,admixed_samples,trees_list,LAI_data,times,K,delta=100):
+
+
+
+
+#%%
+def find_local_ancestry(active_admix_samples,start_coordinate,LAI_data,K):
+    local_ancestry = {sample_id:np.nan for sample_id in active_admix_samples}
+    LAI_data_subset = LAI_data[(LAI_data.spos < start_coordinate) & (LAI_data.epos >= start_coordinate)]
+    if LAI_data_subset.empty:
+        LAI_data_subset = LAI_data[(LAI_data.spos == min(LAI_data.spos))]
+    LAI_data_subset = LAI_data_subset[LAI_data_subset.sample_id.isin(active_admix_samples)]
+    for _,row in LAI_data_subset.iterrows():
+        try:
+            local_ancestry[row.sample_id] = int(row.ancestry)
+        except:
+            continue
+    return local_ancestry
+#%%
+ts_files = ['../results/2_sim_trees/trees/admix_05_05/chr1.trees']
+n_samples = 150
+delta = 50
+input = "../results/2_sim_trees/trees/admix_05_05"
+times = np.logspace(np.log10(10),np.log10(5000),200,base=10)-10
+components_per_sample = np.array([1]*100 + [2]*50)
+LAI_data = pd.read_csv("../results/4_admix/test/admix_05_05_chr1.tsv", sep='\t')
+def convert_to_sample_id(haplotypes):
+    sample_ids = []
+    for haplotype in haplotypes:
+        if haplotype % 1 == 0:
+            sample_id = 2*int(haplotype)
+        else:
+            sample_id = 2*int(haplotype) + 1
+        sample_ids.append(sample_id)
+    return np.array(sample_ids)
+LAI_data["sample_id"] = convert_to_sample_id(LAI_data.haplotype.values)
+LAI_data = LAI_data[LAI_data.sample_id >= 100]
+trees_list = []
+tree_start_coordinates = []
+num_trees_list = []
+for ts_file in ts_files:
+    ts = tskit.load(ts_file)
+    trees_list.append(ts.trees())
+    tree_start_coordinates.append([tree.interval.left for tree in ts.trees()])
+    num_trees_list.append(ts.num_trees)
+#%%
+### I am building the function here!!!
+non_admix_samples = np.arange(n_samples)[np.isin(np.arange(n_samples), admix_samples, invert=True)]
+num_non_admix = len(non_admix_samples)
+num_admix = len(admix_samples)
+num_idx = num_non_admix + num_admix * K
+sample_id_to_index = {}
+for idx, sample_id in enumerate(non_admix_samples):
+    sample_id_to_index[sample_id] = idx
+for idx, sample_id in enumerate(admix_samples):
+    sample_id_to_index[sample_id] = len(non_admix_samples) + np.arange(0,K*num_admix,num_admix) +idx
+
+
+num_treesequences = len(trees_list)
+if times[0] !=0:
+    times = np.concatenate(([0], times))
+    remove_later = True
+else:
+    remove_later = False
+
+n_times = len(times)
+times_upper = times + delta
+N = np.zeros((num_idx, num_idx, n_times), dtype=np.uint16) # matrix of number of coalescent events within sliding window 
+C = np.zeros((num_idx, num_idx, n_times), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
+L0 = np.zeros((num_idx, num_idx), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
+pairs = np.column_stack(np.triu_indices(n_samples, k=1)) 
+num_pairs = pairs.shape[0]
+
+for i,trees in enumerate(trees_list):
+    num_trees = num_trees_list[i]
+    for k,tree in tqdm(enumerate(trees), total=num_trees):
+        start_coordinate = tree.interval.left
+        # Randomly select pairs of samples to count coalescent events
+        mask = np.random.random(size=num_pairs) < 0.1/n_samples
+
+        active_pairs = pairs[mask]
+        tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs])
+        active_samples = np.unique(active_pairs)
+        active_admix_samples = np.intersect1d(active_samples, admix_samples)
+        active_non_admix_samples = np.intersect1d(active_samples, non_admix_samples)
+        local_ancestry = find_local_ancestry(active_admix_samples, start_coordinate, LAI_data, K)
+        for admix_sample,local_ancestry_value in local_ancestry.items():
+            if np.isnan(local_ancestry_value):
+                active_pairs[active_pairs == admix_sample] = -1
+            else:
+                active_pairs[active_pairs == admix_sample] = sample_id_to_index[admix_sample][local_ancestry_value]
+        for non_admix_sample in active_non_admix_samples:
+            active_pairs[active_pairs == non_admix_sample] = sample_id_to_index[non_admix_sample]
+
+        active_pairs = active_pairs[~np.any(active_pairs == -1, axis=1)]
+        for pair,tmrca in zip(active_pairs,tmrca_active_pairs):
+            L0[pair[0],pair[1]] += 1
+            update_matrices(N,C, pair,tmrca,times,times_upper)
+
+L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2)  # Number of uncoalesced loci
+if remove_later:
+    N = N[:, :, 1:]  # Remove the first time point if it was added
+    L = L[:, :, 1:]
+N += N.transpose((1,0,2))
+L += L.transpose((1,0,2))
+
+active_indices = ~np.all(L == 0, axis=(1, 2))
+N = N[active_indices,:,:]
+N = N[:,active_indices,:]
+L = L[active_indices,:,:]
+L = L[:,active_indices,:]
+
+#%%
+X_through_time = compute_embeddings_through_time(N, L, delta)
+population_samples_dict = {"A":np.arange(50), "B":np.arange(50,100), "Admix":np.arange(100,198)}
+embeddings_df = create_embeddings_df(X_through_time, times, population_samples_dict)
+colors_dict = {"A":"#1f77b4", "B":"#ff7f0e", "Admix":"#2ca02c"}
+
+import plotly.express as px
+fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time",log_z=True, color='population',line_group='sample_id',
+    color_discrete_map=colors_dict
+)
+
+
+#%%
+def count_coal_events_admix_sim(trees,times,census_time,population_id_name,delta=100):
     if times[0] !=0:
         times = np.concatenate(([0], times))
         remove_later = True

@@ -77,6 +77,7 @@ def sim_chrom(deme_file_path,output_dir,n,max_time):
             K+=1
 
     print(f"Simulating {n*K} samples from {K} extant populations under {deme_name}")
+    start = 0
     for i in tqdm(range(len(sequence_lengths))):
         ts = msprime.sim_ancestry(
             samples=samples,
@@ -88,7 +89,8 @@ def sim_chrom(deme_file_path,output_dir,n,max_time):
         ts.dump(output_dir + f"chr{i+1}.trees")
         ts = msprime.sim_mutations(ts,1e-8,random_seed=42+i)
         with open(vcf_path, "a") as f:
-            ts.write_vcf(f, contig_id=i+1)
+            ts.write_vcf(f, contig_id=i+1, position_transform = lambda x: np.round(x)+1)
+        start = ts.sequence_length
 
     if "SS" in deme_file_path:
         cmap = plt.get_cmap("rainbow")
