@@ -15,16 +15,16 @@ from tqdm import tqdm
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-sys.path.append('../../src')
-from plot_params import *
+# sys.path.append('../../src')
+# from plot_params import *
 import itertools
 import warnings
-rcParams['font.size'] = 6
-rcParams['xtick.major.width'] = 1
-rcParams['ytick.major.width'] = 1
-rcParams['xtick.major.size'] = 2
-rcParams['ytick.major.size'] = 2
-demes_dir = "../../data/main_deme_files/"
+# rcParams['font.size'] = 6
+# rcParams['xtick.major.width'] = 1
+# rcParams['ytick.major.width'] = 1
+# rcParams['xtick.major.size'] = 2
+# rcParams['ytick.major.size'] = 2
+# demes_dir = "../../data/main_deme_files/"
 species = stdpopsim.get_species("HomSap")
 
 def plot_deme(graph,max_time,colors_dict,log_time=True):
