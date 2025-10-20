@@ -18,6 +18,7 @@ class CountCoalEvents:
                  sample_ids: list = None,
                  admix_samples: list = None,
                  K: int = None,
+                 LAI_data: pd.DataFrame = None,
                  num_posterior_samples: int = None,
                  thinning_fraction: float = 0.1):
         """Base class for counting coalescent events in tree sequences.
@@ -78,6 +79,7 @@ class CountCoalEvents:
         # handling admixed samples if provided
             self.admix = False
             if admix_samples is not None:
+                self.LAI_data = LAI_data
                 self.admix = True
                 assert K is not None, "K (num ancestries) must be provided if admix_samples is provided"
                 self.admix_samples = np.array(admix_samples)
@@ -139,19 +141,29 @@ class CountCoalEvents:
         self.num_pairs = self.pairs.shape[0]
         self.processed_contigs = False
 
-    def count_coal_events_contig(self, trees, LAI_data=None):
+    def count_coal_events_contig(self, contig_rep):
         """A function to count coalescent events over time in a single contig.
 
         Args:
-            trees (iterable): an iterator over trees in a tree sequence.
-            LAI_data (pd.DataFrame, optional): A pandas dataframe with formatted LAI results. Defaults to None.
-
+            contig_rep (tuple): A tuple containing contig id and replicate id.
         Returns:
             np.ndarray: A tuple of two numpy arrays (N, L) representing coalescent event counts and uncoalesced loci counts.
         """
+        if self.num_posterior_samples is None:
+            contig_id = contig_rep
+            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}.trees")
+        else:
+            contig_id, replicate_id = contig_rep
+            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}_{replicate_id}.trees")
+        ts = tskit.load(ts_file)
+        if self.subsample:
+            ts = ts.simplify(self.sample_ids)
         if self.admix:
-            assert LAI_data is not None, "LAI_data must be provided if admix_samples are used"
-        # Adapt to account for admix samples as well
+            assert self.LAI_data is not None, "LAI_data must be provided if admix_samples are used"
+            LAI_data = self.LAI_data[self.LAI_data.contig == contig_id]
+        else:
+            LAI_data = None
+        trees = ts.trees()
         if self.time_points[0] !=0:
             time_points = np.concatenate(([0], self.time_points))
             window_sizes = np.concatenate(([self.window_sizes[0]],self.window_sizes))
@@ -188,8 +200,10 @@ class CountCoalEvents:
             active_pairs = active_pairs[~np.isnan(active_pairs).any(axis=1)]
                     
             for pair,tmrca in zip(active_pairs,tmrca_active_pairs):
+                if pair[0] > pair[1]: # ensuring pair[0] < pair[1], so that the upper triangular matrix is filled
+                    pair = (pair[1],pair[0])
                 L0[pair[0],pair[1]] += 1
-                update_matrices(N,C, pair,tmrca, time_points, times_upper)
+                update_matrices(N, C, pair, tmrca, time_points, times_upper)
 
         L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2)  # Number of uncoalesced loci
         if remove_later:
@@ -201,25 +215,26 @@ class CountCoalEvents:
     def count_coal_events_total(self, parallel: bool = True):
         """A method to count coalescent events over time for all contigs and save results as parquet files.
         """
-        def process_ts_file(ts_file):
-            if self.subsample:
-                ts = tskit.load(ts_file).simplify(self.sample_ids)
-            else:
-                ts = tskit.load(ts_file)
-            trees = ts.trees()
-            N, L = self.count_coal_events_contig(trees)
+        def process_contig(contig_rep):
+            N, L = self.count_coal_events_contig(contig_rep)
             df = counts_to_df(N, L, self.time_points)
-            contig_name = os.path.basename(ts_file).replace(".trees", "")
+            contig_name = f"contig_{contig_rep}" if self.num_posterior_samples is None else f"contig_{contig_rep[0]}_{contig_rep[1]}"
             out_path = os.path.join(self.output_dir, f"{contig_name}_counts.parquet")
             df.to_parquet(out_path)
-        
+        if self.num_posterior_samples is None:
+            contig_reps = np.arange(self.num_contigs)
+        else:
+            contig_reps = []
+            for contig_id in range(self.num_contigs):
+                for replicate_id in range(self.num_posterior_samples):
+                    contig_reps.append((contig_id, replicate_id))
         if parallel:
             with Pool(os.cpu_count()) as pool:
-                for ts_file in tqdm(pool.imap(process_ts_file, self.ts_files), total=len(self.ts_files)):
+                for _ in tqdm(pool.imap(process_contig, contig_reps), total=len(contig_reps)):
                     pass
         else:
-            for ts_file in tqdm(self.ts_files):
-                _ = process_ts_file(ts_file)
+            for contig_rep in tqdm(contig_reps):
+                _ = process_contig(contig_rep)
         self.processed_contigs = True
         
     def aggregate_counts(self):
@@ -340,9 +355,9 @@ def update_matrices(N:np.ndarray, C:np.ndarray, pair:tuple, tmrca:float, times:n
 
 def find_local_ancestry(active_admix_samples,start_coordinate,LAI_data):
     local_ancestry = {sample_id:np.nan for sample_id in active_admix_samples}
-    LAI_data_subset = LAI_data[(LAI_data.spos < start_coordinate) & (LAI_data.epos >= start_coordinate)]
+    LAI_data_subset = LAI_data[(LAI_data.start < start_coordinate) & (LAI_data.end >= start_coordinate)]
     if LAI_data_subset.empty:
-        LAI_data_subset = LAI_data[(LAI_data.spos == min(LAI_data.spos))]
+        LAI_data_subset = LAI_data[(LAI_data.start == min(LAI_data.start))]
     LAI_data_subset = LAI_data_subset[LAI_data_subset.sample_id.isin(active_admix_samples)]
     for _,row in LAI_data_subset.iterrows():
         try:

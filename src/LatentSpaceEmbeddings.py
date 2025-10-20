@@ -33,7 +33,6 @@ class LatentSpaceEmbeddings:
     def __init__(self,
                  R: np.ndarray,
                  time_points: list,
-                #  id_df: pd.DataFrame = None,
                  individuals: bool = False,
                  compute_loss_gradient: callable = compute_loss_gradient,
                  sample_times: list = None,

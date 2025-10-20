@@ -38,7 +38,6 @@ rcParams['savefig.dpi'] = 500
 # %%
 class PlotEmbeddings:
     def __init__(self, 
-                 output_dir: str,
                  embeddings_df: pd.DataFrame,
                  idx_to_sample_df: pd.DataFrame,
                  sample_to_pop_df: pd.DataFrame,
@@ -74,7 +73,6 @@ class PlotEmbeddings:
             embeddings_df["color"] = embeddings_df["population"].map(colors_dict)
 
         self.colors_dict = colors_dict
-        self.output_dir = output_dir
         self.embeddings_df = embeddings_df
 
     def dynamic_plot(self):
@@ -89,5 +87,5 @@ class PlotEmbeddings:
             yaxis=dict(range=[lim_min, lim_max])
         ))
         fig.update_layout(showlegend=True)
-        pio.write_html(fig, file=os.path.join(self.output_dir,"dynamic_3d_plot.html"))
+        # pio.write_html(fig, file=os.path.join(self.output_dir,"dynamic_3d_plot.html"))
         return fig
