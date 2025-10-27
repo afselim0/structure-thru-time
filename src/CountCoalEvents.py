@@ -210,6 +210,26 @@ class CountCoalEvents:
             N = N[:, :, 1:]  # Remove the first time point if it was added
             L = L[:, :, 1:]
 
+        if self.admix: 
+            # setting between type L to zero
+            # setting between type N and L to mean within type values at time 0
+            mean_N_init = 0
+            mean_L_init = 0
+            admix_block_start = self.num_non_admix
+            for k in range(self.K):
+                mean_N_init += np.nanmean(N[admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,0])
+                mean_L_init += np.nanmean(L[admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,0])
+            mean_N_init = mean_N_init / self.K
+            mean_L_init = mean_L_init / self.K
+
+            for k1 in range(self.K):
+                k1_idx = np.arange(admix_block_start + k1 * self.num_admix, admix_block_start + (k1 + 1) * self.num_admix)
+                for k2 in range(k1, self.K):
+                    if k1 != k2:
+                        k2_idx = np.arange(admix_block_start + k2 * self.num_admix, admix_block_start + (k2 + 1) * self.num_admix)
+                        N[np.ix_(k1_idx, k2_idx, [0])] = mean_N_init
+                        L[np.ix_(k1_idx, k2_idx, [0])] = mean_L_init
+                
         return N,L
 
     def count_coal_events_total(self, parallel: bool = True):
@@ -266,7 +286,7 @@ class CountCoalEvents:
                 num_coal_events += df["num_coal_events"].values
             total_counts_df["num_uncoalesced"] = num_uncoalesced
             total_counts_df["num_coal_events"] = num_coal_events
-            total_counts_df["coal_rate"] = num_coal_events / (num_uncoalesced*self.window_sizes[time_idx])
+            total_counts_df["coal_rate"] = num_coal_events / (num_uncoalesced*self.window_sizes[time_idx]) # this is the mean, could also take the median
 
         else:
             coal_rates = np.zeros((len(sample_df["num_coal_events"].values),self.num_posterior_samples), dtype=float)

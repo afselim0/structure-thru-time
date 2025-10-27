@@ -75,8 +75,8 @@ class PlotEmbeddings:
         self.colors_dict = colors_dict
         self.embeddings_df = embeddings_df
 
-    def dynamic_plot(self):
-        fig = px.line_3d(self.embeddings_df, x="X1", y="X2", z="time", color='population', line_group='sample_id', color_discrete_map=self.colors_dict)
+    def dynamic_plot(self,log_time: bool = False):
+        fig = px.line_3d(self.embeddings_df, x="X1", y="X2", z="time", color='population', line_group='idx', color_discrete_map=self.colors_dict,log_z=log_time)
         # Set xlim and ylim to be the same
         x_min, x_max = self.embeddings_df["X1"].min(), self.embeddings_df["X1"].max()
         y_min, y_max = self.embeddings_df["X2"].min(), self.embeddings_df["X2"].max()
