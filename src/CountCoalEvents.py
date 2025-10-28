@@ -7,6 +7,7 @@ import glob
 from numba import njit
 from tqdm import tqdm
 from pathos.multiprocessing import ProcessingPool as Pool
+from itertools import product
 
 class CountCoalEvents:
     def __init__(self,
@@ -16,9 +17,6 @@ class CountCoalEvents:
                  time_points: list = None,
                  window_sizes: list = None,
                  sample_ids: list = None,
-                 admix_samples: list = None,
-                 K: int = None,
-                 LAI_data: pd.DataFrame = None,
                  num_posterior_samples: int = None,
                  thinning_fraction: float = 0.1):
         """Base class for counting coalescent events in tree sequences.
@@ -76,54 +74,6 @@ class CountCoalEvents:
                 raise ValueError("window_sizes must be of the same length as time_points")
             window_sizes = np.array(window_sizes)
         
-        # handling admixed samples if provided
-            self.admix = False
-            if admix_samples is not None:
-                self.LAI_data = LAI_data
-                self.admix = True
-                assert K is not None, "K (num ancestries) must be provided if admix_samples is provided"
-                self.admix_samples = np.array(admix_samples)
-                if not np.all(np.isin(admix_samples, sample_ids)):
-                    raise ValueError("Some admix_samples are not in sample_ids")
-                self.non_admix_samples = np.setdiff1d(sample_ids, admix_samples)
-
-                self.num_admix = len(self.admix_samples)
-                self.num_non_admix = len(self.non_admix_samples)
-                self.num_idxs = self.num_non_admix + self.num_admix * K
-                types = [0] * self.num_non_admix
-                for k in range(K):
-                    types += [k + 1] * self.num_admix
-                sample_id_to_index = {}
-                index_to_sample_id = {}
-                for idx, sample_id in enumerate(self.non_admix_samples):
-                    sample_id_to_index[sample_id] = idx
-                    index_to_sample_id[idx] = sample_id
-                for idx, sample_id in enumerate(self.admix_samples):
-                    indices = len(self.non_admix_samples) + np.arange(0, K * self.num_admix, self.num_admix) + idx
-                    sample_id_to_index[sample_id] = indices
-                    for ind in indices:
-                        index_to_sample_id[ind] = sample_id
-                self.sample_id_to_index = sample_id_to_index
-
-                # creating a DataFrame to map indices to sample IDs, individual IDs, and types
-                # The counts matrix will be arranged according to this DataFrame
-                id_df = pd.DataFrame(list(index_to_sample_id.items()), columns=["idx", "sample_id"])
-                id_df["individual_id"] = id_df["sample_id"] // 2
-                id_df["type"] = types
-                id_df.sort_values(by="idx", inplace=True)
-                id_df.reset_index(drop=True, inplace=True)
-                self.id_df = id_df
-            else:
-                index_to_sample_id = {idx: sample_id for idx, sample_id in enumerate(sample_ids)}
-                id_df = pd.DataFrame(list(index_to_sample_id.items()), columns=["idx", "sample_id"])
-                id_df["individual_id"] = id_df["sample_id"] // 2
-                id_df["type"] = 0
-                id_df.sort_values(by="idx", inplace=True)
-                id_df.reset_index(drop=True, inplace=True)
-                self.id_df = id_df
-                self.num_idxs = self.num_samples
-        
-        id_df.to_parquet(os.path.join(output_dir, "idx_to_sample.parquet"), index=False)
         self.output_dir = output_dir
         self.demes_file = demes_file
         self.ts_files = ts_files
@@ -134,8 +84,6 @@ class CountCoalEvents:
         self.time_points = time_points
         self.window_sizes = window_sizes
         self.sample_ids = sample_ids
-        self.admix_samples = admix_samples
-        self.K = K
         self.thinning_fraction = thinning_fraction
         self.pairs = np.column_stack(np.triu_indices(self.num_samples, k=1)) 
         self.num_pairs = self.pairs.shape[0]
@@ -158,11 +106,6 @@ class CountCoalEvents:
         ts = tskit.load(ts_file)
         if self.subsample:
             ts = ts.simplify(self.sample_ids)
-        if self.admix:
-            assert self.LAI_data is not None, "LAI_data must be provided if admix_samples are used"
-            LAI_data = self.LAI_data[self.LAI_data.contig == contig_id]
-        else:
-            LAI_data = None
         trees = ts.trees()
         if self.time_points[0] !=0:
             time_points = np.concatenate(([0], self.time_points))
@@ -175,61 +118,22 @@ class CountCoalEvents:
         
         times_upper = time_points + window_sizes
 
-        N = np.zeros((self.num_idxs, self.num_idxs, len(time_points)), dtype=np.uint16) # matrix of number of coalescent events within sliding window 
-        C = np.zeros((self.num_idxs, self.num_idxs, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
-        L0 = np.zeros((self.num_idxs, self.num_idxs), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
+        N = np.zeros((self.num_samples, self.num_samples, len(time_points)), dtype=np.uint16) # matrix of number of coalescent events within sliding window 
+        C = np.zeros((self.num_samples, self.num_samples, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
+        L0 = np.zeros((self.num_samples, self.num_samples), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
 
         for tree in trees:
             mask = np.random.random(size=self.num_pairs) < self.thinning_fraction/self.num_samples
             active_pairs = self.pairs[mask]
-            tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs])
-            ## Handling admixed samples case
-            if self.admix:
-                active_samples = np.unique(active_pairs)
-                active_admix_samples = np.intersect1d(active_samples, self.admix_samples)
-                # Finding local ancestry for active admixed samples
-                if len(active_admix_samples) > 0:
-                    local_ancestry = find_local_ancestry(active_admix_samples, tree.interval[0], LAI_data)
-                # matching active pairs to their respective indices in the counts matrices
-                for pair_idx,pair_id in enumerate(active_pairs):
-                    sample_i = pair_id[0]
-                    sample_j = pair_id[1]
-                    active_pairs[pair_idx,0] = self.sample_id_to_index[sample_i] if sample_i in self.non_admix_samples else self.sample_id_to_index[sample_i][local_ancestry[sample_i]]
-                    active_pairs[pair_idx,1] = self.sample_id_to_index[sample_j] if sample_j in self.non_admix_samples else self.sample_id_to_index[sample_j][local_ancestry[sample_j]]
-            # Remove all rows where there is any nan value in active_pairs
-            active_pairs = active_pairs[~np.isnan(active_pairs).any(axis=1)]
-                    
+            tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs])                    
             for pair,tmrca in zip(active_pairs,tmrca_active_pairs):
-                if pair[0] > pair[1]: # ensuring pair[0] < pair[1], so that the upper triangular matrix is filled
-                    pair = (pair[1],pair[0])
                 L0[pair[0],pair[1]] += 1
                 update_matrices(N, C, pair, tmrca, time_points, times_upper)
 
         L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2)  # Number of uncoalesced loci
         if remove_later:
             N = N[:, :, 1:]  # Remove the first time point if it was added
-            L = L[:, :, 1:]
-
-        if self.admix: 
-            # setting between type L to zero
-            # setting between type N and L to mean within type values at time 0
-            mean_N_init = 0
-            mean_L_init = 0
-            admix_block_start = self.num_non_admix
-            for k in range(self.K):
-                mean_N_init += np.nanmean(N[admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,0])
-                mean_L_init += np.nanmean(L[admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,admix_block_start + k * self.num_admix: admix_block_start + (k + 1) * self.num_admix,0])
-            mean_N_init = mean_N_init / self.K
-            mean_L_init = mean_L_init / self.K
-
-            for k1 in range(self.K):
-                k1_idx = np.arange(admix_block_start + k1 * self.num_admix, admix_block_start + (k1 + 1) * self.num_admix)
-                for k2 in range(k1, self.K):
-                    if k1 != k2:
-                        k2_idx = np.arange(admix_block_start + k2 * self.num_admix, admix_block_start + (k2 + 1) * self.num_admix)
-                        N[np.ix_(k1_idx, k2_idx, [0])] = mean_N_init
-                        L[np.ix_(k1_idx, k2_idx, [0])] = mean_L_init
-                
+            L = L[:, :, 1:]                
         return N,L
 
     def count_coal_events_total(self, parallel: bool = True):
@@ -350,6 +254,122 @@ class CountCoalEvents:
         trees = (ts.first() for ts in ts_list)
         return trees
     
+
+class CountCoalEventsAdmix(CountCoalEvents):
+    def __init__(self,
+                output_dir: str,
+                admix_samples: list,
+                LAI_data: pd.DataFrame,
+                K: int,
+                ts_dir: str = None,
+                demes_file: str = None,
+                time_points: list = None,
+                window_sizes: list = None,
+                sample_ids: list = None,
+                num_posterior_samples: int = None,
+                thinning_fraction: float = 0.1,
+                ):
+        super().__init__(output_dir, ts_dir, demes_file, time_points, window_sizes, sample_ids, num_posterior_samples, thinning_fraction)
+        self.admix_samples = np.array(admix_samples)
+        self.non_admix_samples = np.setdiff1d(sample_ids, admix_samples)
+        self.LAI_data = LAI_data
+        self.K = K
+        self.num_admix = len(self.admix_samples)
+        self.num_non_admix = len(self.non_admix_samples)
+        self.num_idxs = self.num_non_admix + self.num_admix * K
+        assert np.all(np.isin(admix_samples, sample_ids)), "Some admix_samples are not in sample_ids"
+
+        types = [np.nan] * self.num_non_admix
+        for k in range(self.K):
+            types += [k] * self.num_admix
+        sample_id_to_index = {}
+        index_to_sample_id = {}
+
+        for idx, sample_id in enumerate(self.non_admix_samples):
+            sample_id_to_index[sample_id] = idx
+            index_to_sample_id[idx] = sample_id
+
+        for idx, sample_id in enumerate(self.admix_samples):
+            indices = len(self.non_admix_samples) + np.arange(0, K * self.num_admix, self.num_admix) + idx
+            sample_id_to_index[sample_id] = indices
+            for ind in indices:
+                index_to_sample_id[ind] = sample_id
+        self.sample_id_to_index = sample_id_to_index
+
+        id_df = pd.DataFrame(list(index_to_sample_id.items()), columns=["idx", "sample_id"])
+        id_df["individual_id"] = id_df["sample_id"] // 2
+        id_df["type"] = pd.Series(types, dtype="Int8")
+        id_df.sort_values(by="idx", inplace=True)
+        id_df.reset_index(drop=True, inplace=True)
+        self.id_df = id_df
+
+        id_df.to_parquet(os.path.join(output_dir, "idx_to_sample.parquet"), index=False)
+        self.pairs = list(product(admix_samples,sample_ids))
+        self.num_pairs = len(self.pairs)
+        self.processed_contigs = False
+        self.LAI_data = LAI_data
+
+    def count_coal_events_contig(self, contig_rep):
+        # Overriding parent method to account for admixed samples
+        if self.num_posterior_samples is None:
+            contig_id = contig_rep
+            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}.trees")
+        else:
+            contig_id, replicate_id = contig_rep
+            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}_{replicate_id}.trees")
+        ts = tskit.load(ts_file)
+        if self.subsample:
+            ts = ts.simplify(self.sample_ids)
+        trees = ts.trees()
+        LAI_data = self.LAI_data[self.LAI_data.contig == contig_id]
+
+        if self.time_points[0] !=0:
+            time_points = np.concatenate(([0], self.time_points))
+            window_sizes = np.concatenate(([self.window_sizes[0]],self.window_sizes))
+            remove_later = True
+        else:
+            time_points = self.time_points
+            window_sizes = self.window_sizes
+            remove_later = False
+        
+        times_upper = time_points + window_sizes
+
+        N = np.zeros((self.num_idxs, self.num_admix, len(time_points)), dtype=np.uint16) # matrix of number of coalescent events within sliding window 
+        C = np.zeros((self.num_idxs, self.num_admix, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
+        L0 = np.zeros((self.num_idxs, self.num_admix), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
+
+        for tree in trees:
+            mask = np.random.random(size=self.num_pairs) < self.thinning_fraction/self.num_samples
+            active_pairs = self.pairs[mask]
+            tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs])
+            
+            active_samples = np.unique(active_pairs)
+            active_admix_samples = np.intersect1d(active_samples, self.admix_samples)
+            # Finding local ancestry for active admixed samples
+            if len(active_admix_samples) > 0:
+                local_ancestry = find_local_ancestry(active_admix_samples, tree.interval[0], LAI_data)
+            # matching active pairs to their respective indices in the counts matrices
+            for pair_idx,pair_id in enumerate(active_pairs):
+                sample_i = pair_id[0]
+                sample_j = pair_id[1]
+                active_pairs[pair_idx,0] = self.sample_id_to_index[sample_i] if sample_i in self.non_admix_samples else self.sample_id_to_index[sample_i][local_ancestry[sample_i]]
+                active_pairs[pair_idx,1] = self.sample_id_to_index[sample_j] if sample_j in self.non_admix_samples else self.sample_id_to_index[sample_j][local_ancestry[sample_j]]
+            # Remove all rows where there is any nan value in active_pairs
+            active_pairs = active_pairs[~np.isnan(active_pairs).any(axis=1)]
+                    
+            for pair,tmrca in zip(active_pairs,tmrca_active_pairs):
+                if pair[0] > pair[1]: # ensuring pair[0] < pair[1], so that the upper triangular matrix is filled
+                    pair = (pair[1],pair[0])
+                L0[pair[0],pair[1]] += 1
+                update_matrices(N, C, pair, tmrca, time_points, times_upper)
+
+        L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2)  # Number of uncoalesced loci
+        if remove_later:
+            N = N[:, :, 1:]  # Remove the first time point if it was added
+            L = L[:, :, 1:]
+
+        return N,L
+            
 
 
 @njit
