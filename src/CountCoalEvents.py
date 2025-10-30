@@ -8,12 +8,12 @@ from numba import njit
 from tqdm import tqdm
 from pathos.multiprocessing import ProcessingPool as Pool
 from itertools import product
+import re
 
 class CountCoalEvents:
     def __init__(self,
                  output_dir: str,
                  ts_dir: str = None,
-                 demes_file: str = None,
                  time_points: list = None,
                  window_sizes: list = None,
                  sample_ids: list = None,
@@ -36,46 +36,57 @@ class CountCoalEvents:
         """
 
         # basic input validation
-        if not os.path.isdir(ts_dir):
-            raise ValueError(f"ts_dir is not a valid directory: {ts_dir}")
+        assert os.path.isdir(ts_dir), f"ts_dir is not a valid directory: {ts_dir}"
+        if not os.path.isdir(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
         
-        if ts_dir is None:
-            assert demes_file is not None and time_points is not None and window_sizes is not None, "if demes_file is provided, time_points, window_sizes, and sample_ids must also be provided"
+        # locating tree sequence files and counting contigs and posterior samples
+        ts_files = glob.glob(os.path.join(ts_dir, "*.trees"))
+        if len(ts_files) == 0:
+            raise ValueError(f"No .trees files found in directory: {ts_dir}")
+        ts_files.sort()
+        if num_posterior_samples is None:
+            num_contigs = len(ts_files)
+        else:
+            num_contigs = len(ts_files) // num_posterior_samples
+            if len(ts_files) % num_posterior_samples != 0:
+                raise ValueError(f"Number of .trees files ({len(ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
 
-        if ts_dir is not None:
-            # locating tree sequence files and counting contigs and posterior samples
-            ts_files = glob.glob(os.path.join(ts_dir, "*.trees"))
-            if len(ts_files) == 0:
-                raise ValueError(f"No .trees files found in directory: {ts_dir}")
-            if num_posterior_samples is None:
-                num_contigs = len(ts_files)
-            else:
-                num_contigs = len(ts_files) // num_posterior_samples
-                if len(ts_files) % num_posterior_samples != 0:
-                    raise ValueError(f"Number of .trees files ({len(ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
+        # loading tskit tree sequence to get sample information and default time points if not defined
+        ts = tskit.load(ts_files[0])
+        if sample_ids is None:
+            sample_ids = ts.samples()
+            self.num_samples = len(sample_ids)
+            self.subsample = False # using all samples
+        else:
+            sample_ids = np.array(sample_ids)
+            self.num_samples = len(sample_ids)
+            self.subsample = True # using a subset of samples
 
-            # loading tskit tree sequence to get sample information and default time points if not defined
-            ts = tskit.load(ts_files[0])
-            if sample_ids is None:
-                sample_ids = ts.samples()
-                self.num_samples = len(sample_ids)
-                self.subsample = False # using all samples
-            else:
-                sample_ids = np.array(sample_ids)
-                self.num_samples = len(sample_ids)
-                self.subsample = True # using a subset of samples
-            if time_points is None:
-                time_points = np.logspace(1, np.log10(np.quantile(ts.nodes_time,0.9)), 100, base=10)
-            if window_sizes is None:
-                window_sizes = np.array([np.mean(ts.nodes_time) /100] * len(time_points))
-            elif isinstance(window_sizes,int):
-                window_sizes = np.array([window_sizes] * len(time_points))
-            elif len(window_sizes) != len(time_points):
-                raise ValueError("window_sizes must be of the same length as time_points")
-            window_sizes = np.array(window_sizes)
         
+
+        if time_points is None:
+            time_points = np.logspace(1, np.log10(np.quantile(ts.nodes_time,0.9)), 100, base=10)
+        if window_sizes is None:
+            window_sizes = np.array([np.mean(ts.nodes_time) /100] * len(time_points))
+        elif isinstance(window_sizes,int):
+            window_sizes = np.array([window_sizes] * len(time_points))
+        elif len(window_sizes) != len(time_points):
+            raise ValueError("window_sizes must be of the same length as time_points")
+        window_sizes = np.array(window_sizes)
+        
+        if num_posterior_samples is None:
+            self.contig_ids = ts_files
+            # self.contig_reps = np.arange(self.num_contigs)
+        else:
+            self.contig_ids = np.unique([re.sub(r'_[0-9]+\.trees$', '', contig) for contig in ts_files])
+            # self.contig_reps = []
+            # for contig_id in range(self.num_contigs):
+            #     for replicate_id in range(self.num_posterior_samples):
+            #         self.contig_reps.append((contig_id, replicate_id))
+    
+
         self.output_dir = output_dir
-        self.demes_file = demes_file
         self.ts_files = ts_files
         self.num_contigs = num_contigs
         self.num_posterior_samples = num_posterior_samples
@@ -88,22 +99,21 @@ class CountCoalEvents:
         self.pairs = np.column_stack(np.triu_indices(self.num_samples, k=1)) 
         self.num_pairs = self.pairs.shape[0]
         self.processed_contigs = False
+        self.idx_sample_dict = {idx: sample_id for idx, sample_id in enumerate(sample_ids)}
+        self.idx_sample_df = pd.DataFrame(list(self.idx_sample_dict.items()), columns=["idx", "sample_id"])
+        self.idx_sample_df.to_parquet(os.path.join(output_dir, "idx_to_sample.parquet"), index=False)
 
-    def count_coal_events_contig(self, contig_rep):
+    def count_coal_events_contig(self, ts_file):
         """A function to count coalescent events over time in a single contig.
 
         Args:
-            contig_rep (tuple): A tuple containing contig id and replicate id.
+            ts_file (str): Path to the .trees file.
         Returns:
             np.ndarray: A tuple of two numpy arrays (N, L) representing coalescent event counts and uncoalesced loci counts.
         """
-        if self.num_posterior_samples is None:
-            contig_id = contig_rep
-            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}.trees")
-        else:
-            contig_id, replicate_id = contig_rep
-            ts_file = os.path.join(self.ts_dir, f"contig_{contig_id}_{replicate_id}.trees")
+        # print(f"Loading contig: {os.path.basename(ts_file).rstrip('.trees')}")
         ts = tskit.load(ts_file)
+
         if self.subsample:
             ts = ts.simplify(self.sample_ids)
         trees = ts.trees()
@@ -122,43 +132,43 @@ class CountCoalEvents:
         C = np.zeros((self.num_samples, self.num_samples, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
         L0 = np.zeros((self.num_samples, self.num_samples), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
 
-        for tree in trees:
+        print(f"Counting Events in contig: {os.path.basename(ts_file).rstrip('.trees')}")
+        num_trees = ts.num_trees
+        for i,tree in enumerate(trees):
+            # if i % 10000 == 0:
+                # print(f"Processing tree {i}/{num_trees} in contig {os.path.basename(ts_file).rstrip('.trees')}")
             mask = np.random.random(size=self.num_pairs) < self.thinning_fraction/self.num_samples
             active_pairs = self.pairs[mask]
-            tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs])                    
+            try:
+                tmrca_active_pairs = np.array([tree.tmrca(ip, jp) for ip, jp in active_pairs]) # Skip when tmrca computation fails 
+            except:
+                continue
             for pair,tmrca in zip(active_pairs,tmrca_active_pairs):
                 L0[pair[0],pair[1]] += 1
                 update_matrices(N, C, pair, tmrca, time_points, times_upper)
 
-        L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2)  # Number of uncoalesced loci
+        L = L0[:,:,np.newaxis]-np.cumsum(C, axis=2, dtype=np.uint16)  # Number of uncoalesced loci
         if remove_later:
             N = N[:, :, 1:]  # Remove the first time point if it was added
             L = L[:, :, 1:]                
         return N,L
 
-    def count_coal_events_total(self, parallel: bool = True):
+    def count_coal_events_total(self, num_threads = 1):
         """A method to count coalescent events over time for all contigs and save results as parquet files.
         """
-        def process_contig(contig_rep):
-            N, L = self.count_coal_events_contig(contig_rep)
+        def process_contig(ts_file):
+            contig_name = os.path.basename(ts_file).rstrip('.trees')
+            N, L = self.count_coal_events_contig(ts_file)
             df = counts_to_df(N, L, self.time_points)
-            contig_name = f"contig_{contig_rep}" if self.num_posterior_samples is None else f"contig_{contig_rep[0]}_{contig_rep[1]}"
             out_path = os.path.join(self.output_dir, f"{contig_name}_counts.parquet")
             df.to_parquet(out_path)
-        if self.num_posterior_samples is None:
-            contig_reps = np.arange(self.num_contigs)
-        else:
-            contig_reps = []
-            for contig_id in range(self.num_contigs):
-                for replicate_id in range(self.num_posterior_samples):
-                    contig_reps.append((contig_id, replicate_id))
-        if parallel:
-            with Pool(os.cpu_count()) as pool:
-                for _ in tqdm(pool.imap(process_contig, contig_reps), total=len(contig_reps)):
+        if num_threads > 1:
+            with Pool(num_threads) as pool:
+                for _ in pool.imap(process_contig, self.ts_files):
                     pass
         else:
-            for contig_rep in tqdm(contig_reps):
-                _ = process_contig(contig_rep)
+            for ts_file in self.ts_files:
+                _ = tqdm(process_contig(ts_file), total=len(self.ts_files))
         self.processed_contigs = True
         
     def aggregate_counts(self):
@@ -271,13 +281,13 @@ class CountCoalEventsAdmix(CountCoalEvents):
                 ):
         super().__init__(output_dir, ts_dir, demes_file, time_points, window_sizes, sample_ids, num_posterior_samples, thinning_fraction)
         self.admix_samples = np.array(admix_samples)
-        self.non_admix_samples = np.setdiff1d(sample_ids, admix_samples)
+        self.non_admix_samples = np.setdiff1d(self.sample_ids, self.admix_samples)
         self.LAI_data = LAI_data
         self.K = K
         self.num_admix = len(self.admix_samples)
         self.num_non_admix = len(self.non_admix_samples)
-        self.num_idxs = self.num_non_admix + self.num_admix * K
-        assert np.all(np.isin(admix_samples, sample_ids)), "Some admix_samples are not in sample_ids"
+        self.num_idx = self.num_non_admix + self.num_admix * K
+        assert np.all(np.isin(self.admix_samples, self.sample_ids)), "Some admix_samples are not in sample_ids"
 
         types = [np.nan] * self.num_non_admix
         for k in range(self.K):
@@ -304,8 +314,8 @@ class CountCoalEventsAdmix(CountCoalEvents):
         self.id_df = id_df
 
         id_df.to_parquet(os.path.join(output_dir, "idx_to_sample.parquet"), index=False)
-        self.pairs = list(product(admix_samples,sample_ids))
-        self.num_pairs = len(self.pairs)
+        self.pairs = np.array(list(product(self.admix_samples,self.sample_ids)))
+        self.num_pairs = self.pairs.shape[0]
         self.processed_contigs = False
         self.LAI_data = LAI_data
 
@@ -334,9 +344,9 @@ class CountCoalEventsAdmix(CountCoalEvents):
         
         times_upper = time_points + window_sizes
 
-        N = np.zeros((self.num_idxs, self.num_admix, len(time_points)), dtype=np.uint16) # matrix of number of coalescent events within sliding window 
-        C = np.zeros((self.num_idxs, self.num_admix, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
-        L0 = np.zeros((self.num_idxs, self.num_admix), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
+        N = np.zeros((self.num_idx, self.num_idx, len(time_points)), dtype=np.uint16) # matrix of number of coalescent events within sliding window
+        C = np.zeros((self.num_idx, self.num_idx, len(time_points)), dtype=np.uint16) # matrix specifying if i and j have coalesesced by t
+        L0 = np.zeros((self.num_idx, self.num_idx), dtype=np.uint16) # matrix counting number of loci where pairs i and j were chosen
 
         for tree in trees:
             mask = np.random.random(size=self.num_pairs) < self.thinning_fraction/self.num_samples

@@ -58,11 +58,11 @@ class PlotEmbeddings:
             on='sample_id',
             how='left'
         )
-        self.num_ancestries = embeddings_df["type"].nunique()
+        self.num_pops = embeddings_df["population"].nunique()
         self.num_populations = embeddings_df["population"].nunique()
         self.populations = embeddings_df["population"].unique()
         if "color" not in embeddings_df.columns:
-            if self.num_ancestries < 10:
+            if self.num_pops < 10:
                 cmap = plt.get_cmap("Set1")
                 colors = cmap(np.arange(self.num_populations))[:,:-1]
                 colors_dict = {label:mcolors.to_hex(colors[i]) for i,label in enumerate(self.populations)}
