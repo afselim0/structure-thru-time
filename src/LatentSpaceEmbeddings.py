@@ -95,8 +95,8 @@ class LatentSpaceEmbeddings:
         R = self.R[:,extant_samples,time_inx]
         X = X_init[extant_samples, :]
         # Optimize using L-BFGS-B
-        result = minimize(self.compute_loss_gradient, X.ravel(), args=(R, self.N0), method='L-BFGS-B', 
-                         jac=True, options={'maxiter': max_iter, 'disp': True, 'gtol': tol})
+        result = minimize(self.compute_loss_gradient, X.ravel(), args=(R, self.N0), method='L-BFGS-B',
+                  jac=True, options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
         # Reshape result back to original dimensions, filling in NaNs for unsampled indices
         X_opt = np.full((self.num_idx,self.n_components),np.nan)
         X_opt[extant_samples, :] = result.x.reshape(X.shape)
