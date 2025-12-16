@@ -7,11 +7,14 @@ DEME_FILE_PATH = config["demes_file_path"]
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
 graph = demes.load(DEME_FILE_PATH)
 demography = msprime.Demography.from_demes(graph)
+
+# Fixed Params
 if "SS" not in DEME_NAME:
     MAX_TIME = int(2*demography.events[-1].time)
 else:
     MAX_TIME = 50000
 WINDOW_SIZE = 100
+N_PER_POP=20
 
 # Base output directory
 OUTPUT_PATH = f"../outputs/{DEME_NAME}"
@@ -87,13 +90,15 @@ rule preprocess_data:
         POP_COLORS,
         POP_LABELS
     params:
-        outdir=DATA_OUTPUT_PATH
+        outdir=DATA_OUTPUT_PATH,
+        n_per_pop=N_PER_POP
     shell:
         """
         mkdir -p {params.outdir}
         python preprocess_demography.py \
             --demes_file_path {input.demes_file_path} \
-            --output_path {params.outdir}
+            --output_path {params.outdir} \
+            --n {params.n_per_pop}
         """
 
 rule run_pca:
@@ -105,7 +110,8 @@ rule run_pca:
     output:
         PCA_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        n_per_pop=N_PER_POP
     shell:
         """
         python run_pca.py \
@@ -113,6 +119,7 @@ rule run_pca:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
+            --n {params.n_per_pop}
         """
 
 rule plot_demography:
@@ -143,13 +150,15 @@ rule simulate_trees:
     output:
         SIM_FINISHED
     params:
-        outdir=SIM_TREE_OUTPUT_PATH
+        outdir=SIM_TREE_OUTPUT_PATH,
+        n_per_pop=N_PER_POP
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
-            --output_path {params.outdir}
+            --output_path {params.outdir} \
+            --n {params.n_per_pop}
         """
 
 rule infer_trees:
