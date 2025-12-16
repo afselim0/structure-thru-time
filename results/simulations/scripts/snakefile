@@ -7,8 +7,11 @@ DEME_FILE_PATH = config["demes_file_path"]
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
 graph = demes.load(DEME_FILE_PATH)
 demography = msprime.Demography.from_demes(graph)
-MAX_TIME = int(2*demography.events[-1].time)
-WINDOW_SIZE = 50
+if "SS" not in DEME_NAME:
+    MAX_TIME = int(2*demography.events[-1].time)
+else:
+    MAX_TIME = 50000
+WINDOW_SIZE = 100
 
 # Base output directory
 OUTPUT_PATH = f"../outputs/{DEME_NAME}"
@@ -75,6 +78,7 @@ rule all:
     input:
         BASE_TARGETS
 
+# Preprocessing
 rule preprocess_data:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -86,6 +90,7 @@ rule preprocess_data:
         outdir=DATA_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python preprocess_demography.py \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir}
@@ -113,14 +118,16 @@ rule run_pca:
 rule plot_demography:
     input:
         demes_file_path=DEME_FILE_PATH,
+        pop_colors=POP_COLORS,
         script="plot_demography.py"
     output:
         DEMOGRAPHY_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --colors {input.pop_colors} \
@@ -128,6 +135,7 @@ rule plot_demography:
             --max_time {params.max_time}
         """
 
+# Trees
 rule simulate_trees:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -138,6 +146,7 @@ rule simulate_trees:
         outdir=SIM_TREE_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir}
@@ -154,12 +163,14 @@ rule infer_trees:
         outdir=INFER_TREE_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --sim_tree_path {params.sim_tree_dir} \
             --output_path {params.outdir}
         """
 
-
+# Rates
+## Compute
 rule compute_rates_true:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -167,14 +178,15 @@ rule compute_rates_true:
     output:
         RATES_TRUE
     params:
-        outdir=DATA_OUTPUT_PATH
+        outdir=DATA_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
-            --output_path {params.outdir}
-            --max_time {params.MAX_TIME}
+            --output_path {params.outdir} \
+            --max_time {params.max_time}
         """
 
 rule compute_rates_sim:
@@ -190,10 +202,11 @@ rule compute_rates_sim:
         window_size=WINDOW_SIZE        
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --tree_path {params.tree_dir} \
             --output_path {params.outdir} \
-            --output_name rates_sim.parquet \
+            --output_name $(basename {output}) \
             --max_time {params.max_time} \
             --window_size {params.window_size}
         """
@@ -211,14 +224,16 @@ rule compute_rates_infer:
         window_size=WINDOW_SIZE      
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --tree_path {params.tree_dir} \
             --output_path {params.outdir} \
-            --output_name rates_infer.parquet
+            --output_name $(basename {output}) \
             --max_time {params.max_time} \
             --window_size {params.window_size}
         """
 
+## Plot
 rule plot_rates_true:
     input:
         rates=RATES_TRUE,
@@ -231,12 +246,13 @@ rule plot_rates_true:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name rates_true.png
+            --output_name $(basename {output})
         """
 
 rule plot_rates_sim:
@@ -251,12 +267,13 @@ rule plot_rates_sim:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name rates_sim.png
+            --output_name $(basename {output})
         """
 
 rule plot_rates_infer:
@@ -271,14 +288,17 @@ rule plot_rates_infer:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name rates_infer.png
+            --output_name $(basename {output})
         """
 
+# Embeddings
+## Compute
 rule compute_embeddings_true:
     input:
         rates=RATES_TRUE,
@@ -289,10 +309,11 @@ rule compute_embeddings_true:
         outdir=DATA_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name embeddings_true.parquet
+            --output_name $(basename {output})
         """
 
 rule compute_embeddings_sim:
@@ -305,10 +326,11 @@ rule compute_embeddings_sim:
         outdir=DATA_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name embeddings_sim.parquet
+            --output_name $(basename {output})
         """
 
 rule compute_embeddings_infer:
@@ -321,12 +343,14 @@ rule compute_embeddings_infer:
         outdir=DATA_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name embeddings_infer.parquet
+            --output_name $(basename {output})
         """
 
+## Plot
 rule plot_embeddings_true:
     input:
         embeddings=EMBEDDINGS_TRUE,
@@ -339,12 +363,13 @@ rule plot_embeddings_true:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.embeddings} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name embeddings_true.html
+            --output_name $(basename {output})
         """
 
 rule plot_embeddings_sim:
@@ -359,12 +384,13 @@ rule plot_embeddings_sim:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.embeddings} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name embeddings_sim.html
+            --output_name $(basename {output})
         """
 
 rule plot_embeddings_infer:
@@ -379,10 +405,11 @@ rule plot_embeddings_infer:
         outdir=PLOT_OUTPUT_PATH
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.embeddings} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name embeddings_infer.html
+            --output_name $(basename {output})
         """
