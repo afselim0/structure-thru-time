@@ -1,0 +1,23 @@
+name: structure-thru-time
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - plotly
+  - tskit
+  - msprime
+  - stdpopsim
+  - demes
+  - numba
+  - tqdm
+  - pathos
+  - pip:
+    - demesdraw
+    - hsluv

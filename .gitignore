@@ -1,0 +1,28 @@
+# log files
+*.pyc
+*.DS_Store
+job_logs/
+
+## Output files
+*.parquet
+*.html
+*.png
+*.csv
+
+## Inferred Trees
+
+## Tests
+tests/
+*old*
+misc/
+local_data/
+
+## Tree inference
+*.hap
+*.map
+*.mut
+*.sample
+*.trees
+*.anc
+*.vcf
+*.zip

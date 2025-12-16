@@ -1,0 +1,39 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: AFR
+  description: Contemporary African population
+  epochs:
+  - {end_time: 5920, start_size: 7310}
+  - {end_time: 0, start_size: 14474.0}
+- name: EUR
+  description: Contemporary European population
+  start_time: 2040
+  ancestors: [AFR]
+  epochs:
+  - {end_time: 920, start_size: 1861}
+  - {end_time: 0, start_size: 1032.0, end_size: 34038.718872685706}
+- name: ASIA
+  description: Contemporary Asian population
+  start_time: 920
+  ancestors: [EUR]
+  epochs:
+  - {end_time: 0, start_size: 554.0, end_size: 45851.568512352045}
+- name: ADMIX
+  description: Modern admixed population
+  start_time: 12
+  ancestors: [AFR, EUR, ASIA]
+  proportions: [0.16666666666666666, 0.33333333333333337, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 30000.0, end_size: 54663.56401171527}
+migrations:
+- demes: [AFR, EUR]
+  rate: 0.00015
+  end_time: 920.0
+- demes: [AFR, EUR]
+  rate: 2.5e-05
+  start_time: 920.0
+- demes: [AFR, ASIA]
+  rate: 7.8e-06
+- demes: [EUR, ASIA]
+  rate: 3.11e-05

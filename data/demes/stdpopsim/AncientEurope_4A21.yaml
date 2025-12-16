@@ -1,0 +1,58 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: OOA
+  description: Basal/OOA
+  epochs:
+  - {end_time: 1500, start_size: 5000}
+- name: NE
+  description: Northern European
+  ancestors: [OOA]
+  epochs:
+  - {end_time: 600, start_size: 5000}
+- name: WA
+  description: West Asian
+  ancestors: [OOA]
+  epochs:
+  - {end_time: 800, start_size: 5000}
+- name: CHG
+  description: Caucasus Hunter-gathers
+  ancestors: [WA]
+  epochs:
+  - {end_time: 0, start_size: 10000}
+- name: ANA
+  description: Anatolian
+  ancestors: [WA]
+  epochs:
+  - {end_time: 0, start_size: 50000}
+- name: WHG
+  description: Western Hunter-gathers
+  ancestors: [NE]
+  epochs:
+  - {end_time: 0, start_size: 10000}
+- name: EHG
+  description: Eastern Hunter-gathers
+  ancestors: [NE]
+  epochs:
+  - {end_time: 0, start_size: 10000}
+- name: NEO
+  description: Neolithic
+  start_time: 200
+  ancestors: [WHG, ANA]
+  proportions: [0.25, 0.75]
+  epochs:
+  - {end_time: 0, start_size: 50000}
+- name: YAM
+  description: Yamnaya
+  start_time: 180
+  ancestors: [EHG, CHG]
+  proportions: [0.5, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 5000}
+- name: Bronze
+  description: Bronze Age
+  start_time: 140
+  ancestors: [YAM, NEO]
+  proportions: [0.5, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 50000.0, end_size: 592450737.7092822}

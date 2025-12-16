@@ -1,0 +1,8 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: African_Americans
+  description: African-Americans from Boyko et al 2008
+  epochs:
+  - {end_time: 6809, start_size: 7778}
+  - {end_time: 0, start_size: 25636.0}
