@@ -56,21 +56,21 @@ DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH,"demography.png")
 BASE_TARGETS = [
     POP_COLORS,
     POP_LABELS,
-    RATES_TRUE,
-    RATES_SIM,
-    RATES_INFER,
-    EMBEDDINGS_TRUE,
-    EMBEDDINGS_SIM,
-    EMBEDDINGS_INFER,
-    SIM_FINISHED,
-    INFER_FINISHED,
     PCA_PLOT,
-    RATES_TRUE_PLOT,
-    RATES_SIM_PLOT,
-    RATES_INFER_PLOT,
-    EMB_TRUE_PLOT,
-    EMB_SIM_PLOT,
-    EMB_INFER_PLOT,
+    # RATES_TRUE,
+    # RATES_SIM,
+    # RATES_INFER,
+    # EMBEDDINGS_TRUE,
+    # EMBEDDINGS_SIM,
+    # EMBEDDINGS_INFER,
+    # SIM_FINISHED,
+    # INFER_FINISHED,
+    # RATES_TRUE_PLOT,
+    # RATES_SIM_PLOT,
+    # RATES_INFER_PLOT,
+    # EMB_TRUE_PLOT,
+    # EMB_SIM_PLOT,
+    # EMB_INFER_PLOT,
 ]
 
 if "SS" not in DEME_NAME:
@@ -101,6 +101,26 @@ rule preprocess_data:
             --n {params.n_per_pop}
         """
 
+rule plot_demography:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        pop_colors=POP_COLORS,
+        script="plot_demography.py"
+    output:
+        DEMOGRAPHY_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH,
+        max_time=MAX_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --colors {input.pop_colors} \
+            --output_path {params.outdir} \
+            --max_time {params.max_time}
+        """
+
 rule run_pca:
     input:
         pop_colors = POP_COLORS,
@@ -120,26 +140,6 @@ rule run_pca:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --n {params.n_per_pop}
-        """
-
-rule plot_demography:
-    input:
-        demes_file_path=DEME_FILE_PATH,
-        pop_colors=POP_COLORS,
-        script="plot_demography.py"
-    output:
-        DEMOGRAPHY_PLOT
-    params:
-        outdir=PLOT_OUTPUT_PATH,
-        max_time=MAX_TIME
-    shell:
-        """
-        mkdir -p {params.outdir}
-        python {input.script} \
-            --demes_file_path {input.demes_file_path} \
-            --colors {input.pop_colors} \
-            --output_path {params.outdir} \
-            --max_time {params.max_time}
         """
 
 # Trees
