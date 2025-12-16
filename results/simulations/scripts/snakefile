@@ -1,27 +1,388 @@
 import os
+import demes
+import msprime
 
+# Parse Simulated Deme
 DEME_FILE_PATH = config["demes_file_path"]
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
+graph = demes.load(DEME_FILE_PATH)
+demography = msprime.Demography.from_demes(graph)
+MAX_TIME = int(2*demography.events[-1].time)
+WINDOW_SIZE = 50
+
+# Base output directory
+OUTPUT_PATH = f"../outputs/{DEME_NAME}"
+DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
+PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
+SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/sim")
+INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/infer")
+
+
+# Data outputs
+POP_COLORS          = os.path.join(DATA_OUTPUT_PATH,"pop_colors.parquet")
+POP_LABELS          = os.path.join(DATA_OUTPUT_PATH,"pop_labels.parquet")
+
+RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH,"rates_true.parquet")
+RATES_SIM           = os.path.join(DATA_OUTPUT_PATH,"rates_sim.parquet")
+RATES_INFER         = os.path.join(DATA_OUTPUT_PATH,"rates_infer.parquet")
+
+EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH,"embeddings_true.parquet")
+EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH,"embeddings_sim.parquet")
+EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH,"embeddings_infer.parquet")
+
+# Tree outputs
+SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH,"finished_sim.txt")
+INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH,"finished_infer.txt")
+
+# Plot outputs
+PCA_PLOT            = os.path.join(PLOT_OUTPUT_PATH,"pca.png")
+RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH,"rates_true.png")
+RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH,"rates_sim.png")
+RATES_INFER_PLOT    = os.path.join(PLOT_OUTPUT_PATH,"rates_infer.png")
+
+EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH,"embeddings_true.html")
+EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH,"embeddings_sim.html")
+EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH,"embeddings_infer.html")
+
+DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH,"demography.png")
+
+
+BASE_TARGETS = [
+    POP_COLORS,
+    POP_LABELS,
+    RATES_TRUE,
+    RATES_SIM,
+    RATES_INFER,
+    EMBEDDINGS_TRUE,
+    EMBEDDINGS_SIM,
+    EMBEDDINGS_INFER,
+    SIM_FINISHED,
+    INFER_FINISHED,
+    PCA_PLOT,
+    RATES_TRUE_PLOT,
+    RATES_SIM_PLOT,
+    RATES_INFER_PLOT,
+    EMB_TRUE_PLOT,
+    EMB_SIM_PLOT,
+    EMB_INFER_PLOT,
+]
+
+if "SS" not in DEME_NAME:
+    BASE_TARGETS.append(DEMOGRAPHY_PLOT)
+
 
 rule all:
     input:
-        f"../outputs/{DEME_NAME}/data/pop_colors.parquet",
-        f"../outputs/{DEME_NAME}/data/pop_labels.parquet",
-        f"../outputs/{DEME_NAME}/data/rates_true.parquet",
-        f"../outputs/{DEME_NAME}/data/rates_sim.parquet",
-        f"../outputs/{DEME_NAME}/data/rates_infer.parquet",
-        f"../outputs/{DEME_NAME}/data/embeddings_true.parquet",
-        f"../outputs/{DEME_NAME}/data/embeddings_sim.parquet",
-        f"../outputs/{DEME_NAME}/data/embeddings_infer.parquet",
-        f"../outputs/{DEME_NAME}/trees/sim/finished_sim.txt",
-        f"../outputs/{DEME_NAME}/trees/infer/finished_infer.txt",
-        f"../outputs/{DEME_NAME}/plots/pca.png",
-        f"../outputs/{DEME_NAME}/plots/rates_true.png",
-        f"../outputs/{DEME_NAME}/plots/rates_sim.png",
-        f"../outputs/{DEME_NAME}/plots/rates_infer.png",
-        f"../outputs/{DEME_NAME}/plots/embeddings_true.html",
-        f"../outputs/{DEME_NAME}/plots/embeddings_sim.html",
-        f"../outputs/{DEME_NAME}/plots/embeddings_infer.html"
+        BASE_TARGETS
+
+rule preprocess_data:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        script="preprocess_demography.py"
+    output:
+        POP_COLORS,
+        POP_LABELS
+    params:
+        outdir=DATA_OUTPUT_PATH
+    shell:
+        """
+        python preprocess_demography.py \
+            --demes_file_path {input.demes_file_path} \
+            --output_path {params.outdir}
+        """
+
+rule run_pca:
+    input:
+        pop_colors = POP_COLORS,
+        pop_labels = POP_LABELS,
+        demes_file_path=DEME_FILE_PATH,
+        script = "run_pca.py"
+    output:
+        PCA_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python run_pca.py \
+            --demes_file_path {input.demes_file_path} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+        """
+
+rule plot_demography:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        script="plot_demography.py"
+    output:
+        DEMOGRAPHY_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+        max_time=MAX_TIME
+    shell:
+        """
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --colors {input.pop_colors} \
+            --output_path {params.outdir} \
+            --max_time {params.max_time}
+        """
+
+rule simulate_trees:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        script="simulate_trees.py"
+    output:
+        SIM_FINISHED
+    params:
+        outdir=SIM_TREE_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --output_path {params.outdir}
+        """
+
+rule infer_trees:
+    input:
+        sim_finished=SIM_FINISHED,
+        script="infer_trees.py"
+    output:
+        INFER_FINISHED
+    params:
+        sim_tree_dir=SIM_TREE_OUTPUT_PATH,
+        outdir=INFER_TREE_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --sim_tree_path {params.sim_tree_dir} \
+            --output_path {params.outdir}
+        """
 
 
+rule compute_rates_true:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        script="compute_rates_true.py"
+    output:
+        RATES_TRUE
+    params:
+        outdir=DATA_OUTPUT_PATH
+        max_time=MAX_TIME
+    shell:
+        """
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --output_path {params.outdir}
+            --max_time {params.MAX_TIME}
+        """
 
+rule compute_rates_sim:
+    input:
+        sim_finished=SIM_FINISHED,
+        script="compute_rates.py"
+    output:
+        RATES_SIM
+    params:
+        tree_dir=SIM_TREE_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
+        max_time=MAX_TIME,
+        window_size=WINDOW_SIZE        
+    shell:
+        """
+        python {input.script} \
+            --tree_path {params.tree_dir} \
+            --output_path {params.outdir} \
+            --output_name rates_sim.parquet \
+            --max_time {params.max_time} \
+            --window_size {params.window_size}
+        """
+
+rule compute_rates_infer:
+    input:
+        infer_finished=INFER_FINISHED,
+        script="compute_rates.py"
+    output:
+        RATES_INFER
+    params:
+        tree_dir=INFER_TREE_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
+        max_time=MAX_TIME,
+        window_size=WINDOW_SIZE      
+    shell:
+        """
+        python {input.script} \
+            --tree_path {params.tree_dir} \
+            --output_path {params.outdir} \
+            --output_name rates_infer.parquet
+            --max_time {params.max_time} \
+            --window_size {params.window_size}
+        """
+
+rule plot_rates_true:
+    input:
+        rates=RATES_TRUE,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_rates.py"
+    output:
+        RATES_TRUE_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name rates_true.png
+        """
+
+rule plot_rates_sim:
+    input:
+        rates=RATES_SIM,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_rates.py"
+    output:
+        RATES_SIM_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name rates_sim.png
+        """
+
+rule plot_rates_infer:
+    input:
+        rates=RATES_INFER,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_rates.py"
+    output:
+        RATES_INFER_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name rates_infer.png
+        """
+
+rule compute_embeddings_true:
+    input:
+        rates=RATES_TRUE,
+        script="compute_embeddings.py"
+    output:
+        EMBEDDINGS_TRUE
+    params:
+        outdir=DATA_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name embeddings_true.parquet
+        """
+
+rule compute_embeddings_sim:
+    input:
+        rates=RATES_SIM,
+        script="compute_embeddings.py"
+    output:
+        EMBEDDINGS_SIM
+    params:
+        outdir=DATA_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name embeddings_sim.parquet
+        """
+
+rule compute_embeddings_infer:
+    input:
+        rates=RATES_INFER,
+        script="compute_embeddings.py"
+    output:
+        EMBEDDINGS_INFER
+    params:
+        outdir=DATA_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name embeddings_infer.parquet
+        """
+
+rule plot_embeddings_true:
+    input:
+        embeddings=EMBEDDINGS_TRUE,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_embeddings.py"
+    output:
+        EMB_TRUE_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name embeddings_true.html
+        """
+
+rule plot_embeddings_sim:
+    input:
+        embeddings=EMBEDDINGS_SIM,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_embeddings.py"
+    output:
+        EMB_SIM_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name embeddings_sim.html
+        """
+
+rule plot_embeddings_infer:
+    input:
+        embeddings=EMBEDDINGS_INFER,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="plot_embeddings.py"
+    output:
+        EMB_INFER_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH
+    shell:
+        """
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name embeddings_infer.html
+        """
