@@ -26,3 +26,5 @@ local_data/
 *.anc
 *.vcf
 *.zip
+
+*.snakemake.log

@@ -1,0 +1,27 @@
+import os
+
+DEME_FILE_PATH = config["demes_file_path"]
+DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
+
+rule all:
+    input:
+        f"../outputs/{DEME_NAME}/data/pop_colors.parquet",
+        f"../outputs/{DEME_NAME}/data/pop_labels.parquet",
+        f"../outputs/{DEME_NAME}/data/rates_true.parquet",
+        f"../outputs/{DEME_NAME}/data/rates_sim.parquet",
+        f"../outputs/{DEME_NAME}/data/rates_infer.parquet",
+        f"../outputs/{DEME_NAME}/data/embeddings_true.parquet",
+        f"../outputs/{DEME_NAME}/data/embeddings_sim.parquet",
+        f"../outputs/{DEME_NAME}/data/embeddings_infer.parquet",
+        f"../outputs/{DEME_NAME}/trees/sim/finished_sim.txt",
+        f"../outputs/{DEME_NAME}/trees/infer/finished_infer.txt",
+        f"../outputs/{DEME_NAME}/plots/pca.png",
+        f"../outputs/{DEME_NAME}/plots/rates_true.png",
+        f"../outputs/{DEME_NAME}/plots/rates_sim.png",
+        f"../outputs/{DEME_NAME}/plots/rates_infer.png",
+        f"../outputs/{DEME_NAME}/plots/embeddings_true.html",
+        f"../outputs/{DEME_NAME}/plots/embeddings_sim.html",
+        f"../outputs/{DEME_NAME}/plots/embeddings_infer.html"
+
+
+
