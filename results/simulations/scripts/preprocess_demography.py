@@ -1,6 +1,33 @@
 import os
 import argparse
-from utils import preprocess_demography
+import demes
+import msprime
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+
+def preprocess_demography(demes_file_path,n_samples_per_pop):
+    graph = demes.load(demes_file_path)
+    demography = msprime.Demography.from_demes(graph)
+    pops = [pop.name for pop in demography.populations if pop.default_sampling_time == 0]
+    if len(pops) <= 9:
+        cmap = plt.get_cmap("Set1")
+        pop_colors_dict = {pop:mcolors.to_hex(cmap(i)[:3]) for i,pop in enumerate(pops)}
+    else:
+        cmap = plt.get_cmap("rainbow")
+        color_idx = np.linspace(0,1,len(pops))
+        pop_colors_dict = {pop:mcolors.to_hex(cmap(color_idx[i])[:3]) for i,pop in enumerate(pops)}
+    pop_colors = pd.DataFrame({
+        "population": list(pop_colors_dict.keys()),
+        "color": list(pop_colors_dict.values())
+    })
+    pop_labels = np.repeat(pops, n_samples_per_pop)
+    pop_labels = pd.DataFrame({
+        "sample_id": np.arange(len(pop_labels)),
+        "population": pop_labels
+    })
+    return pop_labels, pop_colors
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess demography from a demes file")
