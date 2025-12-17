@@ -1,7 +1,24 @@
 import os
 import argparse
-from utils import plot_demography
+from utils import setup_plotting_style
 import pandas as pd
+import demes
+import demesdraw
+import matplotlib.pyplot as plt
+
+def plot_demography(demes_file_path, pop_colors, max_time):
+    setup_plotting_style()
+    graph = demes.load(demes_file_path)
+    pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
+    fig, ax = plt.subplots(figsize=(3, 6))
+    demesdraw.tubes(
+        graph,
+        ax=ax,
+        colours=pop_colors_dict,
+        max_time=max_time,
+        log_time=True
+    )
+    return fig
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess demography from a demes file")
