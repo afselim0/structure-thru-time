@@ -24,6 +24,7 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=500, contig
             demography=demography,
             sequence_length=contig_length,
             recombination_rate=recomb_rate,
+            ploidy=1,
             random_seed=42+i
         )
         return i, ts
