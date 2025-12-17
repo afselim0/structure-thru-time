@@ -23,58 +23,89 @@ PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
 SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/sim")
 INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/infer")
 
+# Main Script Paths
+INFER_RATES_SCRIPT = "../../../src/CountCoalEvents.py"
+COMPUTE_EMBEDDINGS_SCRIPT = "../../../src/LatentSpaceEmbeddings.py"
+PLOT_EMBEDDINGS_SCRIPT = "../../../src/PlotEmbeddings.py"
+
+# File Names
+POP_COLORS_FILE          = "pop_colors.parquet"
+POP_LABELS_FILE          = "pop_labels.parquet"
+
+RATES_TRUE_FILE          = "rates_true.parquet"
+RATES_SIM_FILE           = "rates_sim.parquet"
+RATES_INFER_FILE         = "rates_infer.parquet"
+
+EMBEDDINGS_TRUE_FILE     = "embeddings_true.parquet"
+EMBEDDINGS_SIM_FILE      = "embeddings_sim.parquet"
+EMBEDDINGS_INFER_FILE    = "embeddings_infer.parquet"
+
+SIM_FINISHED_FILE        = "finished_sim.txt"
+INFER_FINISHED_FILE      = "finished_infer.txt"
+
+PCA_PLOT_FILE            = "pca.png"
+RATES_TRUE_PLOT_FILE     = "rates_true.png"
+RATES_SIM_PLOT_FILE      = "rates_sim.png"
+RATES_INFER_PLOT_FILE    = "rates_infer.png"
+
+EMB_TRUE_PLOT_FILE       = "embeddings_true.html"
+EMB_SIM_PLOT_FILE        = "embeddings_sim.html"
+EMB_INFER_PLOT_FILE      = "embeddings_infer.html"
+
+DEMOGRAPHY_PLOT_FILE     = "demography.png"
+
 
 # Data outputs
-POP_COLORS          = os.path.join(DATA_OUTPUT_PATH,"pop_colors.parquet")
-POP_LABELS          = os.path.join(DATA_OUTPUT_PATH,"pop_labels.parquet")
+POP_COLORS          = os.path.join(DATA_OUTPUT_PATH, POP_COLORS_FILE)
+POP_LABELS          = os.path.join(DATA_OUTPUT_PATH, POP_LABELS_FILE)
 
-RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH,"rates_true.parquet")
-RATES_SIM           = os.path.join(DATA_OUTPUT_PATH,"rates_sim.parquet")
-RATES_INFER         = os.path.join(DATA_OUTPUT_PATH,"rates_infer.parquet")
+RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH, RATES_TRUE_FILE)
+RATES_SIM           = os.path.join(DATA_OUTPUT_PATH, RATES_SIM_FILE)
+RATES_INFER         = os.path.join(DATA_OUTPUT_PATH, RATES_INFER_FILE)
 
-EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH,"embeddings_true.parquet")
-EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH,"embeddings_sim.parquet")
-EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH,"embeddings_infer.parquet")
+EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
+EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
+EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
 
 # Tree outputs
-SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH,"finished_sim.txt")
-INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH,"finished_infer.txt")
+SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH, SIM_FINISHED_FILE)
+INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH, INFER_FINISHED_FILE)
 
 # Plot outputs
-PCA_PLOT            = os.path.join(PLOT_OUTPUT_PATH,"pca.png")
-RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH,"rates_true.png")
-RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH,"rates_sim.png")
-RATES_INFER_PLOT    = os.path.join(PLOT_OUTPUT_PATH,"rates_infer.png")
+PCA_PLOT            = os.path.join(PLOT_OUTPUT_PATH, PCA_PLOT_FILE)
+RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH, RATES_TRUE_PLOT_FILE)
+RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH, RATES_SIM_PLOT_FILE)
+RATES_INFER_PLOT    = os.path.join(PLOT_OUTPUT_PATH, RATES_INFER_PLOT_FILE)
 
-EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH,"embeddings_true.html")
-EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH,"embeddings_sim.html")
-EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH,"embeddings_infer.html")
+EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH, EMB_TRUE_PLOT_FILE)
+EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH, EMB_SIM_PLOT_FILE)
+EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH, EMB_INFER_PLOT_FILE)
 
-DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH,"demography.png")
+DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH, DEMOGRAPHY_PLOT_FILE)
 
 
 BASE_TARGETS = [
     POP_COLORS,
     POP_LABELS,
     PCA_PLOT,
-    # RATES_TRUE,
+    SIM_FINISHED,
     # RATES_SIM,
     # RATES_INFER,
-    # EMBEDDINGS_TRUE,
     # EMBEDDINGS_SIM,
     # EMBEDDINGS_INFER,
-    # SIM_FINISHED,
     # INFER_FINISHED,
-    # RATES_TRUE_PLOT,
-    # RATES_SIM_PLOT,
-    # RATES_INFER_PLOT,
-    # EMB_TRUE_PLOT,
     # EMB_SIM_PLOT,
     # EMB_INFER_PLOT,
 ]
 
 if "SS" not in DEME_NAME:
     BASE_TARGETS.append(DEMOGRAPHY_PLOT)
+    BASE_TARGETS.append(RATES_TRUE)
+    BASE_TARGETS.append(RATES_TRUE_PLOT)
+    # BASE_TARGETS.append(EMBEDDINGS_TRUE)
+    # BASE_TARGETS.append(RATES_SIM_PLOT)
+    # BASE_TARGETS.append(RATES_INFER_PLOT)
+    # BASE_TARGETS.append(EMB_TRUE_PLOT)
 
 
 rule all:
@@ -146,19 +177,19 @@ rule run_pca:
 rule simulate_trees:
     input:
         demes_file_path=DEME_FILE_PATH,
+        pop_labels=POP_LABELS,
         script="simulate_trees.py"
     output:
         SIM_FINISHED
     params:
         outdir=SIM_TREE_OUTPUT_PATH,
-        n_per_pop=N_PER_POP
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
-            --n {params.n_per_pop}
+            --labels {input.pop_labels}
         """
 
 rule infer_trees:
@@ -183,6 +214,7 @@ rule infer_trees:
 rule compute_rates_true:
     input:
         demes_file_path=DEME_FILE_PATH,
+        pop_labels = POP_LABELS,
         script="compute_rates_true.py"
     output:
         RATES_TRUE
@@ -195,27 +227,30 @@ rule compute_rates_true:
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
-            --max_time {params.max_time}
+            --max_time {params.max_time} \
+            --labels {input.pop_labels}
         """
 
 rule compute_rates_sim:
     input:
         sim_finished=SIM_FINISHED,
-        script="compute_rates.py"
+        script="compute_rates.py",
+        main_script=INFER_RATES_SCRIPT
     output:
         RATES_SIM
     params:
         tree_dir=SIM_TREE_OUTPUT_PATH,
         outdir=DATA_OUTPUT_PATH,
         max_time=MAX_TIME,
-        window_size=WINDOW_SIZE        
+        window_size=WINDOW_SIZE,
+        output_name=RATES_SIM_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --tree_path {params.tree_dir} \
             --output_path {params.outdir} \
-            --output_name $(basename {output}) \
+            --output_name {params.output_name} \
             --max_time {params.max_time} \
             --window_size {params.window_size}
         """
@@ -223,21 +258,23 @@ rule compute_rates_sim:
 rule compute_rates_infer:
     input:
         infer_finished=INFER_FINISHED,
-        script="compute_rates.py"
+        script="compute_rates.py",
+        main_script=INFER_RATES_SCRIPT
     output:
         RATES_INFER
     params:
         tree_dir=INFER_TREE_OUTPUT_PATH,
         outdir=DATA_OUTPUT_PATH,
         max_time=MAX_TIME,
-        window_size=WINDOW_SIZE      
+        window_size=WINDOW_SIZE,
+        output_name=RATES_INFER_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --tree_path {params.tree_dir} \
             --output_path {params.outdir} \
-            --output_name $(basename {output}) \
+            --output_name {params.output_name} \
             --max_time {params.max_time} \
             --window_size {params.window_size}
         """
@@ -252,7 +289,8 @@ rule plot_rates_true:
     output:
         RATES_TRUE_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=RATES_TRUE_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -261,7 +299,7 @@ rule plot_rates_true:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule plot_rates_sim:
@@ -273,7 +311,8 @@ rule plot_rates_sim:
     output:
         RATES_SIM_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=RATES_SIM_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -282,7 +321,7 @@ rule plot_rates_sim:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule plot_rates_infer:
@@ -294,7 +333,8 @@ rule plot_rates_infer:
     output:
         RATES_INFER_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=RATES_INFER_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -303,7 +343,7 @@ rule plot_rates_infer:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 # Embeddings
@@ -311,52 +351,58 @@ rule plot_rates_infer:
 rule compute_embeddings_true:
     input:
         rates=RATES_TRUE,
-        script="compute_embeddings.py"
+        script="compute_embeddings.py",
+        main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_TRUE
     params:
-        outdir=DATA_OUTPUT_PATH
+        outdir=DATA_OUTPUT_PATH,
+        output_name=EMBEDDINGS_TRUE_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule compute_embeddings_sim:
     input:
         rates=RATES_SIM,
-        script="compute_embeddings.py"
+        script="compute_embeddings.py",
+        main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_SIM
     params:
-        outdir=DATA_OUTPUT_PATH
+        outdir=DATA_OUTPUT_PATH,
+        output_name=EMBEDDINGS_SIM_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule compute_embeddings_infer:
     input:
         rates=RATES_INFER,
-        script="compute_embeddings.py"
+        script="compute_embeddings.py",
+        main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_INFER
     params:
-        outdir=DATA_OUTPUT_PATH
+        outdir=DATA_OUTPUT_PATH,
+        output_name=EMBEDDINGS_INFER_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 ## Plot
@@ -365,11 +411,13 @@ rule plot_embeddings_true:
         embeddings=EMBEDDINGS_TRUE,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py"
+        script="plot_embeddings.py",
+        main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_TRUE_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=EMB_TRUE_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -378,7 +426,7 @@ rule plot_embeddings_true:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule plot_embeddings_sim:
@@ -386,11 +434,13 @@ rule plot_embeddings_sim:
         embeddings=EMBEDDINGS_SIM,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py"
+        script="plot_embeddings.py",
+        main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_SIM_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=EMB_SIM_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -399,7 +449,7 @@ rule plot_embeddings_sim:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
 
 rule plot_embeddings_infer:
@@ -407,11 +457,13 @@ rule plot_embeddings_infer:
         embeddings=EMBEDDINGS_INFER,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py"
+        script="plot_embeddings.py",
+        main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_INFER_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=EMB_INFER_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -420,5 +472,5 @@ rule plot_embeddings_infer:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name $(basename {output})
+            --output_name {params.output_name}
         """
