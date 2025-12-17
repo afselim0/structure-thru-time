@@ -4,15 +4,13 @@ import pandas as pd
 import tskit
 import os
 import glob
-from numba import njit
 from tqdm import tqdm
 from pathos.multiprocessing import ProcessingPool as Pool
 import re
-import msprime
 
 class CountCoalEvents:
     def __init__(self,
-                 ts_dir: str = None,
+                 ts_dir: str,
                  sample_ids: list = None,
                  num_posterior_samples: int = None):
         """Base class for counting coalescent events in tree sequences.
@@ -82,7 +80,7 @@ class CountCoalEvents:
         self.idx_sample_dict = idx_sample_dict
         self.processed_contigs = False
 
-    def compute_uncoalesced_contig(self, ts_file):
+    def compute_uncoalesced_contig(self, ts_file, max_time, time_step = 10):
         """A function to count coalescent events over time in a single contig.
 
         Args:
@@ -90,77 +88,113 @@ class CountCoalEvents:
         Returns:
             np.ndarray: A tuple of two numpy arrays (N, L) representing coalescent event counts and uncoalesced loci counts.
         """
-        print(f"Loading contig: {os.path.basename(ts_file).rstrip('.trees')}")
+        # print(f"Loading contig: {os.path.basename(ts_file).rstrip('.trees')}")
         ts = tskit.load(ts_file)
-        ts = ts.simplify(self.sample_ids)
+        if self.subsample:
+            ts = ts.simplify(self.sample_ids)
         contig_length = int(ts.sequence_length)
+        node_times = ts.nodes_time
+        times = np.arange(0, max_time+time_step, time_step)
 
         node_coal_data = ts.pair_coalescence_counts(sample_sets=self.sample_sets,indexes=self.pairs_reindexed)
-        node_times = ts.nodes_time.astype(np.uint32)
-        survival = 1-np.cumsum(node_coal_data,axis=1)
+        node_coal_data_expanded = np.zeros((self.num_pairs, len(times)), dtype=np.float32)
+        for t,time in enumerate(times[1:]):
+            idxs = np.where(np.logical_and(node_times<=time, node_times>time-time_step))[0]
+            aggregated_coal_data = np.sum(node_coal_data[:,idxs],axis=1)
+            node_coal_data_expanded[:,t+1] = aggregated_coal_data
+
+        survival = 1-np.cumsum(node_coal_data_expanded,axis=1)
         uncoalesced = survival * contig_length
-        uncoalesced = uncoalesced.astype(np.uint64)
+        uncoalesced = uncoalesced.astype(np.uint32)
 
-        uncoalesced_df = pd.DataFrame(uncoalesced,columns=node_times,index = self.pairs)
-        uncoalesced_df = uncoalesced_df.T.groupby(level=0).min().T
-
+        uncoalesced_df = pd.DataFrame(uncoalesced,columns=times,index = pd.MultiIndex.from_tuples(self.pairs,names=["sample_1","sample_2"]))
         return uncoalesced_df
 
-    def compute_uncoalesced_total(self, output_dir, num_threads = 1):
+    def compute_uncoalesced_total(self, output_dir, max_time, num_threads = 1):
         """A method to count coalescent events over time for all contigs and save results as parquet files.
         """
         os.makedirs(output_dir, exist_ok=True)
         def process_contig(ts_file):
             contig_name = os.path.basename(ts_file).rstrip('.trees')
-            uncoalesced_df = self.compute_uncoalesced_contig(ts_file)
+            uncoalesced_df = self.compute_uncoalesced_contig(ts_file,max_time)
             out_path = os.path.join(output_dir, f"{contig_name}_uncoalesced.parquet")
             uncoalesced_df.to_parquet(out_path)
+        print("Processing contigs to compute uncoalesced counts...")
         if num_threads > 1:
             with Pool(num_threads) as pool:
-                for _ in pool.imap(process_contig, self.ts_files):
+                for _ in tqdm(pool.imap(process_contig, self.ts_files), total=len(self.ts_files)):
                     pass
         else:
             for ts_file in self.ts_files:
                 _ = tqdm(process_contig(ts_file), total=len(self.ts_files))
-        self.processed_contigs = True
 
-    def compute_coal_rates_single_replicate(self,uncoal_dir, time_points, window_sizes, replicate_id=None):
-        time_points_upper = time_points + window_sizes
-        assert self.processed_contigs, "You must run compute_uncoalesced_total() before computing coalescent rates."
-        N = np.zeros((self.num_pairs,len(time_points)), dtype=np.uint32)
-        L = np.zeros((self.num_pairs,len(time_points)), dtype=np.uint32)
-        for contig_id in tqdm(self.contig_ids):
-            uncoal_file = os.path.join(uncoal_dir, f"{contig_id}_uncoalesced.parquet")
-            uncoalesced_df = pd.read_parquet(uncoal_file)
-            node_times = uncoalesced_df.columns.values
-            left = np.searchsorted(node_times,time_points,side='left')
-            right = np.searchsorted(node_times,time_points_upper,side='left')
-            L_contig = uncoalesced_df.iloc[:,left].values
-            N_contig = L_contig - uncoalesced_df.iloc[:,right].values
-            L += L_contig
-            N += N_contig
-        coal_rates = N / L
-        coal_rates /= window_sizes[np.newaxis, :]
-        coal_rates_df = pd.DataFrame(coal_rates,columns=time_points,index = self.pairs)
-        return coal_rates_df
-
-    def compute_coal_rates(self, uncoal_dir, time_points, window_sizes):
+        # Aggregating the uncoalesced data across contigs and posterior samples
+        print("Aggregating uncoalesced data across contigs...")
         if self.num_posterior_samples is None:
-            coal_rates_df = self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes)
-            coal_rates_df.to_parquet(os.path.join(uncoal_dir, "coal_rates.parquet"))
-            return coal_rates_df
-        else:
-            for replicate_id in range(self.num_posterior_samples):
-                if replicate_id == 0:
-                    coal_rates_df = self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes, replicate_id)
+            for contig_id in tqdm(self.contig_ids):
+                uncoal_file = os.path.join(output_dir, f"{contig_id}_uncoalesced.parquet")
+                uncoalesced_df = pd.read_parquet(uncoal_file)
+                if contig_id == self.contig_ids[0]:
+                    total_uncoalesced_df = uncoalesced_df.copy()
                 else:
-                    coal_rates_df += self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes, replicate_id)
-            coal_rates_df /= self.num_posterior_samples
-            coal_rates_df.to_parquet(os.path.join(uncoal_dir, "coal_rates.parquet"))
-            return coal_rates_df
+                    total_uncoalesced_df += uncoalesced_df
+            survival_df = (total_uncoalesced_df.T / total_uncoalesced_df.iloc[:,0].values).T
+            survival_df.to_parquet(os.path.join(output_dir, "survival.parquet"))
+        else:
+            # TODO: "Implement aggregation across posterior samples if needed"
+            pass
+        
+        self.processed_contigs = True
+        return survival_df
     
+    def compute_coal_rates(self, survival_df, window_size):
+        survival_time_points = survival_df.columns.values
+        survival_step = survival_time_points[1] - survival_time_points[0]
+        idxs_step = window_size // survival_step
 
-#%%        
+        negative_log_survival = -np.log(survival_df.replace(0, np.nan))
+        rates = (negative_log_survival.iloc[:,idxs_step:].values - negative_log_survival.iloc[:,:-idxs_step].values) / window_size
+        rate_times = (survival_time_points[:-idxs_step] + (window_size / 2)).astype(int)
+        rates_df = pd.DataFrame(rates,columns=rate_times,index = survival_df.index)
+        return rates_df
+
+    # def compute_coal_rates_single_replicate(self,uncoal_dir, time_points, window_sizes, replicate_id=None):
+    #     time_points_upper = time_points + window_sizes
+    #     assert self.processed_contigs, "You must run compute_uncoalesced_total() before computing coalescent rates."
+    #     N = np.zeros((self.num_pairs,len(time_points)), dtype=np.uint32)
+    #     L = np.zeros((self.num_pairs,len(time_points)), dtype=np.uint32)
+    #     for contig_id in tqdm(self.contig_ids):
+    #         uncoal_file = os.path.join(uncoal_dir, f"{contig_id}_uncoalesced.parquet")
+    #         uncoalesced_df = pd.read_parquet(uncoal_file)
+    #         node_times = uncoalesced_df.columns.values
+    #         left = np.searchsorted(node_times,time_points,side='left')
+    #         right = np.searchsorted(node_times,time_points_upper,side='left')
+    #         L_contig = uncoalesced_df.iloc[:,left].values
+    #         N_contig = L_contig - uncoalesced_df.iloc[:,right].values
+    #         L += L_contig
+    #         N += N_contig
+    #     coal_rates = N / L
+    #     coal_rates /= window_sizes[np.newaxis, :]
+    #     coal_rates_df = pd.DataFrame(coal_rates,columns=time_points,index = self.pairs)
+    #     return coal_rates_df
+
+    # def compute_coal_rates(self, uncoal_dir, time_points, window_sizes):
+    #     if self.num_posterior_samples is None:
+    #         coal_rates_df = self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes)
+    #         coal_rates_df.to_parquet(os.path.join(uncoal_dir, "coal_rates.parquet"))
+    #         return coal_rates_df
+    #     else:
+    #         for replicate_id in range(self.num_posterior_samples):
+    #             if replicate_id == 0:
+    #                 coal_rates_df = self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes, replicate_id)
+    #             else:
+    #                 coal_rates_df += self.compute_coal_rates_single_replicate(uncoal_dir, time_points, window_sizes, replicate_id)
+    #         coal_rates_df /= self.num_posterior_samples
+    #         # coal_rates_df.to_parquet(os.path.join(uncoal_dir, "coal_rates.parquet"))
+    #         return coal_rates_df
+    
+#%%
+##%%        
 #     def aggregate_counts(self):
 #         """A method that aggregates counts across contigs and posterior samples if provided.
 
