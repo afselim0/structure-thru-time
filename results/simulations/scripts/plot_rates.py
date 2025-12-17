@@ -20,7 +20,7 @@ def plot_rates(rates_df, pop_colors, pop_labels):
             ax = [ax]
         ax[i].set_xlabel("Time")
         ax[i].set_title(f"{populations[i]}")
-        ax[i].set_xscale("log")
+        # ax[i].set_xscale("log")
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
@@ -40,9 +40,9 @@ def plot_rates(rates_df, pop_colors, pop_labels):
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
             mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
-            ax[i].plot(times, mean_rates, color=color)
+            ax[i].plot(times, mean_rates, color=color, lw = 1, alpha=0.7)
             for pair in sample_pairs:
-                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=1,alpha=0.5)
+                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=0.2, alpha=0.01)
 
     legend_handles = [Line2D(
             [0], [0],
