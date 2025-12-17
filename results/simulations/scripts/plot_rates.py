@@ -1,9 +1,58 @@
-#!/usr/bin/env python3
-"""
-Plot coalescence rates.
-"""
-
+import pandas as pd
 import argparse
+import os
+from utils import setup_plotting_style
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+
+def plot_rates(rates_df, pop_colors, pop_labels):
+    setup_plotting_style()
+    populations = pop_labels['population'].unique()
+    n_populations = len(populations)
+    pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
+    times = rates_df.columns.astype(int)
+
+    fig, ax = plt.subplots(1,len(populations), figsize=(3*len(populations),3),sharex=True,sharey=True)
+    fig.supylabel("Coalescence Rate")
+    for i in range(len(populations)):
+        if n_populations == 1:  
+            ax = [ax]
+        ax[i].set_xlabel("Time")
+        ax[i].set_title(f"{populations[i]}")
+        ax[i].set_xscale("log")
+        for j in range(len(populations)):
+            pop1 = populations[i]
+            pop2 = populations[j]
+            if pop1 == pop2:
+                color = "black"
+            else:
+                color = pop_colors_dict[pop2]
+            pop1_samples = pop_labels[pop_labels['population'] == pop1]['sample_id'].values
+            pop2_samples = pop_labels[pop_labels['population'] == pop2]['sample_id'].values
+            sample_pairs = []
+            for s1 in pop1_samples:
+                for s2 in pop2_samples:
+                    if s1 < s2:
+                        if (s1,s2) not in sample_pairs:
+                            sample_pairs.append((s1,s2))
+                    elif s1 > s2:
+                        if (s2,s1) not in sample_pairs:
+                            sample_pairs.append((s2,s1))
+            mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
+            ax[i].plot(times, mean_rates, color=color)
+            for pair in sample_pairs:
+                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=1,alpha=0.5)
+
+    legend_handles = [Line2D(
+            [0], [0],
+            color=color,
+            linewidth=3,
+            linestyle='-',
+            label=pop)
+        for pop, color in pop_colors_dict.items()]
+    ax[-1].legend(handles=legend_handles, title="Population", bbox_to_anchor=(1.05, 1), loc='upper left')
+    return fig
 
 
 def main():
@@ -15,13 +64,14 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
     
     args = parser.parse_args()
-    
-    # TODO: Implement rates plotting logic
-    print(f"Plotting rates from {args.input}")
-    print(f"Using colors from {args.colors}")
-    print(f"Using labels from {args.labels}")
-    print(f"Output path: {args.output_path}")
-    print(f"Output name: {args.output_name}")
+    rates_df = pd.read_parquet(args.input)
+    colors_df = pd.read_parquet(args.colors)
+    labels_df = pd.read_parquet(args.labels)
+    output_path = args.output_path
+    output_name = args.output_name
+
+    rates_fig = plot_rates(rates_df=rates_df, pop_colors=colors_df, pop_labels=labels_df)
+    rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
 
 
 if __name__ == "__main__":
