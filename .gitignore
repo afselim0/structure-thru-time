@@ -30,3 +30,5 @@ local_data/
 *.snakemake
 finished_sim.txt
 finished_infer.txt
+
+run_test.sh
