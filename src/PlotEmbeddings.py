@@ -39,7 +39,8 @@ rcParams['savefig.dpi'] = 500
 class PlotEmbeddings:
     def __init__(self, 
                  embeddings_df: pd.DataFrame,
-                 sample_colors_df: pd.DataFrame,
+                 labels_df: pd.DataFrame,
+                 colors_df: pd.DataFrame,
                  individuals: bool = False,
                  ):
         # if individuals:
@@ -49,10 +50,15 @@ class PlotEmbeddings:
         #     idx_to_sample_df["idx"] = idx_to_sample_df["idx"] // 2
             
         embeddings_df = embeddings_df.merge(
-            sample_colors_df,
-            on='sample_id',
-            how='left'
-        )
+                    labels_df,
+                    on='sample_id',
+                    how='left'
+                ).merge(
+                    colors_df,
+                    on="population",
+                    how="left"
+                )
+                
         self.num_pops = embeddings_df["population"].nunique()
         self.num_populations = embeddings_df["population"].nunique()
         self.populations = embeddings_df["population"].unique()
@@ -73,7 +79,7 @@ class PlotEmbeddings:
         self.colors_dict = colors_dict
         self.embeddings_df = embeddings_df
 
-    def dynamic_plot(self,log_time: bool = False):
+    def dynamic_plot(self,log_time: bool = True):
         fig = px.line_3d(self.embeddings_df, x="X1", y="X2", z="time", color='population', line_group='sample_id', color_discrete_map=self.colors_dict,log_z=log_time)
         # Set xlim and ylim to be the same
         x_min, x_max = self.embeddings_df["X1"].min(), self.embeddings_df["X1"].max()
@@ -85,7 +91,4 @@ class PlotEmbeddings:
             yaxis=dict(range=[lim_min, lim_max])
         ))
         fig.update_layout(showlegend=True)
-        # pio.write_html(fig, file=os.path.join(self.output_dir,"dynamic_3d_plot.html"))
         return fig
-
-# %%
