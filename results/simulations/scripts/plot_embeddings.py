@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
-"""
-Plot embeddings.
-"""
-
 import argparse
-
+import sys
+import pandas as pd
+sys.path.append("../../../src")
+from PlotEmbeddings import PlotEmbeddings
 
 def main():
     parser = argparse.ArgumentParser(description="Plot embeddings")
@@ -15,14 +13,14 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
     
     args = parser.parse_args()
-    
-    # TODO: Implement embeddings plotting logic
-    print(f"Plotting embeddings from {args.input}")
-    print(f"Using colors from {args.colors}")
-    print(f"Using labels from {args.labels}")
-    print(f"Output path: {args.output_path}")
-    print(f"Output name: {args.output_name}")
-
-
+    embeddings_df = pd.read_parquet(args.input)
+    colors_df = pd.read_parquet(args.colors)
+    labels_df = pd.read_parquet(args.labels)
+    output_path = args.output_path
+    output_name = args.output_name
+    plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df)
+    embeddings_fig = plotter.dynamic_plot(log_time=True)
+    embeddings_fig.write_html(f"{output_path}/{output_name}")
+    embeddings_fig.show()
 if __name__ == "__main__":
     main()
