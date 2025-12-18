@@ -104,8 +104,8 @@ class LatentSpaceEmbeddings:
             # Selecting N0 as 2nd percentile of Ne estimates
             with np.errstate(divide='ignore', invalid='ignore'):
                 Ne = 1/(R + 1e-10)
-            # self.N0 = np.nanquantile(Ne, 0.02)
-            self.N0 = np.nanmin(Ne[Ne!=np.inf])/2
+            self.N0 = np.nanquantile(Ne, 0.01)
+            # self.N0 = np.nanmin(Ne[Ne!=np.inf])/2
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time

@@ -12,7 +12,8 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     
     args = parser.parse_args()
-    rates_df = pd.read_parquet(args.input)
+    input = args.input
+    rates_df = pd.read_parquet(input)
     rates = rates_df.values
     rates_df += np.min(rates[rates!=0])/100
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2)
