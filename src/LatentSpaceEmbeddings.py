@@ -4,28 +4,61 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
+
+# def compute_gradient(X,R,D_prime,valid_mask):
+#     M = np.zeros_like(R)
+#     M[valid_mask] = R[valid_mask]/D_prime[valid_mask] - 1/D_prime[valid_mask]**2
+#     grad = (np.sum(M, axis=1)[:, np.newaxis] * X - M @ X)
+#     return grad
+
+# def compute_loss(R,D_prime):
+#     loss_values = 1/D_prime + R * np.log(D_prime)
+#     return 0.5*np.nansum(loss_values)
+
+# def compute_D_prime(X,N0):
+#     distances_squared = squareform(pdist(X, 'sqeuclidean'))
+#     D_prime = distances_squared + N0
+#     return D_prime
+
+# def compute_loss_gradient(X_flat,R,N0):
+#     n_samples = R.shape[0]
+#     X = X_flat.reshape((n_samples, -1))
+#     valid_mask = ~np.isnan(R)
+
+#     D_prime = compute_D_prime(X,N0)
+#     loss = compute_loss(R,D_prime)
+#     grad = compute_gradient(X,R,D_prime,valid_mask)
+#     return loss, grad.ravel()
 # %%
-def compute_loss_gradient(X_flat, R, N0, d=2):
-    # Mask for valid (non-nan) R entries
-    n = R.shape[0]
-    X = X_flat.reshape(n, d)
+def compute_f(D, N0):
+    D_sq = D**2
+    f = 1/(D_sq + N0)
+    f_prime = -2*D/(D_sq + N0)**2
+    return f,f_prime
 
+def compute_M(f,f_prime,D,R,valid_mask):
+    M = np.zeros_like(R)
+    M[valid_mask] = (f_prime[valid_mask]/D[valid_mask])*(1-R[valid_mask]/f[valid_mask])
+    return M
+
+def compute_loss(f,R,valid_mask):
+    loss_values = f[valid_mask] - R[valid_mask] * np.log(f[valid_mask])
+    return 0.5*np.nansum(loss_values)
+
+def compute_gradient(X,f,f_prime,D,R,valid_mask):
+    M = compute_M(f,f_prime,D,R,valid_mask)
+    grad = (np.sum(M, axis=1)[:, np.newaxis] * X - M @ X)
+    return grad
+
+def compute_loss_gradient(X_flat,R,N0,compute_f):
+    # Compute f is a function that computes f and f_prime given Distances and N0
+    n_samples = R.shape[0]
+    X = X_flat.reshape((n_samples, -1))
     valid_mask = ~np.isnan(R)
-    distances_squared = squareform(pdist(X, 'sqeuclidean'))
-    valid_R = R[valid_mask]
-    valid_distances_squared = distances_squared[valid_mask] + N0
-    inv_distances_squared = 1.0 / valid_distances_squared
-
-    # Compute loss
-    loss_values = inv_distances_squared + valid_R * np.log(valid_distances_squared)
-    loss = 0.5 * np.nansum(loss_values)
-
-    # Compute gradient
-    grad_coeff = np.zeros((n, n))
-    grad_coeff[valid_mask] = valid_R * inv_distances_squared - inv_distances_squared**2
-    row_sums = np.sum(grad_coeff, axis=1)
-    grad = (row_sums[:, np.newaxis] * X - grad_coeff @ X)
-
+    D = squareform(pdist(X, 'euclidean'))
+    f,f_prime = compute_f(D,N0)
+    loss = compute_loss(f,R,valid_mask)
+    grad = compute_gradient(X,f,f_prime,D,R,valid_mask)
     return loss, grad.ravel()
 
 def compute_embeddings(X_init, R, N0, d=2, max_iter=10000, tol=1e-9):
@@ -37,19 +70,20 @@ def compute_embeddings(X_init, R, N0, d=2, max_iter=10000, tol=1e-9):
 
 class LatentSpaceEmbeddings:
     def __init__(self,
-                 coal_rates_df: pd.DataFrame,
+                 rates_df: pd.DataFrame,
                  sample_times: list = None,
+                 N0 = None,
                  n_components: int = 2):
-        self.samples = samples = np.unique([x for pair in coal_rates_df.index.values for x in pair])
-        self.num_samples = len(samples)
-        self.sample_idx_map = {sample: idx for idx, sample in enumerate(samples)}
-        self.idx_sample_map = {idx: sample for idx, sample in enumerate(samples)}
-        self.time_points = coal_rates_df.columns.values
+        self.samples  = np.unique([x for pair in rates_df.index.values for x in pair])
+        self.num_samples = len(self.samples)
+        self.sample_idx_map = {sample: idx for idx, sample in enumerate(self.samples)}
+        self.idx_sample_map = {idx: sample for idx, sample in enumerate(self.samples)}
+        self.time_points = rates_df.columns.values
         self.num_timepoints = len(self.time_points)
         self.n_components = n_components
 
         R = np.full((self.num_samples, self.num_samples, self.num_timepoints), np.nan)
-        for (s1, s2), row in coal_rates_df.iterrows():
+        for (s1, s2), row in rates_df.iterrows():
             i = self.sample_idx_map[s1]
             j = self.sample_idx_map[s2]
             R[i, j, :] = row.values
@@ -63,9 +97,15 @@ class LatentSpaceEmbeddings:
             self.sample_times = sample_times
 
         self.embeddings = None
-        with np.errstate(divide='ignore', invalid='ignore'):
-            Ne = 1/R
-        self.N0 = np.nanquantile(Ne[Ne!=np.inf], 0.02)
+
+        if N0 is not None:
+            self.N0 = N0
+        else:
+            # Selecting N0 as 2nd percentile of Ne estimates
+            with np.errstate(divide='ignore', invalid='ignore'):
+                Ne = 1/(R + 1e-10)
+            self.N0 = np.nanquantile(Ne, 0.02)
+
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
         for t in range(self.num_timepoints):
@@ -114,8 +154,7 @@ class LatentSpaceEmbeddings:
         self.embeddings = embeddings
         return embeddings
 
-
-    def get_embeddings_df(self,output_dir=None):
+    def get_embeddings_df(self):
         assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
         sample_ids = [self.idx_sample_map[i] for i in np.arange(self.num_samples)]
         times = np.tile(self.time_points, self.num_samples)
@@ -129,8 +168,6 @@ class LatentSpaceEmbeddings:
             "X1": X1_flat,
             "X2": X2_flat
         })
-        if output_dir is not None:
-            df.to_parquet(f"{output_dir}/embeddings.parquet", index=False)
         return df
 
 
