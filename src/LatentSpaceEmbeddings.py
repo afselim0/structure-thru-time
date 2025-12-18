@@ -50,7 +50,7 @@ def compute_gradient(X,f,f_prime,D,R,valid_mask):
     grad = (np.sum(M, axis=1)[:, np.newaxis] * X - M @ X)
     return grad
 
-def compute_loss_gradient(X_flat,R,N0,compute_f):
+def compute_loss_gradient(X_flat,R,N0,compute_f=compute_f):
     # Compute f is a function that computes f and f_prime given Distances and N0
     n_samples = R.shape[0]
     X = X_flat.reshape((n_samples, -1))
@@ -63,7 +63,7 @@ def compute_loss_gradient(X_flat,R,N0,compute_f):
 
 def compute_embeddings(X_init, R, N0, d=2, max_iter=10000, tol=1e-9):
     # Optimize using L-BFGS-B
-    result = minimize(compute_loss_gradient, X_init.ravel(), args=(R, N0, d), method='L-BFGS-B',
+    result = minimize(compute_loss_gradient, X_init.ravel(), args=(R, N0), method='L-BFGS-B',
                       jac=True, options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
     X_opt = result.x.reshape(X_init.shape)
     return X_opt, result.fun
@@ -104,7 +104,8 @@ class LatentSpaceEmbeddings:
             # Selecting N0 as 2nd percentile of Ne estimates
             with np.errstate(divide='ignore', invalid='ignore'):
                 Ne = 1/(R + 1e-10)
-            self.N0 = np.nanquantile(Ne, 0.02)
+            # self.N0 = np.nanquantile(Ne, 0.02)
+            self.N0 = np.nanmin(Ne[Ne!=np.inf])/2
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
