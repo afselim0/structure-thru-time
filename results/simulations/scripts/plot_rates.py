@@ -20,7 +20,7 @@ def plot_rates(rates_df, pop_colors, pop_labels):
             ax = [ax]
         ax[i].set_xlabel("Time")
         ax[i].set_title(f"{populations[i]}")
-        # ax[i].set_xscale("log")
+        ax[i].set_xscale("log")
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
