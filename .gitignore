@@ -31,4 +31,5 @@ local_data/
 finished_sim.txt
 finished_infer.txt
 
-run_test.sh
+results/simulations/scripts/run_test.sh
+results/simulations/scripts/test_script.py
