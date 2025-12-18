@@ -7,6 +7,7 @@ import glob
 from tqdm import tqdm
 from pathos.multiprocessing import ProcessingPool as Pool
 import re
+from scipy.signal import savgol_filter
 
 class CountCoalEvents:
     def __init__(self,
@@ -148,14 +149,21 @@ class CountCoalEvents:
         return survival_df
     
     def compute_coal_rates(self, survival_df, window_size):
-        survival_time_points = survival_df.columns.values
-        survival_step = survival_time_points[1] - survival_time_points[0]
-        idxs_step = window_size // survival_step
+        # survival_time_points = survival_df.columns.values
+        # survival_step = survival_time_points[1] - survival_time_points[0]
+        # idxs_step = window_size // survival_step
 
-        negative_log_survival = -np.log(survival_df.replace(0, np.nan))
-        rates = (negative_log_survival.iloc[:,idxs_step:].values - negative_log_survival.iloc[:,:-idxs_step].values) / window_size
-        rate_times = (survival_time_points[:-idxs_step] + (window_size / 2)).astype(int)
-        rates_df = pd.DataFrame(rates,columns=rate_times,index = survival_df.index)
+        # negative_log_survival = -np.log(survival_df.replace(0, np.nan))
+        # rates = (negative_log_survival.iloc[:,idxs_step:].values - negative_log_survival.iloc[:,:-idxs_step].values) / window_size
+        # rate_times = (survival_time_points[:-idxs_step] + (window_size / 2)).astype(int)
+        # rates_df = pd.DataFrame(rates,columns=rate_times,index = survival_df.index)
+        
+        times = survival_df.columns.astype(int)
+        step_size = times[1]-times[0]
+        m = window_size//step_size
+        neg_log_survival = -np.log(survival_df.replace(0, np.nan))
+        rates = savgol_filter(neg_log_survival,window_length=m,polyorder=1,deriv=1,delta=step_size,axis=1)
+        rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
         return rates_df
 
     # def compute_coal_rates_single_replicate(self,uncoal_dir, time_points, window_sizes, replicate_id=None):
