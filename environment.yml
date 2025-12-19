@@ -22,3 +22,5 @@ dependencies:
     - demesdraw
     - hsluv
     - snakemake
+    - tsinfer
+    - tsdate
