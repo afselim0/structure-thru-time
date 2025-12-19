@@ -22,11 +22,11 @@ def main():
     window_size = args.window_size
     n_timepoints = args.n_timepoints
     
-    time_points = np.logspace(0, np.log10(max_time), n_timepoints).astype(int)
+    # time_points = np.logspace(0, np.log10(max_time), n_timepoints).astype(int)
     # window_size = np.array([window_size]*n_timepoints)
 
-
-    data_dir = os.path.join(output_path,"sim_survival_data")
+    data_dir_name = f"{output_name.split('.')[0][6:]}_survival_data"
+    data_dir = os.path.join(output_path, data_dir_name)
     os.makedirs(data_dir, exist_ok=True)
     CCE = CountCoalEvents(ts_dir=input_path)
     survival_df = CCE.compute_uncoalesced_total(output_dir=data_dir,max_time=max_time,num_threads=os.cpu_count())
@@ -35,3 +35,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%
