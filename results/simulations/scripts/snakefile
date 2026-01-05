@@ -4,6 +4,8 @@ import msprime
 
 # Parse Simulated Deme
 DEME_FILE_PATH = config["demes_file_path"]
+N0 = config["N0"]
+
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
 graph = demes.load(DEME_FILE_PATH)
 demography = msprime.Demography.from_demes(graph)
@@ -11,11 +13,14 @@ demography = msprime.Demography.from_demes(graph)
 # Fixed Params
 if "SS" not in DEME_NAME:
     MAX_TIME = int(2*demography.events[-1].time)
+    N_PER_POP = 10
 else:
     MAX_TIME = 50000
+    N_PER_POP = 1
+
 WINDOW_SIZE = 100
 N_TIMEPOINTS = 100
-N_PER_POP=20
+
 
 # Base output directory
 OUTPUT_PATH = f"../outputs/{DEME_NAME}"

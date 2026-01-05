@@ -14,8 +14,8 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=500, contig
     populations = np.unique(pop_labels['population'])
     n_samples = len(pop_labels)
     n_pops = len(populations)
-    n_samples_per_pop = n_samples // n_pops
-    samples = {pop_labels.loc[i*n_samples_per_pop,'population']: n_samples_per_pop for i in range(n_pops)}
+    n_samples_per_pop = n_samples // (2 * n_pops) # diploid samples
+    samples = {pop_labels.loc[2*i*n_samples_per_pop,'population']: n_samples_per_pop for i in range(n_pops)} # diploid samples
 
 
     def simulate_replicate(i):
@@ -24,7 +24,7 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=500, contig
             demography=demography,
             sequence_length=contig_length,
             recombination_rate=recomb_rate,
-            ploidy=1,
+            ploidy=2,
             random_seed=42+i
         )
         return i, ts

@@ -22,7 +22,7 @@ def preprocess_demography(demes_file_path,n_samples_per_pop):
         "population": list(pop_colors_dict.keys()),
         "color": list(pop_colors_dict.values())
     })
-    pop_labels = np.repeat(pops, n_samples_per_pop)
+    pop_labels = np.repeat(pops, 2*n_samples_per_pop) # diploid samples
     pop_labels = pd.DataFrame({
         "sample_id": np.arange(len(pop_labels)),
         "population": pop_labels
@@ -33,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description="Preprocess demography from a demes file")
     parser.add_argument("--demes_file_path", required=True, help="Path to the demes YAML file", type=str)
     parser.add_argument("--output_path", required=True, help="Output directory for preprocessed demography data", type=str)
-    parser.add_argument("--n", required=True, help="Number of samples per population", type=int)
+    parser.add_argument("--n", required=True, help="Number of diploid samples per population", type=int)
 
     args = parser.parse_args()
     demes_file_path = args.demes_file_path

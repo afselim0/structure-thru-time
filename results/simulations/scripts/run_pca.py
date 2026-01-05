@@ -17,7 +17,7 @@ def run_pca(demes_file_path,n_samples_per_pop,sequence_length=1e7,recombination_
         demography=demography,
         sequence_length=sequence_length,
         recombination_rate=recombination_rate,
-        ploidy=1,
+        ploidy=2,
         random_seed=42
     )
     pca=ts.pca(num_components=num_components).factors
