@@ -3,7 +3,7 @@ generation_time: 1
 demes:
 - name: main
   epochs:
-  - {end_time: 10000.0, start_size: 10000.0}
+  - {end_time: 2000.0, start_size: 10000.0}
 - name: A
   ancestors: [main]
   epochs:
