@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 
-def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=500, contig_length=5e6, num_replicates=1, recomb_rate=1e-8, parallel=True):
+def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=100, contig_length=5e6, num_replicates=1, recomb_rate=1e-8, parallel=True):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
     populations = np.unique(pop_labels['population'])

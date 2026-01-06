@@ -95,6 +95,8 @@ class CountCoalEvents:
             ts = ts.simplify(self.sample_ids)
         contig_length = int(ts.sequence_length)
         node_times = ts.nodes_time
+        if max_time>10000:
+            time_step = max_time//500 # have 500 timepoints in this case
         times = np.arange(0, max_time+time_step, time_step)
 
         node_coal_data = ts.pair_coalescence_counts(sample_sets=self.sample_sets,indexes=self.pairs_reindexed)
