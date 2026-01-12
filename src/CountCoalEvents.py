@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import tskit
 import os
-import glob
+from pathlib import Path
 from tqdm import tqdm
 from pathos.multiprocessing import ProcessingPool as Pool
 import re
@@ -13,73 +13,60 @@ class CountCoalEvents:
     def __init__(self,
                  ts_dir: str,
                  sample_ids: list = None,
-                 num_posterior_samples: int = None):
-        """Base class for counting coalescent events in tree sequences.
-
-        Args:
-            output_dir (str): Directory to save counts dataframes.
-            ts_dir (str): A directory containing .trees files for a list of tree sequences.
-            demes_file (str, optional): A demes file specifying the demographic model. Only provided if simulating independent trees. Defaults to None.
-            time_points (list, optional): A list of time points for counting the coalescent events. Defaults to None.
-            window_sizes (list, optional): A list of window sizes for each time point. Defaults to None.
-            sample_ids (list, optional): A list of sample ids to compute counts for in the tree sequence. Defaults to None.
-            admix_samples (list, optional): A list of samples that are treated as admixed. Defaults to None.
-            K (int, optional): Number of ancestries, if admix_samples is provided. Defaults to None.
-            num_posterior_samples (int, optional): Number of posterior ARG samples if ARGs where samples rather than providing a single point estimate. Defaults to None.
-                If provided, contigs in the ts_dir should be appropriately named by adding a suffix _0, _1, ..., _num_posterior_samples-1 to each contig name.
-            thinning_fraction (float, optional): Thinning fraction for each contig, where every pair of samples is chosen on average every thinning_fraction/n_samples number of trees. Defaults to 0.1.
-        """
+                 num_posterior_samples: int = None,
+                 max_time: float = None,
+                 num_timepoints: int = 100,
+                 fraction_pairs: float = 1.0):
+        
+        self.ts_dir = ts_dir
+        self.num_timepoints = num_timepoints
+        self.fraction_pairs = fraction_pairs
 
         # basic input validation
         assert os.path.isdir(ts_dir), f"ts_dir is not a valid directory: {ts_dir}"
-        # locating tree sequence files and counting contigs and posterior samples
-        ts_files = glob.glob(os.path.join(ts_dir, "*.trees"))
-        if len(ts_files) == 0:
-            raise ValueError(f"No .trees files found in directory: {ts_dir}")
-        ts_files.sort()
-        if num_posterior_samples is None:
-            num_contigs = len(ts_files)
-        else:
-            num_contigs = len(ts_files) // num_posterior_samples
-            if len(ts_files) % num_posterior_samples != 0:
-                raise ValueError(f"Number of .trees files ({len(ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
 
-        # loading tskit tree sequence to get sample information and default time points if not defined
-        ts = tskit.load(ts_files[0])
+        # locating tree sequence files and counting contigs and posterior samples
+        self.ts_files = [file.name for file in Path(ts_dir).glob("*.trees")]
+        if len(self.ts_files) == 0:
+            raise ValueError(f"No .trees files found in directory: {ts_dir}")
+        self.ts_files.sort()
+        if num_posterior_samples is None:
+            self.num_posterior_samples = 1
+            self.num_contigs = len(self.ts_files)
+            self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+        else:
+            self.num_posterior_samples = num_posterior_samples
+            self.num_contigs = len(self.ts_files) // num_posterior_samples
+            self.contig_ids = np.unique([re.sub(r'_[0-9]+\.trees$', '', contig) for contig in self.ts_files]) ## Must have the format {ContigID_PosteriorSampleID.trees}
+            if len(self.ts_files) % num_posterior_samples != 0:
+                raise ValueError(f"Number of .trees files ({len(self.ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
+        
+
+        # saving sample data
+        ts = tskit.load(os.path.join(ts_dir, self.ts_files[0]))
+        self.sample_sets = [[sample_id] for sample_id in ts.samples()]
         if sample_ids is None:
             sample_ids = ts.samples()
             self.num_samples = len(sample_ids)
-            self.subsample = False # using all samples
         else:
             sample_ids = np.array(sample_ids)
             sample_ids = np.sort(sample_ids)
             self.num_samples = len(sample_ids)
-            self.subsample = True # using a subset of samples
 
-        if num_posterior_samples is None:
-            self.contig_ids = [os.path.basename(ts_file).rstrip('.trees') for ts_file in ts_files]
-        else:
-            self.contig_ids = np.unique([re.sub(r'_[0-9]+\.trees$', '', contig) for contig in ts_files])
-    
-        idx_sample_dict = {idx: sample_id for idx, sample_id in enumerate(sample_ids)}
-        pairs = []
-        pairs_reindexed = []
+        if max_time is None:
+            max_time = np.quantile(ts.nodes_time, 0.95)
+        self.max_time = max_time
+
+        # creating pairs of samples
+        sample_pairs = []
         for i in range(self.num_samples):
             for j in range(i+1, self.num_samples):
-                pairs.append((idx_sample_dict[i], idx_sample_dict[j]))
-                pairs_reindexed.append((i, j))
-
-        self.ts_files = ts_files
-        self.num_contigs = num_contigs
-        self.num_posterior_samples = num_posterior_samples
-        self.ts_dir = ts_dir
-        self.sample_ids = sample_ids
-        self.pairs = pairs
-        self.pairs_reindexed = pairs_reindexed
-        self.sample_sets = [[i] for i in range(self.num_samples)]
-        self.num_pairs = len(self.pairs)
-        self.idx_sample_dict = idx_sample_dict
-        self.processed_contigs = False
+                sample_pairs.append((sample_ids[i], sample_ids[j]))
+        self.sample_pairs = sample_pairs
+        self.num_pairs = len(sample_pairs)
+        self.pairs_MultiIndex = pd.MultiIndex.from_tuples(self.sample_pairs,names=["sample_1","sample_2"])
+        self.pairs_selected = pd.DataFrame(np.random.rand(self.num_pairs,self.num_contigs) < self.fraction_pairs,index=self.pairs_MultiIndex,columns=self.contig_ids)
+        
 
     def compute_uncoalesced_contig(self, ts_file, max_time, time_step = 10):
         """A function to count coalescent events over time in a single contig.
