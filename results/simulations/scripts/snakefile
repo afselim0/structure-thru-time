@@ -13,7 +13,7 @@ demography = msprime.Demography.from_demes(graph)
 # Fixed Params
 if "SS" not in DEME_NAME:
     MAX_TIME = int(2*demography.events[-1].time)
-    N_PER_POP = 10
+    N_PER_POP = 50
 else:
     MAX_TIME = 100000
     N_PER_POP = 1
