@@ -18,7 +18,8 @@ dependencies:
   - numba
   - tqdm
   - pathos
-  - fastparquet
+  - fastparquet=2024.11.0
+  - pyarrow=20.0.0
   - pip:
     - demesdraw
     - hsluv
