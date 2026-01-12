@@ -34,12 +34,14 @@ class CountCoalEvents:
             self.num_posterior_samples = 1
             self.num_contigs = len(self.ts_files)
             self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+            self.contig_lengths = {contig_id:tskit.load(os.path.join(ts_dir, contig_id + ".trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)}
         else:
             self.num_posterior_samples = num_posterior_samples
             self.num_contigs = len(self.ts_files) // num_posterior_samples
             self.contig_ids = np.unique([re.sub(r'_[0-9]+\.trees$', '', contig) for contig in self.ts_files]) ## Must have the format {ContigID_PosteriorSampleID.trees}
             if len(self.ts_files) % num_posterior_samples != 0:
                 raise ValueError(f"Number of .trees files ({len(self.ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
+            self.contig_lengths = {contig_id:tskit.load(os.path.join(ts_dir, contig_id + "_0.trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)}
         
 
         # saving sample data
