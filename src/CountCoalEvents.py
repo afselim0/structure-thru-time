@@ -5,7 +5,7 @@ import tskit
 import os
 from pathlib import Path
 from tqdm import tqdm
-from pathos.multiprocessing import ProcessingPool as Pool
+from joblib import Parallel, delayed
 import re
 from scipy.signal import savgol_filter
 
@@ -34,14 +34,14 @@ class CountCoalEvents:
             self.num_posterior_samples = 1
             self.num_contigs = len(self.ts_files)
             self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
-            self.contig_lengths = {contig_id:tskit.load(os.path.join(ts_dir, contig_id + ".trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)}
+            self.contig_lengths = np.array([tskit.load(os.path.join(ts_dir, contig_id + ".trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)])
         else:
             self.num_posterior_samples = num_posterior_samples
             self.num_contigs = len(self.ts_files) // num_posterior_samples
             self.contig_ids = np.unique([re.sub(r'_[0-9]+\.trees$', '', contig) for contig in self.ts_files]) ## Must have the format {ContigID_PosteriorSampleID.trees}
             if len(self.ts_files) % num_posterior_samples != 0:
                 raise ValueError(f"Number of .trees files ({len(self.ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
-            self.contig_lengths = {contig_id:tskit.load(os.path.join(ts_dir, contig_id + "_0.trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)}
+            self.contig_lengths = np.array([tskit.load(os.path.join(ts_dir, contig_id + "_0.trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)])
         
 
         # saving sample data
@@ -89,54 +89,53 @@ class CountCoalEvents:
             coal_segments_summary[contig_pairs_idxs,i] = np.sum(coal_segments[:,hist_idxs[i]:hist_idxs[i+1]], axis=1)
         
         return coal_segments_summary
-
-    def compute_uncoalesced_total(self, output_dir, max_time, num_threads = 1):
-        """A method to count coalescent events over time for all contigs and save results as parquet files.
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        def process_contig(ts_file):
-            contig_name = os.path.basename(ts_file).rstrip('.trees')
-            uncoalesced_df = self.compute_uncoalesced_contig(ts_file,max_time)
-            out_path = os.path.join(output_dir, f"{contig_name}_uncoalesced.parquet")
-            uncoalesced_df.to_parquet(out_path)
-        print("Processing contigs to compute uncoalesced counts...")
-        if num_threads > 1:
-            with Pool(num_threads) as pool:
-                for _ in tqdm(pool.imap(process_contig, self.ts_files), total=len(self.ts_files)):
-                    pass
-        else:
-            for ts_file in self.ts_files:
-                _ = tqdm(process_contig(ts_file), total=len(self.ts_files))
-
-        # Aggregating the uncoalesced data across contigs and posterior samples
-        print("Aggregating uncoalesced data across contigs...")
-        if self.num_posterior_samples is None:
-            for contig_id in tqdm(self.contig_ids):
-                uncoal_file = os.path.join(output_dir, f"{contig_id}_uncoalesced.parquet")
-                uncoalesced_df = pd.read_parquet(uncoal_file)
-                if contig_id == self.contig_ids[0]:
-                    total_uncoalesced_df = uncoalesced_df.copy()
-                else:
-                    total_uncoalesced_df += uncoalesced_df
-            survival_df = (total_uncoalesced_df.T / total_uncoalesced_df.iloc[:,0].values).T
-            survival_df.to_parquet(os.path.join(output_dir, "survival.parquet"))
-        else:
-            # TODO: "Implement aggregation across posterior samples if needed"
-            pass
-        
-        self.processed_contigs = True
-        return survival_df
     
-    def compute_coal_rates(self, survival_df, window_size):
-        # survival_time_points = survival_df.columns.values
-        # survival_step = survival_time_points[1] - survival_time_points[0]
-        # idxs_step = window_size // survival_step
+    def compute_coal_segments_contigs(self, ts_files):
+        for ts_file in tqdm(ts_files, total=len(ts_files), desc=f"Computing coalescent segments for contigs"):
+            coal_segments = self.compute_coal_segments(ts_file)
+            if ts_file == ts_files[0]:
+                total_coal_segments = coal_segments
+            else:
+                total_coal_segments += coal_segments
+        return total_coal_segments
+    
+    def compute_coal_time_pdf(self, num_threads = 1, data_output = None):
+        if num_threads == 1:
+            coal_segments_total = self.compute_coal_segments_contigs(self.ts_files)
+        else:
+            assert data_output is not None, "data_output directory must be specified when using multiple threads."
+            os.makedirs(data_output, exist_ok=True)
+            # Save the file as a random integer that is returned
+            def process_chunk(ts_files_chunk, chunk_id):
+                coal_segments_chunk = self.compute_coal_segments_contigs(ts_files_chunk)
+                chunk_file = os.path.join(data_output, f"coal_segments_chunk_{chunk_id}.npy")
+                np.save(chunk_file, coal_segments_chunk)
+                return
+            
+            chunks = np.array_split(self.ts_files, num_threads)
+            Parallel(n_jobs=num_threads)(
+                delayed(process_chunk)(ts_files_chunk, chunk_id)
+                for chunk_id, ts_files_chunk in enumerate(chunks)
+            )
 
-        # negative_log_survival = -np.log(survival_df.replace(0, np.nan))
-        # rates = (negative_log_survival.iloc[:,idxs_step:].values - negative_log_survival.iloc[:,:-idxs_step].values) / window_size
-        # rate_times = (survival_time_points[:-idxs_step] + (window_size / 2)).astype(int)
-        # rates_df = pd.DataFrame(rates,columns=rate_times,index = survival_df.index)
-        
+            # Aggregating the results from chunk files
+            for chunk_id in range(len(chunks)):
+                chunk_file = os.path.join(data_output, f"coal_segments_chunk_{chunk_id}.npy")
+                coal_segments_chunk = np.load(chunk_file)
+                if chunk_id == 0:
+                    coal_segments_total = coal_segments_chunk
+                else:
+                    coal_segments_total += coal_segments_chunk
+                os.remove(chunk_file)  # Clean up chunk file after loading
+            os.rmdir(data_output)  # Remove the output directory if empty
+        time_bins_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
+        pdf_df = pd.DataFrame(coal_segments_total,columns=time_bins_edges[:-1],index = self.pairs_MultiIndex)
+
+        return pdf_df
+    
+    def compute_coal_rates(self, pdf_df, window_size):
+        total_segments_per_pair = (self.pairs_selected*self.contig_lengths).values.sum(axis=1).astype(np.uint32)
+        survival_df = (total_segments_per_pair.reshape(-1,1) - pdf_df.cumsum(axis=1))/(self.num_posterior_samples*total_segments_per_pair.reshape(-1,1))
         times = survival_df.columns.astype(int)
         step_size = times[1]-times[0]
         m = window_size//step_size
@@ -144,3 +143,65 @@ class CountCoalEvents:
         rates = savgol_filter(neg_log_survival,window_length=m,polyorder=1,deriv=1,delta=step_size,axis=1)
         rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
         return rates_df
+
+    # def compute_uncoalesced_total(self, output_dir, max_time, num_threads = 1):
+    #     """A method to count coalescent events over time for all contigs and save results as parquet files.
+    #     """
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     def process_contig(ts_file):
+    #         contig_name = os.path.basename(ts_file).rstrip('.trees')
+    #         uncoalesced_df = self.compute_uncoalesced_contig(ts_file,max_time)
+    #         out_path = os.path.join(output_dir, f"{contig_name}_uncoalesced.parquet")
+    #         uncoalesced_df.to_parquet(out_path)
+    #     print("Processing contigs to compute uncoalesced counts...")
+    #     if num_threads > 1:
+    #         with Pool(num_threads) as pool:
+    #             for _ in tqdm(pool.imap(process_contig, self.ts_files), total=len(self.ts_files)):
+    #                 pass
+    #     else:
+    #         for ts_file in self.ts_files:
+    #             _ = tqdm(process_contig(ts_file), total=len(self.ts_files))
+
+    #     # Aggregating the uncoalesced data across contigs and posterior samples
+    #     print("Aggregating uncoalesced data across contigs...")
+    #     if self.num_posterior_samples is None:
+    #         for contig_id in tqdm(self.contig_ids):
+    #             uncoal_file = os.path.join(output_dir, f"{contig_id}_uncoalesced.parquet")
+    #             uncoalesced_df = pd.read_parquet(uncoal_file)
+    #             if contig_id == self.contig_ids[0]:
+    #                 total_uncoalesced_df = uncoalesced_df.copy()
+    #             else:
+    #                 total_uncoalesced_df += uncoalesced_df
+    #         survival_df = (total_uncoalesced_df.T / total_uncoalesced_df.iloc[:,0].values).T
+    #         survival_df.to_parquet(os.path.join(output_dir, "survival.parquet"))
+    #     else:
+    #         # TODO: "Implement aggregation across posterior samples if needed"
+    #         pass
+        
+    #     self.processed_contigs = True
+    #     return survival_df
+    
+    # def compute_coal_rates(self, survival_df, window_size):
+    #     # survival_time_points = survival_df.columns.values
+    #     # survival_step = survival_time_points[1] - survival_time_points[0]
+    #     # idxs_step = window_size // survival_step
+
+    #     # negative_log_survival = -np.log(survival_df.replace(0, np.nan))
+    #     # rates = (negative_log_survival.iloc[:,idxs_step:].values - negative_log_survival.iloc[:,:-idxs_step].values) / window_size
+    #     # rate_times = (survival_time_points[:-idxs_step] + (window_size / 2)).astype(int)
+    #     # rates_df = pd.DataFrame(rates,columns=rate_times,index = survival_df.index)
+        
+    #     times = survival_df.columns.astype(int)
+    #     step_size = times[1]-times[0]
+    #     m = window_size//step_size
+    #     neg_log_survival = -np.log(survival_df.replace(0, np.nan))
+    #     rates = savgol_filter(neg_log_survival,window_length=m,polyorder=1,deriv=1,delta=step_size,axis=1)
+    #     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
+    #     return rates_df
+#%%
+ts_dir = "../results/simulations/outputs/split/trees/sim"
+CCE = CountCoalEvents(ts_dir=ts_dir, num_timepoints=500, fraction_pairs=0.1, max_time = 10000)
+df = CCE.compute_coal_time_pdf(num_threads=10, data_output="./test_dir")
+rates_df = CCE.compute_coal_rates(df, window_size=100)
+
+# %%

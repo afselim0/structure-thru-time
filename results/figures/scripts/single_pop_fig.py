@@ -25,22 +25,6 @@ def plot_demography(demes_file_path, pop_colors, max_time, ax):
     )
 
 
-# #%%
-# parser = argparse.ArgumentParser(description="Plot embeddings and demography")
-# parser.add_argument("--demes_file", required=True, help="List of demography examples to plit")
-
-# # deme_names = parser.parse_args().deme_names.split(",")
-# deme_name = parser.parse_args().deme_name
-#%%
-demes_file_path = "../../../data/demes/main/split.yaml"
-deme_name = os.path.basename(demes_file_path).rstrip(".yaml")
-embeddings_df = pd.read_parquet(f"../../simulations/outputs/{deme_name}/data/embeddings_sim.parquet")
-pop_colors = pd.read_parquet(f"../../simulations/outputs/{deme_name}/data/pop_colors.parquet")
-max_time = embeddings_df["time"].max()
-fig, axs = plt.subplots(1,2,figsize=(6,3),constrained_layout=True,gridspec_kw={"width_ratios": [1, 3]}, dpi=500)
-plot_demography(demes_file_path, pop_colors, max_time, ax=axs[0])
-
-
 # %%
 def static_3d_plot(embeddings_df, colors_dict, x_view=2,y_view=2, z_view=1):
     fig = go.Figure()
@@ -96,3 +80,22 @@ def static_3d_plot(embeddings_df, colors_dict, x_view=2,y_view=2, z_view=1):
     fig.write_image(os.path.join(output,"static_3d_plot.png"), scale=3)
     
     return fig
+
+
+
+# #%%
+# parser = argparse.ArgumentParser(description="Plot embeddings and demography")
+# parser.add_argument("--demes_file", required=True, help="List of demography examples to plit")
+
+# # deme_names = parser.parse_args().deme_names.split(",")
+# deme_name = parser.parse_args().deme_name
+#%%
+demes_file_path = "../../../data/demes/main/split.yaml"
+deme_name = os.path.basename(demes_file_path).rstrip(".yaml")
+embeddings_df = pd.read_parquet(f"../../simulations/outputs/{deme_name}/data/embeddings_sim.parquet")
+pop_colors = pd.read_parquet(f"../../simulations/outputs/{deme_name}/data/pop_colors.parquet")
+max_time = embeddings_df["time"].max()
+fig, axs = plt.subplots(1,2,figsize=(6,3),constrained_layout=True,gridspec_kw={"width_ratios": [1, 3]}, dpi=500)
+plot_demography(demes_file_path, pop_colors, max_time, ax=axs[0])
+
+
