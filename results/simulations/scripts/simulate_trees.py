@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 
-def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs=100, contig_length=5e6, num_replicates=1, recomb_rate=1e-8, parallel=True):
+def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, num_replicates, recomb_rate=1e-8, parallel=True):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
     populations = np.unique(pop_labels['population'])
@@ -58,13 +58,19 @@ def main():
     parser.add_argument("--demes_file_path", required=True, help="Path to the demes YAML file")
     parser.add_argument("--output_path", required=True, help="Output directory for simulated trees")
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
+    parser.add_argument("--num_contigs", required=True, help="number of contigs to simulate")
+    parser.add_argument("--num_replicates", required=True, help="number of replicates per contig")
+    parser.add_argument("--contig_length", required=True, help="length of each contig")
     
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
     output_path = args.output_path
     labels = pd.read_parquet(args.labels)
+    num_contigs = int(args.num_contigs)
+    num_replicates = int(args.num_replicates)
+    contig_length = int(args.contig_length)
     
-    time_taken = sim_contigs(demes_file_path, output_path, labels)
+    time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length, num_replicates)
     with open(f"{output_path}/finished_sim.txt", "w") as f:
         f.write(f"Simulation took {time_taken/60:.2f} minutes")
 
