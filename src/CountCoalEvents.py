@@ -13,7 +13,7 @@ class CountCoalEvents:
     def __init__(self,
                  ts_dir: str,
                  sample_ids: list = None,
-                 num_posterior_samples: int = None,
+                 num_posterior_samples: int = 1,
                  max_time: float = None,
                  num_timepoints: int = 100,
                  fraction_pairs: float = 1.0):
@@ -41,7 +41,7 @@ class CountCoalEvents:
         if len(self.ts_files) == 0:
             raise ValueError(f"No .trees files found in directory: {ts_dir}")
         self.ts_files.sort()
-        if num_posterior_samples is None:
+        if num_posterior_samples == 1:
             self.num_posterior_samples = 1
             self.num_contigs = len(self.ts_files)
             self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
@@ -90,21 +90,36 @@ class CountCoalEvents:
         Returns:
             np.NDArray: Each row corresponds to a sample pair, and each column corresponds to a time bin. The values represent the total span of genomic segments that coalesce within the respective time bin for the sample pair.
         """
-        ts = tskit.load(os.path.join(self.ts_dir, ts_file))
-        node_times = ts.nodes_time
+        # Find the contig ID associated with the tree sequence file
         if self.num_posterior_samples == 1:
             contig_id = ts_file.rstrip('.trees')
         else:
             contig_id = re.sub(r'_[0-9]+\.trees$', '', ts_file)
-        hist,time_bins_edges = np.histogram(node_times,bins=self.num_timepoints,range=(0,self.max_time))
-        hist_idxs = np.concatenate(([0],np.cumsum(hist)))
 
+        # Find the pairs of samples selected for this contig
         contig_pairs_idxs = np.where(self.pairs_selected[contig_id].values)[0]
         if len(contig_pairs_idxs) == 0:
             return np.zeros((self.num_pairs, len(time_bins_edges)-1), dtype=np.uint32)
         contig_pairs = np.array(self.sample_pairs)[contig_pairs_idxs]
-        coal_segments = ts.pair_coalescence_counts(sample_sets=self.sample_sets,indexes=contig_pairs,span_normalise=False)
-    
+        # Find the active samples involved in the selected pairs
+        active_samples = np.unique([x for t in contig_pairs for x in t])
+        ts = tskit.load(os.path.join(self.ts_dir, ts_file))
+        if len(active_samples) != ts.num_samples:
+            ts = ts.simplify(samples=active_samples)
+        node_times = ts.nodes_time
+        hist,time_bins_edges = np.histogram(node_times,bins=self.num_timepoints,range=(0,self.max_time))
+        hist_idxs = np.concatenate(([0],np.cumsum(hist)))
+
+        # Reindex samples to match the simplified tree sequence
+        reindex_map = {old_idx:new_idx for new_idx, old_idx in enumerate(active_samples)}        
+        contig_pairs_reindex = []
+        for pair in contig_pairs:
+            contig_pairs_reindex.append([reindex_map[pair[0]], reindex_map[pair[1]]])
+        active_samples_reindex = [reindex_map[sample_id] for sample_id in active_samples]
+        sample_sets = [[sample_id] for sample_id in active_samples_reindex]
+        
+        # Summarizing coalescent counts
+        coal_segments = ts.pair_coalescence_counts(sample_sets=sample_sets,indexes=contig_pairs_reindex,span_normalise=False)
         coal_segments_summary = np.zeros((self.num_pairs, len(time_bins_edges)-1), dtype=np.uint32)
         for i in range(len(time_bins_edges)-1):
             coal_segments_summary[contig_pairs_idxs,i] = np.sum(coal_segments[:,hist_idxs[i]:hist_idxs[i+1]], axis=1)
@@ -192,3 +207,4 @@ class CountCoalEvents:
         rates = savgol_filter(neg_log_survival,window_length=m,polyorder=1,deriv=1,delta=step_size,axis=1)
         rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
         return rates_df
+# %%
