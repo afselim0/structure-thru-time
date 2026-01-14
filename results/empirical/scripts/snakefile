@@ -1,0 +1,97 @@
+import os
+
+trees_dir = config["trees_dir"]
+output_dir = config["output_dir"]
+pops = config["pops"]
+max_time = config["max_time"]
+n_samples = config["n_samples"]
+species = config["species"]
+pops = pops.replace(","," ")
+
+if species == "humans":
+    pop_colors = "./wohns_pop_colors.csv"
+    pop_labels = "./wohns_pop_labels.csv"
+elif species == "chimps":
+    pop_colors = "./chimps_pop_colors.csv"
+    pop_labels = "./chimps_pop_labels.csv"
+
+
+rates_data = os.path.join(output_dir,"rates.parquet")
+rates_plot = os.path.join(output_dir,"rates.png")
+embeddings_data = os.path.join(output_dir,"embeddings.parquet")
+embeddings_3d_plot = os.path.join(output_dir,"embeddings.html")
+embeddings_static_plot = os.path.join(output_dir,"embeddings.png")
+
+INFER_RATES_SCRIPT = "../../../src/CountCoalEvents.py"
+COMPUTE_EMBEDDINGS_SCRIPT = "../../../src/LatentSpaceEmbeddings.py"
+PLOT_EMBEDDINGS_SCRIPT = "../../../src/PlotEmbeddings.py"
+
+# Fixed params
+window_size = 100
+n_timepoints = 1000
+num_posterior_samples = 1
+fraction_pairs = 1
+
+
+rule all:
+    input:
+        rates_data,
+        rates_plot
+        # embeddings_data
+        # embeddings_3d_plot
+        # embeddings_static_plot
+
+rule compute_rates:
+    input:
+        infer_rates_script = INFER_RATES_SCRIPT
+    params:
+        trees_dir = trees_dir,
+        output_dir = output_dir,
+        max_time = max_time,
+        n_samples = n_samples,
+        window_size = window_size,
+        n_timepoints = n_timepoints,
+        num_posterior_samples = num_posterior_samples,
+        fraction_pairs = fraction_pairs,
+        pops = pops,
+        pop_labels = pop_labels
+
+    output:
+        rates_data
+    shell:
+        """
+        python compute_rates.py \
+            --input_path {params.trees_dir} \
+            --output_path {params.output_dir} \
+            --max_time {params.max_time} \
+            --n_timepoints {params.n_timepoints} \
+            --window_size {params.window_size} \
+            --pops {params.pops} \
+            --n_samples_per_pop {params.n_samples} \
+            --fraction_pairs {params.fraction_pairs} \
+            --pop_labels {params.pop_labels}
+        """
+
+rule plot_rates:
+    input:
+        rates=rates_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="plot_rates.py"
+    output:
+        rates_plot
+    params:
+        outdir=output_dir
+    shell:
+        """
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir}
+        """
+
+# rule compute_embeddings:
+
+# rule plot_embeddings:
+
