@@ -5,22 +5,25 @@ import msprime
 # Parse Simulated Deme
 DEME_FILE_PATH = config["demes_file_path"]
 N0 = config["N0"]
+FRACTION_PAIRS = config["fraction"]
 
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
 graph = demes.load(DEME_FILE_PATH)
 demography = msprime.Demography.from_demes(graph)
+n_pops = demography.num_populations
 
-# Fixed Params
-if "SS" not in DEME_NAME:
+# Simulation Parameters
+NUM_CONTIGS = 100
+NUM_REPLICATES = 10
+CONTIG_LENGTH = 3000000
+
+# Rates parameters
+WINDOW_SIZE = 50
+N_TIMEPOINTS = 1000
+try:
     MAX_TIME = int(2*demography.events[-1].time)
-    N_PER_POP = 50
-else:
+except:
     MAX_TIME = 100000
-    N_PER_POP = 1
-
-WINDOW_SIZE = 100
-N_TIMEPOINTS = 100
-
 
 # Base output directory
 OUTPUT_PATH = f"../outputs/{DEME_NAME}"
@@ -104,7 +107,7 @@ BASE_TARGETS = [
     EMB_INFER_PLOT
 ]
 
-if "SS" not in DEME_NAME:
+if n_pops<20:
     BASE_TARGETS.append(DEMOGRAPHY_PLOT)
     BASE_TARGETS.append(RATES_TRUE)
     BASE_TARGETS.append(RATES_TRUE_PLOT)
@@ -112,7 +115,13 @@ if "SS" not in DEME_NAME:
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
     BASE_TARGETS.append(RATES_INFER_PLOT)
-    
+
+    N_PER_POP = 16
+
+else:
+    N_PER_POP = 1
+
+
     
 rule all:
     input:
@@ -189,13 +198,20 @@ rule simulate_trees:
         SIM_FINISHED
     params:
         outdir=SIM_TREE_OUTPUT_PATH,
+        num_contigs=NUM_CONTIGS,
+        num_replicates=NUM_REPLICATES,
+        contig_length=CONTIG_LENGTH
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
-            --labels {input.pop_labels}
+            --labels {input.pop_labels} \
+            --num_contigs {params.num_contigs} \
+            --num_replicates {params.num_replicates} \
+            --contig_length {params.contig_length}
+
         """
 
 rule infer_trees:
@@ -250,7 +266,9 @@ rule compute_rates_sim:
         max_time=MAX_TIME,
         window_size=WINDOW_SIZE,
         output_name=RATES_SIM_FILE,
-        n_timepoints=N_TIMEPOINTS
+        n_timepoints=N_TIMEPOINTS,
+        num_replicates=NUM_REPLICATES,
+        fraction_pairs=FRACTION_PAIRS
     shell:
         """
         mkdir -p {params.outdir}
@@ -260,7 +278,9 @@ rule compute_rates_sim:
             --output_name {params.output_name} \
             --max_time {params.max_time} \
             --window_size {params.window_size} \
-            --n_timepoints {params.n_timepoints}
+            --n_timepoints {params.n_timepoints} \
+            --num_posterior_samples {params.num_replicates} \
+            --fraction_pairs {params.fraction_pairs}
         """
 
 rule compute_rates_infer:
@@ -276,7 +296,9 @@ rule compute_rates_infer:
         max_time=MAX_TIME,
         window_size=WINDOW_SIZE,
         output_name=RATES_INFER_FILE,
-        n_timepoints=N_TIMEPOINTS
+        n_timepoints=N_TIMEPOINTS,
+        num_replicates=NUM_REPLICATES,
+        fraction_pairs=FRACTION_PAIRS
     shell:
         """
         mkdir -p {params.outdir}
@@ -286,7 +308,9 @@ rule compute_rates_infer:
             --output_name {params.output_name} \
             --max_time {params.max_time} \
             --window_size {params.window_size} \
-            --n_timepoints {params.n_timepoints}
+            --n_timepoints {params.n_timepoints} \
+            --num_posterior_samples {params.num_replicates} \
+            --fraction_pairs {params.fraction_pairs}
         """
 
 ## Plot
@@ -367,14 +391,16 @@ rule compute_embeddings_true:
         EMBEDDINGS_TRUE
     params:
         outdir=DATA_OUTPUT_PATH,
-        output_name=EMBEDDINGS_TRUE_FILE
+        output_name=EMBEDDINGS_TRUE_FILE,
+        N0=N0
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --N0 {params.N0}
         """
 
 rule compute_embeddings_sim:
@@ -386,14 +412,16 @@ rule compute_embeddings_sim:
         EMBEDDINGS_SIM
     params:
         outdir=DATA_OUTPUT_PATH,
-        output_name=EMBEDDINGS_SIM_FILE
+        output_name=EMBEDDINGS_SIM_FILE,
+        N0=N0
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --N0 {params.N0}
         """
 
 rule compute_embeddings_infer:
@@ -405,14 +433,16 @@ rule compute_embeddings_infer:
         EMBEDDINGS_INFER
     params:
         outdir=DATA_OUTPUT_PATH,
-        output_name=EMBEDDINGS_INFER_FILE
+        output_name=EMBEDDINGS_INFER_FILE,
+        N0=N0
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --N0 {params.N0}
         """
 
 ## Plot
