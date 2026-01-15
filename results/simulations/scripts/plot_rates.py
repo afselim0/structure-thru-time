@@ -65,8 +65,8 @@ def main():
     
     args = parser.parse_args()
     rates_df = pd.read_parquet(args.input)
-    colors_df = pd.read_parquet(args.colors)
-    labels_df = pd.read_parquet(args.labels)
+    colors_df = pd.read_csv(args.colors)
+    labels_df = pd.read_csv(args.labels)
     output_path = args.output_path
     output_name = args.output_name
 

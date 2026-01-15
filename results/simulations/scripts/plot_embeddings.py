@@ -14,13 +14,19 @@ def main():
     
     args = parser.parse_args()
     embeddings_df = pd.read_parquet(args.input)
-    colors_df = pd.read_parquet(args.colors)
-    labels_df = pd.read_parquet(args.labels)
+    colors_df = pd.read_csv(args.colors)
+    labels_df = pd.read_csv(args.labels)
     output_path = args.output_path
     output_name = args.output_name
     plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df)
-    embeddings_fig = plotter.dynamic_plot(log_time=True)
-    embeddings_fig.write_html(f"{output_path}/{output_name}")
-    embeddings_fig.show()
+    embeddings_dyn_fig = plotter.dynamic_plot(log_time=True)
+    embeddings_dyn_fig.write_html(f"{output_path}/{output_name}")
+    #embeddings_dyn_fig.show()
+
+    static_output_filename = f"{output_path}/{output_name}".removesuffix(".html")
+    embeddings_dyn_fig.write_image(f"{static_output_filename}.pdf",scale=2)
+    
+    
+    
 if __name__ == "__main__":
     main()

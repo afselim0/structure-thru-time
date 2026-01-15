@@ -40,8 +40,8 @@ def main():
     output_path = args.output_path
     n = args.n
     pop_labels, pop_colors = preprocess_demography(demes_file_path=demes_file_path,n_samples_per_pop=n)
-    pop_colors.to_parquet(os.path.join(output_path,"pop_colors.parquet"))
-    pop_labels.to_parquet(os.path.join(output_path,"pop_labels.parquet"))
+    pop_colors.to_csv(os.path.join(output_path,"pop_colors.csv"))
+    pop_labels.to_csv(os.path.join(output_path,"pop_labels.csv"))
 
 if __name__ == "__main__":
     main()

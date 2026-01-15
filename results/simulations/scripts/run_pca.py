@@ -62,8 +62,8 @@ def main():
     n = args.n
     colors_path = args.colors
     labels_path = args.labels
-    colors = pd.read_parquet(colors_path)
-    labels = pd.read_parquet(labels_path)
+    colors = pd.read_csv(colors_path)
+    labels = pd.read_csv(labels_path)
 
     sequence_length = 1e7
     recombination_rate = 1e-8

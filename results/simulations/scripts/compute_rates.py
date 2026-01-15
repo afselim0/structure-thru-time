@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 sys.path.append("../../../src/")
-from CountCoalEvents import CountCoalEvents
+from CountCoalEvents import CountCoalEvents,compute_coal_rates
 import numpy as np
 
 def main():
@@ -33,10 +33,9 @@ def main():
     os.makedirs(data_dir, exist_ok=True)
     CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_pairs=fraction_pairs)
     pdf_df = CCE.compute_coal_time_pdf(num_threads=os.cpu_count()-1, data_output=f"counts_data_{os.path.basename(output_name)}")
-    rates_df = CCE.compute_coal_rates(pdf_df=pdf_df, window_size=window_size)
+    rates_df = compute_coal_rates(pdf_df=pdf_df, window_size=window_size)
     rates_df.to_parquet(f"{output_path}/{output_name}")
+    # pdf_df.to_parquet(f"{data_dir}/pdf_{output_name}")
 
 if __name__ == "__main__":
     main()
-
-# %%

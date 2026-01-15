@@ -5,7 +5,14 @@ import msprime
 # Parse Simulated Deme
 DEME_FILE_PATH = config["demes_file_path"]
 N0 = config["N0"]
-FRACTION_PAIRS = config["fraction"]
+try:
+    FRACTION_PAIRS = config["frac_pairs"]
+except:
+    FRACTION_PAIRS = 1
+try:
+    INFER_METHOD=config["infer_method"] 
+except:
+    INFER_METHOD="tsinfer"
 
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
 graph = demes.load(DEME_FILE_PATH)
@@ -25,12 +32,22 @@ try:
 except:
     MAX_TIME = 100000
 
+if n_pops<20:
+    N_PER_POP = 16
+else:
+    N_PER_POP = 1
+
+SIM_TAG=f"{DEME_NAME}.npp{N_PER_POP}.nC{NUM_CONTIGS}"
+INFER_TAG=f".m{INFER_METHOD}"
+STT_TAG=f".N0{N0}.FP{FRACTION_PAIRS}.nR{NUM_REPLICATES}.WS{WINDOW_SIZE}.nT{N_TIMEPOINTS}"
+
 # Base output directory
-OUTPUT_PATH = f"../outputs/{DEME_NAME}"
+OUTPUT_PATH = f"../outputs/{SIM_TAG}"
 DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
-PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
-SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/sim")
-INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"trees/infer")
+STT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"stt_out{INFER_TAG}{STT_TAG}")
+PLOT_OUTPUT_PATH = os.path.join(STT_OUTPUT_PATH,"plots")
+SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
+INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/infer{INFER_TAG}")
 
 # Main Script Paths
 INFER_RATES_SCRIPT = "../../../src/CountCoalEvents.py"
@@ -38,50 +55,50 @@ COMPUTE_EMBEDDINGS_SCRIPT = "../../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../../src/PlotEmbeddings.py"
 
 # File Names
-POP_COLORS_FILE          = "pop_colors.parquet"
-POP_LABELS_FILE          = "pop_labels.parquet"
+POP_COLORS_FILE          = "pop_colors.csv"
+POP_LABELS_FILE          = "pop_labels.csv"
 
-RATES_TRUE_FILE          = "rates_true.parquet"
-RATES_SIM_FILE           = "rates_sim.parquet"
-RATES_INFER_FILE         = "rates_infer.parquet"
+RATES_TRUE_FILE          = f"rates_true.parquet"
+RATES_SIM_FILE           = f"rates_sim.parquet"
+RATES_INFER_FILE         = f"rates_infer.parquet"
 
-EMBEDDINGS_TRUE_FILE     = "embeddings_true.parquet"
-EMBEDDINGS_SIM_FILE      = "embeddings_sim.parquet"
-EMBEDDINGS_INFER_FILE    = "embeddings_infer.parquet"
+EMBEDDINGS_TRUE_FILE     = f"embeddings_true.parquet"
+EMBEDDINGS_SIM_FILE      = f"embeddings_sim.parquet"
+EMBEDDINGS_INFER_FILE    = f"embeddings_infer.parquet"
 
-SIM_FINISHED_FILE        = "finished_sim.txt"
-INFER_FINISHED_FILE      = "finished_infer.txt"
+SIM_FINISHED_FILE        = f"finished_sim.txt"
+INFER_FINISHED_FILE      = f"finished_infer.txt"
 
-PCA_PLOT_FILE            = "pca.png"
-RATES_TRUE_PLOT_FILE     = "rates_true.png"
-RATES_SIM_PLOT_FILE      = "rates_sim.png"
-RATES_INFER_PLOT_FILE    = "rates_infer.png"
+PCA_PLOT_FILE            = f"pca.png"
+RATES_TRUE_PLOT_FILE     = f"rates_true.png"
+RATES_SIM_PLOT_FILE      = f"rates_sim.png"
+RATES_INFER_PLOT_FILE    = f"rates_infer.png"
 
-EMB_TRUE_PLOT_FILE       = "embeddings_true.html"
-EMB_SIM_PLOT_FILE        = "embeddings_sim.html"
-EMB_INFER_PLOT_FILE      = "embeddings_infer.html"
+EMB_TRUE_PLOT_FILE       = f"embeddings_true.html"
+EMB_SIM_PLOT_FILE        = f"embeddings_sim.html"
+EMB_INFER_PLOT_FILE      = f"embeddings_infer.html"
 
 DEMOGRAPHY_PLOT_FILE     = "demography.png"
 
-
-# Data outputs
+# Data outputs and basic plot outputs
 POP_COLORS          = os.path.join(DATA_OUTPUT_PATH, POP_COLORS_FILE)
 POP_LABELS          = os.path.join(DATA_OUTPUT_PATH, POP_LABELS_FILE)
-
-RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH, RATES_TRUE_FILE)
-RATES_SIM           = os.path.join(DATA_OUTPUT_PATH, RATES_SIM_FILE)
-RATES_INFER         = os.path.join(DATA_OUTPUT_PATH, RATES_INFER_FILE)
-
-EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
-EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
-EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
+DEMOGRAPHY_PLOT     = os.path.join(DATA_OUTPUT_PATH, DEMOGRAPHY_PLOT_FILE)
+PCA_PLOT            = os.path.join(DATA_OUTPUT_PATH, PCA_PLOT_FILE)
 
 # Tree outputs
 SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH, SIM_FINISHED_FILE)
 INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH, INFER_FINISHED_FILE)
 
-# Plot outputs
-PCA_PLOT            = os.path.join(PLOT_OUTPUT_PATH, PCA_PLOT_FILE)
+# STT outputs
+RATES_TRUE          = os.path.join(STT_OUTPUT_PATH, RATES_TRUE_FILE)
+RATES_SIM           = os.path.join(STT_OUTPUT_PATH, RATES_SIM_FILE)
+RATES_INFER         = os.path.join(STT_OUTPUT_PATH, RATES_INFER_FILE)
+
+EMBEDDINGS_TRUE     = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
+EMBEDDINGS_SIM      = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
+EMBEDDINGS_INFER    = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
+
 RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH, RATES_TRUE_PLOT_FILE)
 RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH, RATES_SIM_PLOT_FILE)
 RATES_INFER_PLOT    = os.path.join(PLOT_OUTPUT_PATH, RATES_INFER_PLOT_FILE)
@@ -90,21 +107,16 @@ EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH, EMB_TRUE_PLOT_FILE)
 EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH, EMB_SIM_PLOT_FILE)
 EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH, EMB_INFER_PLOT_FILE)
 
-DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH, DEMOGRAPHY_PLOT_FILE)
-
 
 BASE_TARGETS = [
     POP_COLORS,
     POP_LABELS,
     PCA_PLOT,
+    DEMOGRAPHY_PLOT,
     SIM_FINISHED,
     RATES_SIM,
     EMBEDDINGS_SIM,
-    EMB_SIM_PLOT,
-    INFER_FINISHED,
-    RATES_INFER,
-    EMBEDDINGS_INFER,
-    EMB_INFER_PLOT
+    EMB_SIM_PLOT
 ]
 
 if n_pops<20:
@@ -114,18 +126,24 @@ if n_pops<20:
     BASE_TARGETS.append(RATES_SIM_PLOT)
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
-    BASE_TARGETS.append(RATES_INFER_PLOT)
-
-    N_PER_POP = 16
-
-else:
-    N_PER_POP = 1
-
-
     
+INFER_TARGETS = [
+    INFER_FINISHED,
+    RATES_INFER,
+    EMBEDDINGS_INFER,
+    EMB_INFER_PLOT
+]
+if n_pops<20:
+    INFER_TARGETS.append(RATES_INFER_PLOT)
+
 rule all:
     input:
+        BASE_TARGETS, INFER_TARGETS
+
+rule sttsimsonly:
+    input:
         BASE_TARGETS
+
 
 # Preprocessing
 rule preprocess_data:
@@ -155,7 +173,7 @@ rule plot_demography:
     output:
         DEMOGRAPHY_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
@@ -176,7 +194,7 @@ rule run_pca:
     output:
         PCA_PLOT
     params:
-        outdir=PLOT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         n_per_pop=N_PER_POP
     shell:
         """
@@ -200,7 +218,7 @@ rule simulate_trees:
         outdir=SIM_TREE_OUTPUT_PATH,
         num_contigs=NUM_CONTIGS,
         num_replicates=NUM_REPLICATES,
-        contig_length=CONTIG_LENGTH
+        contig_length=CONTIG_LENGTH,
     shell:
         """
         mkdir -p {params.outdir}
@@ -241,7 +259,7 @@ rule compute_rates_true:
     output:
         RATES_TRUE
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
@@ -262,7 +280,7 @@ rule compute_rates_sim:
         RATES_SIM
     params:
         tree_dir=SIM_TREE_OUTPUT_PATH,
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         max_time=MAX_TIME,
         window_size=WINDOW_SIZE,
         output_name=RATES_SIM_FILE,
@@ -292,7 +310,7 @@ rule compute_rates_infer:
         RATES_INFER
     params:
         tree_dir=INFER_TREE_OUTPUT_PATH,
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         max_time=MAX_TIME,
         window_size=WINDOW_SIZE,
         output_name=RATES_INFER_FILE,
@@ -390,7 +408,7 @@ rule compute_embeddings_true:
     output:
         EMBEDDINGS_TRUE
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         output_name=EMBEDDINGS_TRUE_FILE,
         N0=N0
     shell:
@@ -411,7 +429,7 @@ rule compute_embeddings_sim:
     output:
         EMBEDDINGS_SIM
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         output_name=EMBEDDINGS_SIM_FILE,
         N0=N0
     shell:
@@ -432,7 +450,7 @@ rule compute_embeddings_infer:
     output:
         EMBEDDINGS_INFER
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
         output_name=EMBEDDINGS_INFER_FILE,
         N0=N0
     shell:
