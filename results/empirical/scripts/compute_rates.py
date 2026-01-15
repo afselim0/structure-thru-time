@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 sys.path.append("../../../src")
-from CountCoalEvents import CountCoalEvents
+from CountCoalEvents import CountCoalEvents,compute_coal_rates
 import pandas as pd
 
 def main():
@@ -51,39 +51,11 @@ def main():
     os.makedirs(data_dir, exist_ok=True)
 
     CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_pairs=fraction_pairs, sample_ids=chosen_samples)
-    pdf_df = CCE.compute_coal_time_pdf(num_threads=os.cpu_count()-1, data_output=data_dir)
-    rates_df = CCE.compute_coal_rates(pdf_df=pdf_df, window_size=window_size)
+    pdf_df = CCE.compute_coal_time_pdf(num_threads=10, data_output=data_dir)
+    pdf_df.to_parquet(f"{output_path}/pdf.parquet")
+
+    rates_df = compute_coal_rates(pdf_df=pdf_df, window_size=window_size)
     rates_df.to_parquet(f"{output_path}/rates.parquet")
 
 if __name__ == "__main__":
     main()
-
-#%%
-input_path = "../../../data/trees/wohns_chopped"
-output_path = "../wohns/test"
-max_time = 2000
-window_size = 100
-n_timepoints = 2000
-num_posterior_samples = 1
-fraction_pairs = 1
-chosen_pops = ["YRI","CEU"]
-n_samples_per_pop = 10
-population_labels = pd.read_csv("wohns_pop_labels.csv")
-# %%
-if chosen_pops is None:
-    population_labels = population_labels[population_labels["sample_time"]==0]
-else:
-    population_labels = population_labels[population_labels["population"].isin(chosen_pops)]
-if n_samples_per_pop is not None:
-    chosen_samples = []
-    for pop in chosen_pops:
-        sample_ids = population_labels[population_labels["population"] == pop]["sample_id"].values
-        if n_samples_per_pop < len(sample_ids):
-            subsample_ids = sample_ids[:n_samples_per_pop]
-        else:
-            subsample_ids = sample_ids
-        chosen_samples.extend(subsample_ids)
-
-data_dir = os.path.join(output_path, "rates_data")
-os.makedirs(data_dir, exist_ok=True)
-# %%

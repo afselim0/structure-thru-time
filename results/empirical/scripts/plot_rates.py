@@ -82,7 +82,3 @@ if __name__ == "__main__":
     main()
 
 # %%
-rates_df = pd.read_parquet("../wohns/test/rates.parquet")
-pop_colors = pd.read_csv("./wohns_pop_colors.csv")
-pop_labels = pd.read_csv("./wohns_pop_labels.csv")
-# %%
