@@ -29,10 +29,9 @@ def main():
     embeddings_dyn_fig.write_html(f"{output_path}/embeddings.html")
     embeddings_dyn_fig.show()
 
-    # # new code needs debugging
-    # embeddings_stat_fig = plotter.dynamic_plot(log_time=True)
-    # embeddings_stat_fig.write_image(f"{output_path}/embeddings.png",scale=2)
-    
+    static_output_filename = f"{output_path}/{output_name}".removesuffix(".html")
+    embeddings_dyn_fig.write_image(f"{static_output_filename}.pdf",scale=2)
+     
     
     
 if __name__ == "__main__":
