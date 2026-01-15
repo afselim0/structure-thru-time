@@ -9,6 +9,8 @@ from matplotlib import rcParams
 import matplotlib.colors as mcolors
 import plotly.express as px
 import plotly.io as pio
+import plotly.graph_objects as go
+
 
 # -- Axes --
 rcParams['axes.spines.bottom'] = True
@@ -92,3 +94,56 @@ class PlotEmbeddings:
         ))
         fig.update_layout(showlegend=True)
         return fig
+    
+    
+    def static_3d_plot(self, colors_dict, x_view=2,y_view=2, z_view=1):
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter3d(
+            x=self.embeddings_df["X1"],
+            y=self.embeddings_df["X2"],
+            z=self.embeddings_df["time"],
+            mode='lines',
+            line=dict(width=0.5, color=colors_dict[self.embeddings_df["population"].values[0]]),
+            opacity= 1
+            ))
+
+        # Get combined min/max from X1 and X2 columns
+        xy_min = min(self.embeddings_df["X1"].min(), self.embeddings_df["X2"].min())
+        xy_max = max(self.embeddings_df["X1"].max(), self.embeddings_df["X2"].max())
+
+        # Add 10% padding for margins
+        padding = 0.1 * (xy_max - xy_min)
+        xy_range = [xy_min - padding, xy_max + padding]
+
+        fig.update_layout(showlegend=False,
+            margin=dict(l=0, r=0, t=0, b=0),
+            scene=dict(
+                xaxis_title='X1',
+                yaxis_title='X2',
+                zaxis_title='Time (generations ago)',
+                zaxis_type='log'
+            )
+        )
+
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(range=xy_range),  # Same range for X
+                yaxis=dict(range=xy_range),  # Same range for Y
+                aspectmode='manual',  # Prevents auto-scaling
+                aspectratio=dict(x=1, y=1, z=0.7),  # X/Y equal, Z scaled down
+            )
+        )
+
+        fig.update_layout(
+            width=600,
+            height=600,
+            scene_camera=dict(
+                eye=dict(x=x_view, y=y_view, z=z_view),  # Diagonal view
+            )
+        )
+
+        #fig.write_image(os.path.join(output,"static_3d_plot.png"), scale=3)
+        
+        return fig
+
