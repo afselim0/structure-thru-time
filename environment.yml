@@ -25,6 +25,7 @@ dependencies:
   - pip:
     - demesdraw
     - hsluv
+    - kaleido
     - snakemake==9.14.5
     - tsinfer
     - tsdate
