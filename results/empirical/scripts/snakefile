@@ -6,14 +6,16 @@ pops = config["pops"]
 max_time = config["max_time"]
 n_samples = config["n_samples"]
 species = config["species"]
+fraction_pairs = config["fraction"]
 pops = pops.replace(","," ")
 
+
 if species == "humans":
-    pop_colors = "./wohns_pop_colors.csv"
-    pop_labels = "./wohns_pop_labels.csv"
+    pop_colors = "wohns_pop_colors.csv"
+    pop_labels = "wohns_pop_labels.csv"
 elif species == "chimps":
-    pop_colors = "./chimps_pop_colors.csv"
-    pop_labels = "./chimps_pop_labels.csv"
+    pop_colors = "chimps_pop_colors.csv"
+    pop_labels = "chimps_pop_labels.csv"
 
 
 rates_data = os.path.join(output_dir,"rates.parquet")
@@ -27,19 +29,18 @@ COMPUTE_EMBEDDINGS_SCRIPT = "../../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../../src/PlotEmbeddings.py"
 
 # Fixed params
-window_size = 100
-n_timepoints = 1000
+window_size = 500
+n_timepoints = 6000
 num_posterior_samples = 1
-fraction_pairs = 1
+
 
 
 rule all:
     input:
         rates_data,
-        rates_plot
-        # embeddings_data
-        # embeddings_3d_plot
-        # embeddings_static_plot
+        rates_plot,
+        embeddings_data,
+        embeddings_3d_plot
 
 rule compute_rates:
     input:
@@ -91,7 +92,41 @@ rule plot_rates:
             --output_path {params.outdir}
         """
 
-# rule compute_embeddings:
+rule compute_embeddings:
+    input:
+        rates=rates_data,
+        script="compute_embeddings.py",
+        main_script=COMPUTE_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_data
+    params:
+        outdir=output_dir,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir}
+        """
 
-# rule plot_embeddings:
+rule plot_embeddings_sim:
+    input:
+        embeddings=embeddings_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="plot_embeddings.py",
+        main_script=PLOT_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_3d_plot
+    params:
+        outdir=output_dir,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir}
+        """
 
