@@ -61,11 +61,12 @@ def main():
     parser.add_argument("--num_contigs", required=True, help="number of contigs to simulate")
     parser.add_argument("--num_replicates", required=True, help="number of replicates per contig")
     parser.add_argument("--contig_length", required=True, help="length of each contig")
+   
     
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
     output_path = args.output_path
-    labels = pd.read_parquet(args.labels)
+    labels = pd.read_csv(args.labels)
     num_contigs = int(args.num_contigs)
     num_replicates = int(args.num_replicates)
     contig_length = int(args.contig_length)
