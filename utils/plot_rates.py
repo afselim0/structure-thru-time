@@ -63,12 +63,14 @@ def main():
     parser.add_argument("--colors", required=True, help="Path to population colors parquet file")
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
+    parser.add_argument("--output_name", required=True, help="Output filename for plot")
     
     args = parser.parse_args()
     rates_df = pd.read_parquet(args.input)
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
     output_path = args.output_path
+    output_name = args.output_name
 
     # Subsetting labels_df and colors_df to active samples only
     active_pairs = rates_df.index.values
@@ -78,7 +80,7 @@ def main():
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
     rates_fig = plot_rates(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels)
-    rates_fig.savefig(os.path.join(output_path, "rates.png"), dpi=500)
+    rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
 
 
 if __name__ == "__main__":

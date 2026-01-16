@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 sys.path.append("../src")
+sys.path.append("../../src")
 from CountCoalEvents import CountCoalEvents
 import pandas as pd
 
@@ -31,13 +32,13 @@ def main():
     population_labels = pd.read_csv(pop_labels_path)
 
     os.makedirs(output_path, exist_ok=True)
-
+    
     if chosen_pops is None:
         if "sample_time" in population_labels.columns:
             population_labels = population_labels[population_labels["sample_time"]==0]
     else:
         population_labels = population_labels[population_labels["population"].isin(chosen_pops)]
-
+    
     if n_samples_per_pop is not None:
         chosen_samples = []
         for pop in chosen_pops:
@@ -47,7 +48,8 @@ def main():
             else:
                 subsample_ids = sample_ids
             chosen_samples.extend(subsample_ids)
-
+    else:
+        chosen_samples = None
     data_dir = os.path.join(output_path, "pdf_data")
     os.makedirs(data_dir, exist_ok=True)
 

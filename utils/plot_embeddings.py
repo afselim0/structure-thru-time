@@ -1,7 +1,8 @@
 import argparse
 import sys
 import pandas as pd
-sys.path.append("../../../src")
+sys.path.append("../../src")
+sys.path.append("../src")
 from PlotEmbeddings import PlotEmbeddings
 
 def main():
@@ -10,7 +11,8 @@ def main():
     parser.add_argument("--colors", required=True, help="Path to population colors parquet file")
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
-    
+    parser.add_argument("--output_name", required=True, help="Output filename for plot")
+
     args = parser.parse_args()
     embeddings_df = pd.read_parquet(args.input)
     colors_df = pd.read_csv(args.colors)
@@ -26,7 +28,7 @@ def main():
 
     plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df)
     embeddings_dyn_fig = plotter.dynamic_plot(log_time=True)
-    embeddings_dyn_fig.write_html(f"{output_path}/embeddings.html")
+    embeddings_dyn_fig.write_html(f"{output_path}/{output_name}")
     embeddings_dyn_fig.show()
 
     static_output_filename = f"{output_path}/{output_name}".removesuffix(".html")

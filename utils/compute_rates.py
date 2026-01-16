@@ -1,7 +1,8 @@
 import argparse
 import sys
 sys.path.append("../src")
-from CountCoalEvents import compute_coal_rates
+sys.path.append("../../src")
+from compute_coal_rates import compute_coal_rates
 import pandas as pd
 
 def main():

@@ -2,30 +2,33 @@ import os
 import demes
 import msprime
 
-# Parse Simulated Deme
-DEME_FILE_PATH = config["demes_file_path"]
-N0 = config["N0"]
-try:
-    FRACTION_PAIRS = config["frac_pairs"]
-except:
-    FRACTION_PAIRS = 1
-try:
-    INFER_METHOD=config["infer_method"] 
-except:
-    INFER_METHOD="tsinfer"
-
-DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
-graph = demes.load(DEME_FILE_PATH)
-demography = msprime.Demography.from_demes(graph)
-n_pops = demography.num_populations
-
 # Simulation Parameters
 NUM_CONTIGS = 100
 NUM_REPLICATES = 10
 CONTIG_LENGTH = 3000000
 
+# Input params to snakefile
+DEME_FILE_PATH = config["demes_file_path"]
+N0 = config["N0"]
+
+try:
+    FRACTION_PAIRS = config["frac_pairs"]
+except:
+    FRACTION_PAIRS = 1
+
+try:
+    INFER_METHOD=config["infer_method"] 
+except:
+    INFER_METHOD="tsinfer"
+
+# Parse Simulated Deme
+DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
+graph = demes.load(DEME_FILE_PATH)
+demography = msprime.Demography.from_demes(graph)
+n_pops = demography.num_populations
+
 # Rates parameters
-WINDOW_SIZE = 50
+WINDOW_SIZE = 100
 N_TIMEPOINTS = 1000
 try:
     MAX_TIME = int(2*demography.events[-1].time)
@@ -42,7 +45,7 @@ INFER_TAG=f".m{INFER_METHOD}"
 STT_TAG=f".N0{N0}.FP{FRACTION_PAIRS}.nR{NUM_REPLICATES}.WS{WINDOW_SIZE}.nT{N_TIMEPOINTS}"
 
 # Base output directory
-OUTPUT_PATH = f"../outputs/{SIM_TAG}"
+OUTPUT_PATH = f"outputs/{SIM_TAG}"
 DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
 STT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"stt_out{INFER_TAG}{STT_TAG}")
 PLOT_OUTPUT_PATH = os.path.join(STT_OUTPUT_PATH,"plots")
@@ -50,13 +53,18 @@ SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
 INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/infer{INFER_TAG}")
 
 # Main Script Paths
-INFER_RATES_SCRIPT = "../../../src/CountCoalEvents.py"
-COMPUTE_EMBEDDINGS_SCRIPT = "../../../src/LatentSpaceEmbeddings.py"
-PLOT_EMBEDDINGS_SCRIPT = "../../../src/PlotEmbeddings.py"
+CountCoalEvents_SCRIPT = "../../src/CountCoalEvents.py"
+COMPUTE_RATES_SCRIPT = "../../src/compute_coal_rates.py"
+COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
+PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
 # File Names
 POP_COLORS_FILE          = "pop_colors.csv"
 POP_LABELS_FILE          = "pop_labels.csv"
+
+PDF_TRUE_FILE          = f"pdf_true.parquet"
+PDF_SIM_FILE           = f"pdf_sim.parquet"
+PDF_INFER_FILE         = f"pdf_infer.parquet"
 
 RATES_TRUE_FILE          = f"rates_true.parquet"
 RATES_SIM_FILE           = f"rates_sim.parquet"
@@ -92,7 +100,10 @@ INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH, INFER_FINISHED_FILE)
 
 # STT outputs
 RATES_TRUE          = os.path.join(STT_OUTPUT_PATH, RATES_TRUE_FILE)
+
+PDF_SIM           = os.path.join(STT_OUTPUT_PATH, PDF_SIM_FILE)
 RATES_SIM           = os.path.join(STT_OUTPUT_PATH, RATES_SIM_FILE)
+PDF_INFER           = os.path.join(STT_OUTPUT_PATH, PDF_INFER_FILE)
 RATES_INFER         = os.path.join(STT_OUTPUT_PATH, RATES_INFER_FILE)
 
 EMBEDDINGS_TRUE     = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
@@ -112,7 +123,6 @@ BASE_TARGETS = [
     POP_COLORS,
     POP_LABELS,
     PCA_PLOT,
-    DEMOGRAPHY_PLOT,
     SIM_FINISHED,
     RATES_SIM,
     EMBEDDINGS_SIM,
@@ -149,7 +159,7 @@ rule sttsimsonly:
 rule preprocess_data:
     input:
         demes_file_path=DEME_FILE_PATH,
-        script="preprocess_demography.py"
+        script="../../utils/preprocess_demography.py"
     output:
         POP_COLORS,
         POP_LABELS
@@ -159,7 +169,7 @@ rule preprocess_data:
     shell:
         """
         mkdir -p {params.outdir}
-        python preprocess_demography.py \
+        python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
             --n {params.n_per_pop}
@@ -169,7 +179,7 @@ rule plot_demography:
     input:
         demes_file_path=DEME_FILE_PATH,
         pop_colors=POP_COLORS,
-        script="plot_demography.py"
+        script="../../utils/plot_demography.py"
     output:
         DEMOGRAPHY_PLOT
     params:
@@ -190,7 +200,7 @@ rule run_pca:
         pop_colors = POP_COLORS,
         pop_labels = POP_LABELS,
         demes_file_path=DEME_FILE_PATH,
-        script = "run_pca.py"
+        script = "../../utils/run_pca.py"
     output:
         PCA_PLOT
     params:
@@ -198,7 +208,7 @@ rule run_pca:
         n_per_pop=N_PER_POP
     shell:
         """
-        python run_pca.py \
+        python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
@@ -211,7 +221,7 @@ rule simulate_trees:
     input:
         demes_file_path=DEME_FILE_PATH,
         pop_labels=POP_LABELS,
-        script="simulate_trees.py"
+        script="../../utils/simulate_trees.py"
     output:
         SIM_FINISHED
     params:
@@ -235,7 +245,7 @@ rule simulate_trees:
 rule infer_trees:
     input:
         sim_finished=SIM_FINISHED,
-        script="infer_trees.py"
+        script="../../utils/infer_trees.py"
     output:
         INFER_FINISHED
     params:
@@ -255,7 +265,7 @@ rule compute_rates_true:
     input:
         demes_file_path=DEME_FILE_PATH,
         pop_labels = POP_LABELS,
-        script="compute_rates_true.py"
+        script="../../utils/compute_rates_true.py"
     output:
         RATES_TRUE
     params:
@@ -271,22 +281,73 @@ rule compute_rates_true:
             --labels {input.pop_labels}
         """
 
-rule compute_rates_sim:
+rule compute_pdf_sim:
     input:
         sim_finished=SIM_FINISHED,
-        script="compute_rates.py",
-        main_script=INFER_RATES_SCRIPT
+        script="../../utils/compute_pdf.py",
+        main_script=CountCoalEvents_SCRIPT
     output:
-        RATES_SIM
+        PDF_SIM
     params:
         tree_dir=SIM_TREE_OUTPUT_PATH,
         outdir=STT_OUTPUT_PATH,
+        output_name=PDF_SIM_FILE,
         max_time=MAX_TIME,
-        window_size=WINDOW_SIZE,
-        output_name=RATES_SIM_FILE,
         n_timepoints=N_TIMEPOINTS,
-        num_replicates=NUM_REPLICATES,
-        fraction_pairs=FRACTION_PAIRS
+        num_posterior_samples=NUM_REPLICATES,
+        fraction_pairs=FRACTION_PAIRS,
+        pop_labels=POP_LABELS
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input_path {params.tree_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --max_time {params.max_time} \
+            --n_timepoints {params.n_timepoints} \
+            --num_posterior_samples {params.num_posterior_samples} \
+            --fraction_pairs {params.fraction_pairs} \
+            --pop_labels {params.pop_labels}
+        """
+
+rule compute_rates_sim:
+    input:
+        pdf_sim=PDF_SIM,
+        script="../../utils/compute_rates.py",
+        main_script=COMPUTE_RATES_SCRIPT
+    output:
+        RATES_SIM
+    params:
+        outdir=STT_OUTPUT_PATH,
+        output_name=RATES_SIM_FILE,
+        window_size=WINDOW_SIZE
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --pdf_path {input.pdf_sim} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --window_size {params.window_size} 
+        """
+
+rule compute_pdf_infer:
+    input:
+        infer_finished=INFER_FINISHED,
+        script="../../utils/compute_pdf.py",
+        main_script=CountCoalEvents_SCRIPT
+    output:
+        PDF_INFER
+    params:
+        tree_dir=INFER_TREE_OUTPUT_PATH,
+        outdir=STT_OUTPUT_PATH,
+        output_name=PDF_INFER_FILE,
+        max_time=MAX_TIME,
+        n_timepoints=N_TIMEPOINTS,
+        num_posterior_samples=NUM_REPLICATES,
+        fraction_pairs=FRACTION_PAIRS,
+        pop_labels=POP_LABELS
     shell:
         """
         mkdir -p {params.outdir}
@@ -297,38 +358,30 @@ rule compute_rates_sim:
             --max_time {params.max_time} \
             --window_size {params.window_size} \
             --n_timepoints {params.n_timepoints} \
-            --num_posterior_samples {params.num_replicates} \
-            --fraction_pairs {params.fraction_pairs}
+            --num_posterior_samples {params.num_posterior_samples} \
+            --fraction_pairs {params.fraction_pairs} \
+            --pop_labels {params.pop_labels}
         """
 
 rule compute_rates_infer:
     input:
-        infer_finished=INFER_FINISHED,
-        script="compute_rates.py",
-        main_script=INFER_RATES_SCRIPT
+        pdf_infer=PDF_INFER,
+        script="../../utils/compute_rates.py",
+        main_script=COMPUTE_RATES_SCRIPT
     output:
         RATES_INFER
     params:
-        tree_dir=INFER_TREE_OUTPUT_PATH,
         outdir=STT_OUTPUT_PATH,
-        max_time=MAX_TIME,
-        window_size=WINDOW_SIZE,
         output_name=RATES_INFER_FILE,
-        n_timepoints=N_TIMEPOINTS,
-        num_replicates=NUM_REPLICATES,
-        fraction_pairs=FRACTION_PAIRS
+        window_size=WINDOW_SIZE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
-            --input_path {params.tree_dir} \
+            --pdf_path {input.pdf_sim} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --max_time {params.max_time} \
             --window_size {params.window_size} \
-            --n_timepoints {params.n_timepoints} \
-            --num_posterior_samples {params.num_replicates} \
-            --fraction_pairs {params.fraction_pairs}
         """
 
 ## Plot
@@ -337,7 +390,7 @@ rule plot_rates_true:
         rates=RATES_TRUE,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_rates.py"
+        script="../../utils/plot_rates.py"
     output:
         RATES_TRUE_PLOT
     params:
@@ -359,7 +412,7 @@ rule plot_rates_sim:
         rates=RATES_SIM,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_rates.py"
+        script="../../utils/plot_rates.py"
     output:
         RATES_SIM_PLOT
     params:
@@ -381,7 +434,7 @@ rule plot_rates_infer:
         rates=RATES_INFER,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_rates.py"
+        script="../../utils/plot_rates.py"
     output:
         RATES_INFER_PLOT
     params:
@@ -403,7 +456,7 @@ rule plot_rates_infer:
 rule compute_embeddings_true:
     input:
         rates=RATES_TRUE,
-        script="compute_embeddings.py",
+        script="../../utils/compute_embeddings.py",
         main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_TRUE
@@ -424,7 +477,7 @@ rule compute_embeddings_true:
 rule compute_embeddings_sim:
     input:
         rates=RATES_SIM,
-        script="compute_embeddings.py",
+        script="../../utils/compute_embeddings.py",
         main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_SIM
@@ -445,7 +498,7 @@ rule compute_embeddings_sim:
 rule compute_embeddings_infer:
     input:
         rates=RATES_INFER,
-        script="compute_embeddings.py",
+        script="../../utils/compute_embeddings.py",
         main_script=COMPUTE_EMBEDDINGS_SCRIPT
     output:
         EMBEDDINGS_INFER
@@ -469,7 +522,7 @@ rule plot_embeddings_true:
         embeddings=EMBEDDINGS_TRUE,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py",
+        script="../../utils/plot_embeddings.py",
         main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_TRUE_PLOT
@@ -492,7 +545,7 @@ rule plot_embeddings_sim:
         embeddings=EMBEDDINGS_SIM,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py",
+        script="../../utils/plot_embeddings.py",
         main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_SIM_PLOT
@@ -515,7 +568,7 @@ rule plot_embeddings_infer:
         embeddings=EMBEDDINGS_INFER,
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
-        script="plot_embeddings.py",
+        script="../../utils/plot_embeddings.py",
         main_script=PLOT_EMBEDDINGS_SCRIPT
     output:
         EMB_INFER_PLOT

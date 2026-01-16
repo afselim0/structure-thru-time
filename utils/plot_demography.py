@@ -1,6 +1,6 @@
 import os
 import argparse
-from utils import setup_plotting_style
+from plotting_style import setup_plotting_style
 import pandas as pd
 import demes
 import demesdraw

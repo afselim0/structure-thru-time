@@ -1,5 +1,5 @@
 import argparse
-from utils import setup_plotting_style
+from plotting_style import setup_plotting_style
 import demes
 import msprime
 import numpy as np
