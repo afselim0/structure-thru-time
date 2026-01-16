@@ -356,7 +356,6 @@ rule compute_pdf_infer:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --max_time {params.max_time} \
-            --window_size {params.window_size} \
             --n_timepoints {params.n_timepoints} \
             --num_posterior_samples {params.num_posterior_samples} \
             --fraction_pairs {params.fraction_pairs} \
@@ -378,7 +377,7 @@ rule compute_rates_infer:
         """
         mkdir -p {params.outdir}
         python {input.script} \
-            --pdf_path {input.pdf_sim} \
+            --pdf_path {input.pdf_infer} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --window_size {params.window_size} \
