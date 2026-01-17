@@ -20,6 +20,11 @@ try:
     INFER_METHOD=config["infer_method"] 
 except:
     INFER_METHOD="tsinfer"
+    
+try:
+    STT_METHOD=config["infer_method"] 
+except:
+    STT_METHOD="1"
 
 # Parse Simulated Deme
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
@@ -42,7 +47,7 @@ else:
 
 SIM_TAG=f"{DEME_NAME}.npp{N_PER_POP}.nC{NUM_CONTIGS}"
 INFER_TAG=f".m{INFER_METHOD}"
-STT_TAG=f".N0{N0}.FP{FRACTION_PAIRS}.nR{NUM_REPLICATES}.WS{WINDOW_SIZE}.nT{N_TIMEPOINTS}"
+STT_TAG=f"v{STT_METHOD}.N0{N0}.FP{FRACTION_PAIRS}.nR{NUM_REPLICATES}.WS{WINDOW_SIZE}.nT{N_TIMEPOINTS}"
 
 # Base output directory
 OUTPUT_PATH = f"outputs/{SIM_TAG}"

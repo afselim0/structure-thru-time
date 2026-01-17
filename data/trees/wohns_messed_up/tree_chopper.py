@@ -18,7 +18,7 @@ def chop_ts(ts,contig_length):
 #%%
 chopped_trees_path = "../wohns_chopped"
 
-ts_files = glob.glob("*.trees")
+ts_files = glob.glob("../wohns/*.trees")
 contig_length = 5e6
 for ts_file in ts_files:
     ts = tskit.load(ts_file)
