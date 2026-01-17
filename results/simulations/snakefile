@@ -10,6 +10,7 @@ CONTIG_LENGTH = 3000000
 # Input params to snakefile
 DEME_FILE_PATH = config["demes_file_path"]
 N0 = config["N0"]
+min_time = config["min_time"]
 
 try:
     FRACTION_PAIRS = config["frac_pairs"]
@@ -532,7 +533,8 @@ rule plot_embeddings_true:
         EMB_TRUE_PLOT
     params:
         outdir=PLOT_OUTPUT_PATH,
-        output_name=EMB_TRUE_PLOT_FILE
+        output_name=EMB_TRUE_PLOT_FILE,
+        min_time=min_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -541,7 +543,8 @@ rule plot_embeddings_true:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
         """
 
 rule plot_embeddings_sim:
@@ -555,7 +558,8 @@ rule plot_embeddings_sim:
         EMB_SIM_PLOT
     params:
         outdir=PLOT_OUTPUT_PATH,
-        output_name=EMB_SIM_PLOT_FILE
+        output_name=EMB_SIM_PLOT_FILE,
+        min_time=min_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -564,7 +568,8 @@ rule plot_embeddings_sim:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
         """
 
 rule plot_embeddings_infer:
@@ -578,7 +583,8 @@ rule plot_embeddings_infer:
         EMB_INFER_PLOT
     params:
         outdir=PLOT_OUTPUT_PATH,
-        output_name=EMB_INFER_PLOT_FILE
+        output_name=EMB_INFER_PLOT_FILE,
+        min_time=min_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -587,5 +593,6 @@ rule plot_embeddings_infer:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
         """

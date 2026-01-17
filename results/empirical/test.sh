@@ -8,5 +8,6 @@ snakemake --config \
     pop_colors=./wohns_pop_colors.csv \
     species=humans \
     fraction=1 \
+    min_time=500 \
     --cores all
     

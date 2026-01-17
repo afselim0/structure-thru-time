@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
+    parser.add_argument("--min_time", default=0, type=float,help="Minimum time for plotting")
 
     args = parser.parse_args()
     embeddings_df = pd.read_parquet(args.input)
@@ -19,13 +20,14 @@ def main():
     labels_df = pd.read_csv(args.labels)
     output_path = args.output_path
     output_name = args.output_name
-
+    min_time = args.min_time
     # subsetting labels_df and colors_df to active samples only
     active_samples = embeddings_df.sample_id.unique()
     labels_df = labels_df[labels_df['sample_id'].isin(active_samples)]
     populations = labels_df['population'].unique()
     colors_df = colors_df[colors_df['population'].isin(populations)]
 
+    embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
     plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df)
     embeddings_dyn_fig = plotter.dynamic_plot(log_time=True)
     embeddings_dyn_fig.write_html(f"{output_path}/{output_name}")
