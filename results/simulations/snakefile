@@ -2,30 +2,7 @@ import os
 import demes
 import msprime
 
-# Simulation Parameters
-NUM_CONTIGS = 100
-NUM_REPLICATES = 10
-CONTIG_LENGTH = 3000000
-
-# Input params to snakefile
-DEME_FILE_PATH = config["demes_file_path"]
-N0 = config["N0"]
-min_time = config["min_time"]
-
-try:
-    FRACTION_PAIRS = config["frac_pairs"]
-except:
-    FRACTION_PAIRS = 1
-
-try:
-    INFER_METHOD=config["infer_method"] 
-except:
-    INFER_METHOD="tsinfer"
-    
-try:
-    STT_METHOD=config["infer_method"] 
-except:
-    STT_METHOD="1"
+DEME_FILE_PATH = config["demes_file_path"] # Only strictly required input
 
 # Parse Simulated Deme
 DEME_NAME = os.path.splitext(os.path.basename(DEME_FILE_PATH))[0]
@@ -33,30 +10,21 @@ graph = demes.load(DEME_FILE_PATH)
 demography = msprime.Demography.from_demes(graph)
 n_pops = demography.num_populations
 
-# Rates parameters
-WINDOW_SIZE = 100
-N_TIMEPOINTS = 1000
-try:
-    MAX_TIME = int(2*demography.events[-1].time)
-except:
-    MAX_TIME = 100000
+# Parameters
+## Simulation Parameters
+NUM_CONTIGS = config["num_contigs"] if "num_contigs" in config else 100
+NUM_REPLICATES = config["num_replicates"] if "num_replicates" in config else 1
+CONTIG_LENGTH = config["contig_length"] if "contig_length" in config else 3000000
+N_PER_POP = config["n_per_pop"] if "n_per_pop" in config else 10
+INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 
-if n_pops<20:
-    N_PER_POP = 16
-else:
-    N_PER_POP = 1
-
-SIM_TAG=f"{DEME_NAME}.npp{N_PER_POP}.nC{NUM_CONTIGS}"
-INFER_TAG=f".m{INFER_METHOD}"
-STT_TAG=f"v{STT_METHOD}.N0{N0}.FP{FRACTION_PAIRS}.nR{NUM_REPLICATES}.WS{WINDOW_SIZE}.nT{N_TIMEPOINTS}"
-
-# Base output directory
-OUTPUT_PATH = f"outputs/{SIM_TAG}"
-DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
-STT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"stt_out{INFER_TAG}{STT_TAG}")
-PLOT_OUTPUT_PATH = os.path.join(STT_OUTPUT_PATH,"plots")
-SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
-INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/infer{INFER_TAG}")
+## STT Parameters
+FRACTION_PAIRS = config["fraction_pairs"] if "fraction_pairs" in config else 1
+WINDOW_SIZE = config["window_size"] if "window_size" in config else 100
+N0 = config["N0"] if "num_contigs" in config else 1
+MIN_TIME = config["min_time"] if "min_time" in config else 1
+MAX_TIME = config["max_time"] if "max_time" in config else int(2*demography.events[-1].time)
+N_TIMEPOINTS = config["n_timepoints"] if "n_timepoints" in config else 1000
 
 # Main Script Paths
 CountCoalEvents_SCRIPT = "../../src/CountCoalEvents.py"
@@ -64,57 +32,73 @@ COMPUTE_RATES_SCRIPT = "../../src/compute_coal_rates.py"
 COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
+# Base output directory
+OUTPUT_PATH = f"outputs/{DEME_NAME}"
+DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
+PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
+SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
+INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/{INFER_METHOD}")
+
+# Tags
+PDF_SIM_TAG = f"FP{FRACTION_PAIRS}"
+PDF_INFER_TAG = f"FP{FRACTION_PAIRS}.m{INFER_METHOD}"
+RATES_SIM_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}"
+RATES_INFER_TAG =f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.m{INFER_METHOD}"
+EMBEDDINGS_SIM_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
+EMBEDDINGS_INFER_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
+
+
 # File Names
 POP_COLORS_FILE          = "pop_colors.csv"
 POP_LABELS_FILE          = "pop_labels.csv"
 
-PDF_TRUE_FILE          = f"pdf_true.parquet"
-PDF_SIM_FILE           = f"pdf_sim.parquet"
-PDF_INFER_FILE         = f"pdf_infer.parquet"
+PDF_TRUE_FILE            = f"pdf_true.parquet"
+PDF_SIM_FILE             = f"pdf_sim.{PDF_SIM_TAG}.parquet"
+PDF_INFER_FILE           = f"pdf_infer.{PDF_INFER_TAG}.parquet"
 
 RATES_TRUE_FILE          = f"rates_true.parquet"
-RATES_SIM_FILE           = f"rates_sim.parquet"
-RATES_INFER_FILE         = f"rates_infer.parquet"
+RATES_SIM_FILE           = f"rates_sim.{RATES_SIM_TAG}.parquet"
+RATES_INFER_FILE         = f"rates_infer.{RATES_INFER_TAG}.parquet"
 
 EMBEDDINGS_TRUE_FILE     = f"embeddings_true.parquet"
-EMBEDDINGS_SIM_FILE      = f"embeddings_sim.parquet"
-EMBEDDINGS_INFER_FILE    = f"embeddings_infer.parquet"
+EMBEDDINGS_SIM_FILE      = f"embeddings_sim.{EMBEDDINGS_SIM_TAG}.parquet"
+EMBEDDINGS_INFER_FILE    = f"embeddings_infer.{EMBEDDINGS_INFER_TAG}.parquet"
 
 SIM_FINISHED_FILE        = f"finished_sim.txt"
 INFER_FINISHED_FILE      = f"finished_infer.txt"
 
 PCA_PLOT_FILE            = f"pca.png"
 RATES_TRUE_PLOT_FILE     = f"rates_true.png"
-RATES_SIM_PLOT_FILE      = f"rates_sim.png"
-RATES_INFER_PLOT_FILE    = f"rates_infer.png"
+RATES_SIM_PLOT_FILE      = f"rates_sim.{RATES_SIM_TAG}..png"
+RATES_INFER_PLOT_FILE    = f"rates_infer.{RATES_INFER_TAG}..png"
 
 EMB_TRUE_PLOT_FILE       = f"embeddings_true.html"
-EMB_SIM_PLOT_FILE        = f"embeddings_sim.html"
-EMB_INFER_PLOT_FILE      = f"embeddings_infer.html"
+EMB_SIM_PLOT_FILE        = f"embeddings_sim.{EMBEDDINGS_SIM_TAG}.html"
+EMB_INFER_PLOT_FILE      = f"embeddings_infer.{EMBEDDINGS_INFER_TAG}.html"
 
 DEMOGRAPHY_PLOT_FILE     = "demography.png"
 
 # Data outputs and basic plot outputs
 POP_COLORS          = os.path.join(DATA_OUTPUT_PATH, POP_COLORS_FILE)
 POP_LABELS          = os.path.join(DATA_OUTPUT_PATH, POP_LABELS_FILE)
-DEMOGRAPHY_PLOT     = os.path.join(DATA_OUTPUT_PATH, DEMOGRAPHY_PLOT_FILE)
-PCA_PLOT            = os.path.join(DATA_OUTPUT_PATH, PCA_PLOT_FILE)
+DEMOGRAPHY_PLOT     = os.path.join(PLOT_OUTPUT_PATH, DEMOGRAPHY_PLOT_FILE)
+PCA_PLOT            = os.path.join(PLOT_OUTPUT_PATH, PCA_PLOT_FILE)
 
 # Tree outputs
 SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH, SIM_FINISHED_FILE)
 INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH, INFER_FINISHED_FILE)
 
 # STT outputs
-RATES_TRUE          = os.path.join(STT_OUTPUT_PATH, RATES_TRUE_FILE)
+RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH, RATES_TRUE_FILE)
 
-PDF_SIM           = os.path.join(STT_OUTPUT_PATH, PDF_SIM_FILE)
-RATES_SIM           = os.path.join(STT_OUTPUT_PATH, RATES_SIM_FILE)
-PDF_INFER           = os.path.join(STT_OUTPUT_PATH, PDF_INFER_FILE)
-RATES_INFER         = os.path.join(STT_OUTPUT_PATH, RATES_INFER_FILE)
+PDF_SIM           = os.path.join(DATA_OUTPUT_PATH, PDF_SIM_FILE)
+RATES_SIM           = os.path.join(DATA_OUTPUT_PATH, RATES_SIM_FILE)
+PDF_INFER           = os.path.join(DATA_OUTPUT_PATH, PDF_INFER_FILE)
+RATES_INFER         = os.path.join(DATA_OUTPUT_PATH, RATES_INFER_FILE)
 
-EMBEDDINGS_TRUE     = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
-EMBEDDINGS_SIM      = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
-EMBEDDINGS_INFER    = os.path.join(STT_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
+EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
+EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
+EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
 
 RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH, RATES_TRUE_PLOT_FILE)
 RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH, RATES_SIM_PLOT_FILE)
@@ -135,6 +119,13 @@ BASE_TARGETS = [
     EMB_SIM_PLOT
 ]
 
+INFER_TARGETS = [
+    INFER_FINISHED,
+    RATES_INFER_PLOT,
+    EMBEDDINGS_INFER,
+    EMB_INFER_PLOT
+]
+
 if n_pops<20:
     BASE_TARGETS.append(DEMOGRAPHY_PLOT)
     BASE_TARGETS.append(RATES_TRUE)
@@ -142,21 +133,13 @@ if n_pops<20:
     BASE_TARGETS.append(RATES_SIM_PLOT)
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
-    
-INFER_TARGETS = [
-    INFER_FINISHED,
-    RATES_INFER,
-    EMBEDDINGS_INFER,
-    EMB_INFER_PLOT
-]
-if n_pops<20:
     INFER_TARGETS.append(RATES_INFER_PLOT)
-
+    
 rule all:
     input:
         BASE_TARGETS, INFER_TARGETS
 
-rule sttsimsonly:
+rule sim:
     input:
         BASE_TARGETS
 
@@ -275,7 +258,7 @@ rule compute_rates_true:
     output:
         RATES_TRUE
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
@@ -296,7 +279,7 @@ rule compute_pdf_sim:
         PDF_SIM
     params:
         tree_dir=SIM_TREE_OUTPUT_PATH,
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=PDF_SIM_FILE,
         max_time=MAX_TIME,
         n_timepoints=N_TIMEPOINTS,
@@ -325,7 +308,7 @@ rule compute_rates_sim:
     output:
         RATES_SIM
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=RATES_SIM_FILE,
         window_size=WINDOW_SIZE
     shell:
@@ -347,7 +330,7 @@ rule compute_pdf_infer:
         PDF_INFER
     params:
         tree_dir=INFER_TREE_OUTPUT_PATH,
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=PDF_INFER_FILE,
         max_time=MAX_TIME,
         n_timepoints=N_TIMEPOINTS,
@@ -376,7 +359,7 @@ rule compute_rates_infer:
     output:
         RATES_INFER
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=RATES_INFER_FILE,
         window_size=WINDOW_SIZE
     shell:
@@ -466,7 +449,7 @@ rule compute_embeddings_true:
     output:
         EMBEDDINGS_TRUE
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=EMBEDDINGS_TRUE_FILE,
         N0=N0
     shell:
@@ -487,7 +470,7 @@ rule compute_embeddings_sim:
     output:
         EMBEDDINGS_SIM
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=EMBEDDINGS_SIM_FILE,
         N0=N0
     shell:
@@ -508,7 +491,7 @@ rule compute_embeddings_infer:
     output:
         EMBEDDINGS_INFER
     params:
-        outdir=STT_OUTPUT_PATH,
+        outdir=DATA_OUTPUT_PATH,
         output_name=EMBEDDINGS_INFER_FILE,
         N0=N0
     shell:
@@ -534,7 +517,7 @@ rule plot_embeddings_true:
     params:
         outdir=PLOT_OUTPUT_PATH,
         output_name=EMB_TRUE_PLOT_FILE,
-        min_time=min_time
+        min_time=MIN_TIME
     shell:
         """
         mkdir -p {params.outdir}
@@ -559,7 +542,7 @@ rule plot_embeddings_sim:
     params:
         outdir=PLOT_OUTPUT_PATH,
         output_name=EMB_SIM_PLOT_FILE,
-        min_time=min_time
+        min_time=MIN_TIME
     shell:
         """
         mkdir -p {params.outdir}
@@ -584,7 +567,7 @@ rule plot_embeddings_infer:
     params:
         outdir=PLOT_OUTPUT_PATH,
         output_name=EMB_INFER_PLOT_FILE,
-        min_time=min_time
+        min_time=MIN_TIME
     shell:
         """
         mkdir -p {params.outdir}
