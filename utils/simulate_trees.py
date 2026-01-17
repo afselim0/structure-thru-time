@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 
-def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, num_replicates, recomb_rate=1e-8, parallel=True):
+def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, num_replicates, recomb_rate=1e-8, mutation_rate=1e-8, parallel=True):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
     populations = np.unique(pop_labels['population'])
@@ -27,27 +27,34 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ploidy=2,
             random_seed=42+i
         )
+        ts = msprime.sim_mutations(
+            ts,
+            rate=mutation_rate,
+            random_seed=42+i
+        )
         return i, ts
+    
     
     start_time = time()
     if parallel:
         with Pool(os.cpu_count()) as pool:
             for i, ts in tqdm(pool.imap(simulate_replicate, range(num_contigs*num_replicates)), total=num_contigs*num_replicates):
-                if num_replicates == 1:
-                    ts.dump(f"{output_dir}/contig_{i}.trees")
-                else:
-                    rep = i // num_contigs
-                    contig = i % num_contigs
-                    ts.dump(f"{output_dir}/contig_{contig}_{rep}.trees")
+                rep = i // num_contigs
+                contig = i % num_contigs
+                file_name = f"contig_{contig}" if num_replicates == 1 else f"contig_{contig}_{rep}"
+                ts.dump(f"{output_dir}/{file_name}.trees")
+                with open(f"{output_dir}/{file_name}.vcf", "w") as f:
+                    ts.write_vcf(f, contig_id=str(contig),allow_position_zero=True)
     else:
         for i in tqdm(range(num_contigs*num_replicates)):
             _, ts = simulate_replicate(i)
-            if num_replicates == 1:
-                ts.dump(f"{output_dir}/contig_{i}.trees")
-            else:
-                rep = i // num_contigs
-                contig = i % num_contigs
-                ts.dump(f"{output_dir}/contig_{contig}_{rep}.trees")
+            rep = i // num_contigs
+            contig = i % num_contigs
+            file_name = f"contig_{contig}" if num_replicates == 1 else f"contig_{contig}_{rep}"
+            ts.dump(f"{output_dir}/{file_name}.trees")
+            with open(f"{output_dir}/{file_name}.vcf", "w") as f:
+                ts.write_vcf(f, contig_id=str(contig),allow_position_zero=True)
+
     end_time = time()
     time_taken = end_time - start_time
     
@@ -77,3 +84,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%

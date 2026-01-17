@@ -171,7 +171,7 @@ rule plot_demography:
     output:
         DEMOGRAPHY_PLOT
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=PLOT_OUTPUT_PATH,
         max_time=MAX_TIME
     shell:
         """
@@ -192,7 +192,7 @@ rule run_pca:
     output:
         PCA_PLOT
     params:
-        outdir=DATA_OUTPUT_PATH,
+        outdir=PLOT_OUTPUT_PATH,
         n_per_pop=N_PER_POP
     shell:
         """
