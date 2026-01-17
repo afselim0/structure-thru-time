@@ -143,8 +143,7 @@ rule sim:
     input:
         BASE_TARGETS
 
-
-# Preprocessing
+# --------------------Preprocessing--------------------
 rule preprocess_data:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -205,7 +204,7 @@ rule run_pca:
             --n {params.n_per_pop}
         """
 
-# Trees
+# --------------------Generating Trees--------------------
 rule simulate_trees:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -248,8 +247,8 @@ rule infer_trees:
             --output_path {params.outdir}
         """
 
-# Rates
-## Compute
+# --------------------Coalescent Rates--------------------
+# 1. Compute
 rule compute_rates_true:
     input:
         demes_file_path=DEME_FILE_PATH,
@@ -372,7 +371,7 @@ rule compute_rates_infer:
             --window_size {params.window_size} \
         """
 
-## Plot
+# 2. Plot
 rule plot_rates_true:
     input:
         rates=RATES_TRUE,
@@ -439,8 +438,8 @@ rule plot_rates_infer:
             --output_name {params.output_name}
         """
 
-# Embeddings
-## Compute
+# --------------------Latent Space Embeddings--------------------
+# 1. Compute
 rule compute_embeddings_true:
     input:
         rates=RATES_TRUE,
@@ -504,7 +503,7 @@ rule compute_embeddings_infer:
             --N0 {params.N0}
         """
 
-## Plot
+# 2. Plot
 rule plot_embeddings_true:
     input:
         embeddings=EMBEDDINGS_TRUE,
