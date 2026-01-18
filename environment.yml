@@ -1,4 +1,4 @@
-name: structure-thru-time
+name: STT
 channels:
   - conda-forge
   - defaults
@@ -30,3 +30,4 @@ dependencies:
     - tsinfer
     - tsdate
     - pulp==3.3.0
+    - tsunzip
