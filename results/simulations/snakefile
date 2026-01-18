@@ -33,7 +33,7 @@ COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
 # Base output directory
-OUTPUT_PATH = f"outputs/{DEME_NAME}"
+OUTPUT_PATH = f"{DEME_NAME}"
 DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
 PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
 SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
