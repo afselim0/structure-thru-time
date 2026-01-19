@@ -10,7 +10,7 @@ def plot_demography(demes_file_path, pop_colors, max_time):
     setup_plotting_style()
     graph = demes.load(demes_file_path)
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-    fig, ax = plt.subplots(figsize=(3, 6))
+    fig, ax = plt.subplots(figsize=(4, 4))
     demesdraw.tubes(
         graph,
         ax=ax,
