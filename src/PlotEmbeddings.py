@@ -24,16 +24,6 @@ TUBE_ALPHA            = 0.18
 INDIVIDUAL_LINE_ALPHA = 0.10
 MEDIAN_LINE_WIDTH     = 5
 # ---------------------------------------------------------------------------
-embeddings_df = pd.read_parquet("../results/empirical/wohns/test/embeddings.parquet")
-embeddings_df = embeddings_df[embeddings_df['time']>=500]
-labels_df = pd.read_csv("../data/metadata/wohns_pop_labels.csv")
-colors_df = pd.read_csv("../data/metadata/wohns_pop_colors.csv")
-Plotter = PlotEmbeddings(embeddings_df, labels_df, colors_df, generation_time=28)
-Plotter.init_plot(time_scale="log")
-# Plotter.add_sample_trajectories()
-Plotter.add_population_medians()
-Plotter.add_legend()
-Plotter.save_static(filename="test", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
 # %%
 class PlotEmbeddings:
     def __init__(self, 
@@ -99,6 +89,7 @@ class PlotEmbeddings:
             backgroundcolor="whitesmoke",
             tickmode="array"
         )
+        
         # Setting equal scaling for X and Y axes
         x_min = self.embeddings_df["X1"].min()
         x_max = self.embeddings_df["X1"].max()
@@ -131,7 +122,9 @@ class PlotEmbeddings:
             scene=dict(
                 xaxis=dict(title=x_label, range=x_range, zeroline=True, **axis_style),
                 yaxis=dict(title=y_label, range=y_range, zeroline=True, **axis_style),
-                zaxis=dict(title=z_label, tickvals = z_ticks, ticktext = [str(int(z)) for z in z_ticks], **axis_style, type=time_scale)
+                zaxis=dict(title=z_label, tickvals = z_ticks, ticktext = [str(int(z)) for z in z_ticks], **axis_style, type=time_scale),
+                aspectmode="manual",
+                aspectratio=dict(x=1, y=1, z=1)
             )
         )
 
@@ -205,6 +198,8 @@ class PlotEmbeddings:
                     opacity=alpha
                 )
             )
+
+
 
     # def add_population_convex_hulls(self:
     # def add_iso_surfaces(self):
