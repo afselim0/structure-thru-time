@@ -1,4 +1,4 @@
-#%%
+#!/usr/bin/env python3
 import argparse
 import tskit
 import msprime
@@ -49,5 +49,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# %%

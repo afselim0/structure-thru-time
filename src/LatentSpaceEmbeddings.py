@@ -1,4 +1,4 @@
-#%%
+#!/usr/bin/env python3
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -29,7 +29,7 @@ from tqdm import tqdm
 #     loss = compute_loss(R,D_prime)
 #     grad = compute_gradient(X,R,D_prime,valid_mask)
 #     return loss, grad.ravel()
-# %%
+
 def compute_f(D, N0):
     D_sq = D**2
     f = 1/(D_sq + N0)
@@ -277,8 +277,3 @@ class LatentSpaceEmbeddings:
 #             "X2": X2_flat
 #         })
 #         return df
-    
-
-# # %%
-
-# %%

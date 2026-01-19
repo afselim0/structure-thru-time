@@ -1,4 +1,4 @@
-#%%
+#!/usr/bin/env python3
 import numpy as np
 import pandas as pd
 import os
@@ -233,5 +233,3 @@ def compute_coal_rates(pdf_df, window_size,gaussian_sigma=None):
     # rates = (H[:,m:] - H[:,:-m])/(m*time_step)
     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
     return rates_df
-
-# %%
