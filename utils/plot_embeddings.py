@@ -45,7 +45,7 @@ def main():
     plotter.fig.write_html(f"{output_path}/{output_name}")
     plotter.add_convex_hull()
     plotter.fig.write_html(f"{output_path}/convexhull_{output_name}")
-    #embeddings_dyn_fig.show()
+    plotter.fig.show()
 
     # embeddings_dyn_fig.update_traces(opacity=1,line=dict(width=1))
     # embeddings_dyn_fig.update_layout(

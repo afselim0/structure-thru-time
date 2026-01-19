@@ -1,9 +1,6 @@
 # simulations
 
 ## outputs / workflow engineering
-
-- Pulling in Luke's plotting code to be plotting script by default; Also there is some existing static export code in PlotEmbeddings that has some upsides but it has some quirks in its plotting.  
-
 - Performance evaluation script - 
   - How well does the embedding represent the input rate matrix?  
      - Through time across all lineages and on average over time
@@ -27,13 +24,6 @@
 
 - Turn attention to the local admixture problem 
 
-- PARTIAL DONE Adding & Debugging a static figure output function to PlotEmbeddings.py 
-    - TODO set up so it outputs 3 different standard static camera views to file
-- Merging in Luke's plotting code to PlotEmbeddings.py
-
-- DONE Calculating rates is a seperate step after estimating the binned_pdf in snakemake
-
-
 Minor:
 - JN to clean up his version / sync to git 
 - In sim snakemake - Update True embedding outputs to mark choices of N0 and other specific relevant params 
@@ -42,8 +32,6 @@ Minor:
 - Set up syncronization so that overleaf has access to fig outputs directory(ies)
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
 - Outputs to log files... 
-- DONE Scraper of all output figs into one directory for easy exploration of results
-- DONE Use csv vs parquet for popcolors/poplabels so that manual editing of color schemes is feasible
 
 To Discuss:
 - 1/18 JN : Didn't accomplish too much except to realize how fussy plotly static export is!  Static figures are improved somewhat; 2 camera outputs; and figure scraper is set up; see note above about need to step up and link in Luke's code  
@@ -57,3 +45,9 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 
 Misc:
 - 1/18 About an 1hr 20 min to do all deme examples from scratch with FP=1 on laptop!
+
+### Done
+- DONE Pulling in Luke's plotting code to be plotting script by default; Also there is some existing static export code in PlotEmbeddings that has some upsides but it has some quirks in its plotting.  
+- DONE Scraper of all output figs into one directory for easy exploration of results
+- DONE Use csv vs parquet for popcolors/poplabels so that manual editing of color schemes is feasible
+- DONE Calculating rates is a seperate step after estimating the binned_pdf in snakemake
