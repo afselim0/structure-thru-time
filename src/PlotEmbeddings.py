@@ -26,7 +26,9 @@ colors_df = pd.read_csv("../data/metadata/wohns_pop_colors.csv")
 Plotter = PlotEmbeddings(embeddings_df, labels_df, colors_df, generation_time=None)
 Plotter.init_plot(time_scale="log")
 Plotter.add_sample_trajectories(line_width=2, alpha=0.5)
+Plotter.add_population_medians(line_width=5, alpha=0.8)
 Plotter.add_legend()
+
 pio.write_html(Plotter.fig, file="test.html", auto_open=True)
 
 # %%
@@ -71,6 +73,8 @@ class PlotEmbeddings:
         self.colors_dict = colors_dict
         if generation_time is not None:
             embeddings_df["time"] = embeddings_df["time"] * generation_time
+        
+        self.times = embeddings_df["time"].unique()
         self.generation_time = generation_time
         self.embeddings_df = embeddings_df
         self.fig = None
@@ -163,7 +167,35 @@ class PlotEmbeddings:
                     legendgroup=population
                 )
             )
-#%%
+
+    def add_population_medians(self,line_width: int = 5, alpha: float = 1.0):
+        median_df = (
+            self.embeddings_df
+            .groupby(["population", "time"], as_index=False)
+            .agg(
+                X1=("X1", "median"),
+                X2=("X2", "median"),
+                color=("color", "first"),
+            )
+        )
+
+        for population in self.populations:
+            pop_data = median_df[median_df["population"] == population]
+            color = self.colors_dict.get(population, "#808080")
+            self.fig.add_trace(
+                go.Scatter3d(
+                    x=pop_data["X1"],
+                    y=pop_data["X2"],
+                    z=pop_data["time"],
+                    mode='lines',
+                    line=dict(color=color, width=line_width),
+                    name=f'{population} Median',
+                    hovertemplate=f"{population} Median<br>Time: %{{z:.2f}}<extra></extra>",
+                    showlegend=True,
+                    legendgroup=population,
+                    opacity=alpha
+                )
+            )
 
     # def add_population_medians(self):
 
