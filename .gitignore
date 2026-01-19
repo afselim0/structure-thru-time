@@ -1,7 +1,9 @@
+
 # log files
 *.pyc
 *.DS_Store
 job_logs/
+*.ipynb
 
 ## Output files
 *.parquet
