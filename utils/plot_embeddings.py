@@ -31,7 +31,7 @@ def main():
     plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df)
     embeddings_dyn_fig = plotter.dynamic_plot(log_time=True)
     embeddings_dyn_fig.write_html(f"{output_path}/{output_name}")
-    embeddings_dyn_fig.show()
+    #embeddings_dyn_fig.show()
 
     static_output_filename = f"{output_path}/{output_name}".removesuffix(".html")
     embeddings_dyn_fig.write_image(f"{static_output_filename}.pdf",scale=2)

@@ -21,10 +21,11 @@ INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 ## STT Parameters
 FRACTION_PAIRS = config["fraction_pairs"] if "fraction_pairs" in config else 1
 WINDOW_SIZE = config["window_size"] if "window_size" in config else 100
-N0 = config["N0"] if "num_contigs" in config else 1
+N0 = config["N0"] if "N0" in config else 1
 MIN_TIME = config["min_time"] if "min_time" in config else 1
 MAX_TIME = config["max_time"] if "max_time" in config else int(2*demography.events[-1].time)
 N_TIMEPOINTS = config["n_timepoints"] if "n_timepoints" in config else 1000
+VERSION = "1"
 
 # Main Script Paths
 CountCoalEvents_SCRIPT = "../../src/CountCoalEvents.py"
@@ -33,19 +34,19 @@ COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
 # Base output directory
-OUTPUT_PATH = f"{DEME_NAME}"
+OUTPUT_PATH = f"outputs/{DEME_NAME}"
 DATA_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"data")
 PLOT_OUTPUT_PATH = os.path.join(OUTPUT_PATH,"plots")
 SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
 INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/{INFER_METHOD}")
 
 # Tags
-PDF_SIM_TAG = f"FP{FRACTION_PAIRS}"
-PDF_INFER_TAG = f"FP{FRACTION_PAIRS}.m{INFER_METHOD}"
-RATES_SIM_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}"
-RATES_INFER_TAG =f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.m{INFER_METHOD}"
-EMBEDDINGS_SIM_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
-EMBEDDINGS_INFER_TAG = f"FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
+PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
+PDF_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.m{INFER_METHOD}"
+RATES_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
+RATES_INFER_TAG =f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}.m{INFER_METHOD}"
+EMBEDDINGS_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
+EMBEDDINGS_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
 
 
 # File Names
