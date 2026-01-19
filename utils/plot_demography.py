@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import argparse
 from plotting_style import setup_plotting_style
