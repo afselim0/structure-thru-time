@@ -12,25 +12,28 @@ import plotly.io as pio
 import plotly.graph_objects as go
 #%%
 # ----------------------- tunables ------------------------------------------
+sample_line_width = 2
+sample_line_alpha = 0.5
+median_line_width = 5
+median_line_alpha = 1.0
+# ---------------------------------------------------------------------------
 CENTRAL_PERCENTILE    = 0.95
 GRID_RES_XY           = 256
 GAUSS_SIGMA           = 1.5
 TUBE_ALPHA            = 0.18
 INDIVIDUAL_LINE_ALPHA = 0.10
-MEDIAN_SMOOTH_WINDOW  = 5
 MEDIAN_LINE_WIDTH     = 5
 # ---------------------------------------------------------------------------
 embeddings_df = pd.read_parquet("../results/empirical/wohns/test/embeddings.parquet")
+embeddings_df = embeddings_df[embeddings_df['time']>=500]
 labels_df = pd.read_csv("../data/metadata/wohns_pop_labels.csv")
 colors_df = pd.read_csv("../data/metadata/wohns_pop_colors.csv")
-Plotter = PlotEmbeddings(embeddings_df, labels_df, colors_df, generation_time=None)
+Plotter = PlotEmbeddings(embeddings_df, labels_df, colors_df, generation_time=28)
 Plotter.init_plot(time_scale="log")
-Plotter.add_sample_trajectories(line_width=2, alpha=0.5)
-Plotter.add_population_medians(line_width=5, alpha=0.8)
+# Plotter.add_sample_trajectories()
+Plotter.add_population_medians()
 Plotter.add_legend()
-
-pio.write_html(Plotter.fig, file="test.html", auto_open=True)
-
+Plotter.save_static(filename="test", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
 # %%
 class PlotEmbeddings:
     def __init__(self, 
@@ -87,11 +90,13 @@ class PlotEmbeddings:
         axis_style = dict(
             showline=True,
             showgrid=True,
+            showbackground=True,
             linecolor="black",
             linewidth=1,
             ticks="outside",
             tickcolor="black",
-            gridcolor="rgba(0,0,0,0)",
+            gridcolor="white",
+            backgroundcolor="whitesmoke",
             tickmode="array"
         )
         # Setting equal scaling for X and Y axes
@@ -124,8 +129,8 @@ class PlotEmbeddings:
 
         self.fig.update_layout(
             scene=dict(
-                xaxis=dict(title=x_label, range=x_range, **axis_style),
-                yaxis=dict(title=y_label, range=y_range, **axis_style),
+                xaxis=dict(title=x_label, range=x_range, zeroline=True, **axis_style),
+                yaxis=dict(title=y_label, range=y_range, zeroline=True, **axis_style),
                 zaxis=dict(title=z_label, tickvals = z_ticks, ticktext = [str(int(z)) for z in z_ticks], **axis_style, type=time_scale)
             )
         )
@@ -147,7 +152,11 @@ class PlotEmbeddings:
                 )
             )
 
-    def add_sample_trajectories(self,line_width: int = 2,alpha: float = 1.0):
+    def save_static(self,filename, format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1)):
+        self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
+        pio.write_image(fig = self.fig, file = f"{filename}.{format}",format=format,width=width,height=height,scale=scale)
+
+    def add_sample_trajectories(self,line_width: int = sample_line_width,alpha: float = sample_line_alpha):
         samples = self.embeddings_df["sample_id"].unique()
         for sample in samples:
             sample_data = self.embeddings_df[self.embeddings_df["sample_id"] == sample]
@@ -168,7 +177,7 @@ class PlotEmbeddings:
                 )
             )
 
-    def add_population_medians(self,line_width: int = 5, alpha: float = 1.0):
+    def add_population_medians(self,line_width: int = median_line_width, alpha: float = median_line_alpha):
         median_df = (
             self.embeddings_df
             .groupby(["population", "time"], as_index=False)
@@ -197,41 +206,9 @@ class PlotEmbeddings:
                 )
             )
 
-    # def add_population_medians(self):
-
     # def add_population_convex_hulls(self:
     # def add_iso_surfaces(self):
 
-    # def basic_plot(self,min_time,max_time, log_time: bool = True):
-    #     fig = px.line_3d(self.embeddings_df, x="X1", y="X2", z="time", color='population', line_group='sample_id', color_discrete_map=self.colors_dict,log_z=log_time)
-    #     # Set xlim and ylim to be the same
-    #     x_min, x_max = self.embeddings_df["X1"].min(), self.embeddings_df["X1"].max()
-    #     y_min, y_max = self.embeddings_df["X2"].min(), self.embeddings_df["X2"].max()
-    #     lim_min = min(x_min, y_min)
-    #     lim_max = max(x_max, y_max)
-    #     fig.update_layout(scene=dict(
-    #         xaxis=dict(range=[lim_min, lim_max]),
-    #         yaxis=dict(range=[lim_min, lim_max])
-    #     ))
-    #     fig.update_layout(showlegend=True)
-    #     return fig
-
-    # def dynamic_plot(self,log_time: bool = True):
-    #     fig = px.line_3d(self.embeddings_df, x="X1", y="X2", z="time", color='population', line_group='sample_id', color_discrete_map=self.colors_dict,log_z=log_time)
-    #     # Set xlim and ylim to be the same
-    #     xy_min = min(self.embeddings_df["X1"].min(), self.embeddings_df["X2"].min())
-    #     xy_max = max(self.embeddings_df["X1"].max(), self.embeddings_df["X2"].max())
-    #     lim_min = min(xy_min, xy_min)
-    #     lim_max = max(xy_max, xy_max)
-    #     # Add 10% padding for margins
-    #     padding = 0.1 * (xy_max - xy_min)
-    #     xy_range = [xy_min - padding, xy_max + padding]
-    #     fig.update_layout(scene=dict(
-    #         xaxis=dict(range=[lim_min, lim_max]),
-    #         yaxis=dict(range=[lim_min, lim_max])
-    #     ))
-    #     fig.update_layout(showlegend=True)
-    #     return fig
     
     
     # def static_3d_plot(self, colors_dict, x_view=2,y_view=2, z_view=1):
@@ -344,9 +321,6 @@ class PlotEmbeddings:
 # def median_df(df:pd.DataFrame,log_time:bool)->pd.DataFrame:
 #     med=df.groupby('time',as_index=False)[['dimension 1','dimension 2']].median().sort_values('time')
 #     med['time_plot']=np.log(med.time) if log_time else med.time
-#     if MEDIAN_SMOOTH_WINDOW>1:
-#         med['dimension 1']=med['dimension 1'].rolling(MEDIAN_SMOOTH_WINDOW,center=True,min_periods=1).mean()
-#         med['dimension 2']=med['dimension 2'].rolling(MEDIAN_SMOOTH_WINDOW,center=True,min_periods=1).mean()
 #     return med
 
 # def plot_population(df:pd.DataFrame,pop:str,vol_data,fig:go.Figure,colour:str,mode:str,log_time:bool,show_traj:bool,show_median:bool,show_ribs:bool,show_surface:bool) -> None:
