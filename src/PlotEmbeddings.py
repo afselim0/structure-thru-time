@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 import plotly.express as px
 import plotly.io as pio
 import plotly.graph_objects as go
-
+#%%
 # ----------------------- tunables ------------------------------------------
 CENTRAL_PERCENTILE    = 0.95
 GRID_RES_XY           = 256
@@ -26,6 +26,7 @@ colors_df = pd.read_csv("../data/metadata/wohns_pop_colors.csv")
 Plotter = PlotEmbeddings(embeddings_df, labels_df, colors_df, generation_time=None)
 Plotter.init_plot(time_scale="log")
 Plotter.add_sample_trajectories(line_width=2, alpha=0.5)
+Plotter.add_legend()
 pio.write_html(Plotter.fig, file="test.html", auto_open=True)
 
 # %%
@@ -109,8 +110,7 @@ class PlotEmbeddings:
         y_label = "X2"
         z_label = "Time (generations ago)" if self.generation_time is None else "Time (years ago)"
 
-        # Setting gridlines and ticks
-        # xy_grid = np.linspace(common_min, common_max, num_xy_ticks+2)[1:-1]
+        # Setting gridlines and ticks for time axis
         min_time = self.embeddings_df["time"].min()
         min_time = 1 if min_time <= 0 else min_time
         max_time = self.embeddings_df["time"].max()
@@ -126,6 +126,22 @@ class PlotEmbeddings:
             )
         )
 
+    def add_legend(self):
+        for pop in self.populations:
+            color = self.colors_dict.get(pop, "#808080")
+
+            self.fig.add_trace(
+                go.Scatter3d(
+                    x=[None],
+                    y=[None],
+                    z=[None],
+                    mode="markers",
+                    marker=dict(size=10, color=color),
+                    name=pop,
+                    legendgroup=pop,
+                    showlegend=True
+                )
+            )
 
     def add_sample_trajectories(self,line_width: int = 2,alpha: float = 1.0):
         samples = self.embeddings_df["sample_id"].unique()
@@ -143,7 +159,8 @@ class PlotEmbeddings:
                     opacity=alpha,
                     name=f'{population} - {sample}',
                     hovertemplate=f"{population}: {sample}<br>Time: %{{z:.2f}}<extra></extra>",
-                    showlegend=False
+                    showlegend=False,
+                    legendgroup=population
                 )
             )
 #%%
