@@ -25,7 +25,6 @@
 - Turn attention to the local admixture problem 
 
 Minor:
-- JN to clean up his version / sync to git 
 - In sim snakemake - Update True embedding outputs to mark choices of N0 and other specific relevant params 
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
@@ -34,17 +33,22 @@ Minor:
 - Outputs to log files... 
 
 To Discuss:
-- 1/18 JN : Didn't accomplish too much except to realize how fussy plotly static export is!  Static figures are improved somewhat; 2 camera outputs; and figure scraper is set up; see note above about need to step up and link in Luke's code  
+- 1/19 Are the demes files for human examples stdpopsim all handy? 
 - 1/18 Results are coming in squished on the 2nd dimension?  
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 the population combos script developed for chimps should be brought in as a general utility script
 - 1/18 Where are the empirical outputs... let's be sure to keep example runs
-- 1/18 Snakemake stalls oddly on split.yaml - not sure why - some kind of lock or sync issue
-
-- 1/18 Realizing I don't know how to launch a job on cluster that will run in a particular conda environment - add source activate line to bash script that call snakemake
 
 Misc:
+
+
+### Moot discussion points
+
+- 1/18 JN : Didn't accomplish too much except to realize how fussy plotly static export is!  Static figures are improved somewhat; 2 camera outputs; and figure scraper is set up; see note above about need to step up and link in Luke's code  
+- 1/18 Snakemake stalls oddly on split.yaml - not sure why - some kind of lock or sync issue
+- 1/18 Realizing I don't know how to launch a job on cluster that will run in a particular conda environment - add source activate line to bash script that call snakemake
 - 1/18 About an 1hr 20 min to do all deme examples from scratch with FP=1 on laptop!
+
 
 ### Done
 - DONE Pulling in Luke's plotting code to be plotting script by default; Also there is some existing static export code in PlotEmbeddings that has some upsides but it has some quirks in its plotting.  
