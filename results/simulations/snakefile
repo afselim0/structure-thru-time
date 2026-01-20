@@ -80,8 +80,8 @@ RATES_SIM_PLOT_FILE      = f"rates_sim.{SIM_TAG + RATES_TAG}.png"
 RATES_INFER_PLOT_FILE    = f"rates_infer.{INFER_TAG + RATES_TAG}.png"
 
 EMB_TRUE_PLOT_FILE       = f"embeddings_true.N0{N0}.html"
-EMB_SIM_PLOT_FILE        = f"embeddings_sim.{SIM_TAG + EMBEDDINGS_TAG}.html"
-EMB_INFER_PLOT_FILE      = f"embeddings_infer.{INFER_TAG + EMBEDDINGS_TAG}.html"
+EMB_SIM_PLOT_FILE        = f"embeddings_sim{SIM_TAG + EMBEDDINGS_TAG}.html"
+EMB_INFER_PLOT_FILE      = f"embeddings_infer{INFER_TAG + EMBEDDINGS_TAG}.html"
 
 PERFORMANCE_TRUE_FILE    = f"performance_true.N0{N0}.parquet"
 PERFORMANCE_SIM_FILE     = f"performance_sim{SIM_TAG + EMBEDDINGS_TAG}.parquet"
