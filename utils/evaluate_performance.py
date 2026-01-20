@@ -49,10 +49,12 @@ def main():
     N0 = LSE.N0 if args.N0 is None else args.N0
     reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
     error = performance_across_pairs(rates, reconstructed_rates)
-    fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates", title="Reconstruction Error of Pairwise Rates")
-
     error.to_parquet(f"{args.output_path}/{args.output_name}.parquet")
-    fig.savefig(f"{args.output_path}/{args.output_name}.png", dpi=500)
+
+    if len(pop_colors) < 10:
+        fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates", title="Reconstruction Error of Pairwise Rates")
+        fig.savefig(f"{args.output_path}/{args.output_name}.png", dpi=500)
 
 if __name__ == "__main__":
     main()
+# %%

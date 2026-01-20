@@ -41,12 +41,18 @@ SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
 INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/{INFER_METHOD}")
 
 # Tags
-PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
-PDF_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.m{INFER_METHOD}"
-RATES_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
-RATES_INFER_TAG =f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}.m{INFER_METHOD}"
-EMBEDDINGS_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
-EMBEDDINGS_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
+SIM_TAG = f".V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
+INFER_TAG = SIM_TAG + f".m{INFER_METHOD}"
+
+RATES_TAG = f".WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
+EMBEDDINGS_TAG = RATES_TAG + f".N0{N0}"
+
+# PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
+# PDF_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.m{INFER_METHOD}"
+# RATES_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
+# RATES_INFER_TAG =f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}.m{INFER_METHOD}"
+# EMBEDDINGS_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
+# EMBEDDINGS_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
 
 
 # File Names
@@ -54,28 +60,32 @@ POP_COLORS_FILE          = "pop_colors.csv"
 POP_LABELS_FILE          = "pop_labels.csv"
 
 PDF_TRUE_FILE            = f"pdf_true.parquet"
-PDF_SIM_FILE             = f"pdf_sim.{PDF_SIM_TAG}.parquet"
-PDF_INFER_FILE           = f"pdf_infer.{PDF_INFER_TAG}.parquet"
+PDF_SIM_FILE             = f"pdf_sim{SIM_TAG}.parquet"
+PDF_INFER_FILE           = f"pdf_infer{INFER_TAG}.parquet"
 
 RATES_TRUE_FILE          = f"rates_true.parquet"
-RATES_SIM_FILE           = f"rates_sim.{RATES_SIM_TAG}.parquet"
-RATES_INFER_FILE         = f"rates_infer.{RATES_INFER_TAG}.parquet"
+RATES_SIM_FILE           = f"rates_sim{SIM_TAG + RATES_TAG}.parquet"
+RATES_INFER_FILE         = f"rates_infer{INFER_TAG + RATES_TAG}.parquet"
 
-EMBEDDINGS_TRUE_FILE     = f"embeddings_true.parquet"
-EMBEDDINGS_SIM_FILE      = f"embeddings_sim.{EMBEDDINGS_SIM_TAG}.parquet"
-EMBEDDINGS_INFER_FILE    = f"embeddings_infer.{EMBEDDINGS_INFER_TAG}.parquet"
+EMBEDDINGS_TRUE_FILE     = f"embeddings_true.N0{N0}.parquet"
+EMBEDDINGS_SIM_FILE      = f"embeddings_sim{SIM_TAG + EMBEDDINGS_TAG}.parquet"
+EMBEDDINGS_INFER_FILE    = f"embeddings_infer{INFER_TAG + EMBEDDINGS_TAG}.parquet"
 
-SIM_FINISHED_FILE        = f"finished_sim.txt"
-INFER_FINISHED_FILE      = f"finished_infer.txt"
+SIM_FINISHED_FILE        = f"finished_sim{SIM_TAG}.txt"
+INFER_FINISHED_FILE      = f"finished_infer{INFER_TAG}.txt"
 
 PCA_PLOT_FILE            = f"pca.png"
 RATES_TRUE_PLOT_FILE     = f"rates_true.png"
-RATES_SIM_PLOT_FILE      = f"rates_sim.{RATES_SIM_TAG}..png"
-RATES_INFER_PLOT_FILE    = f"rates_infer.{RATES_INFER_TAG}..png"
+RATES_SIM_PLOT_FILE      = f"rates_sim.{SIM_TAG + RATES_TAG}..png"
+RATES_INFER_PLOT_FILE    = f"rates_infer.{INFER_TAG + RATES_TAG}..png"
 
-EMB_TRUE_PLOT_FILE       = f"embeddings_true.html"
-EMB_SIM_PLOT_FILE        = f"embeddings_sim.{EMBEDDINGS_SIM_TAG}.html"
-EMB_INFER_PLOT_FILE      = f"embeddings_infer.{EMBEDDINGS_INFER_TAG}.html"
+EMB_TRUE_PLOT_FILE       = f"embeddings_true.N0{N0}.html"
+EMB_SIM_PLOT_FILE        = f"embeddings_sim.{SIM_TAG + EMBEDDINGS_TAG}.html"
+EMB_INFER_PLOT_FILE      = f"embeddings_infer.{INFER_TAG + EMBEDDINGS_TAG}.html"
+
+PERFORMANCE_TRUE_FILE    = f"performance_true.N0{N0}.parquet"
+PERFORMANCE_SIM_FILE     = f"embeddings_true.{SIM_TAG + EMBEDDINGS_TAG}.parquet"
+PERFORMANCE_INFER_FILE   = f"embeddings_true.{INFER_TAG + EMBEDDINGS_TAG}.parquet"
 
 DEMOGRAPHY_PLOT_FILE     = "demography.png"
 
@@ -109,6 +119,10 @@ EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH, EMB_TRUE_PLOT_FILE)
 EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH, EMB_SIM_PLOT_FILE)
 EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH, EMB_INFER_PLOT_FILE)
 
+PERFORMANCE_TRUE    = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_TRUE_FILE)
+PERFORMANCE_SIM     = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_SIM_FILE)
+PERFORMANCE_INFER   = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_INFER_FILE)
+
 
 BASE_TARGETS = [
     POP_COLORS,
@@ -117,14 +131,16 @@ BASE_TARGETS = [
     SIM_FINISHED,
     RATES_SIM,
     EMBEDDINGS_SIM,
-    EMB_SIM_PLOT
+    EMB_SIM_PLOT,
+    PERFORMANCE_SIM
 ]
 
 INFER_TARGETS = [
     INFER_FINISHED,
     RATES_INFER_PLOT,
     EMBEDDINGS_INFER,
-    EMB_INFER_PLOT
+    EMB_INFER_PLOT,
+    PERFORMANCE_INFER
 ]
 
 if n_pops<20:
@@ -134,6 +150,7 @@ if n_pops<20:
     BASE_TARGETS.append(RATES_SIM_PLOT)
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
+    BASE_TARGETS.append(PERFORMANCE_TRUE)
     INFER_TARGETS.append(RATES_INFER_PLOT)
     
 rule all:
@@ -578,4 +595,87 @@ rule plot_embeddings_infer:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --min_time {params.min_time}
+        """
+
+# 3. Performance Evaluation
+rule evaluate_performance_true:
+    input:
+        embeddings=EMBEDDINGS_TRUE,
+        rates=RATES_TRUE,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="../../utils/evaluate_performance.py",
+    output:
+        PERFORMANCE_TRUE
+    params:
+        N0=N0,
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=PERFORMANCE_TRUE_FILE,
+        min_time=MIN_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --embeddings_path {input.embeddings} \
+            --rates_path {input.rates} \
+            --N0 {params.N0} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+
+rule evaluate_performance_sim:
+    input:
+        embeddings=EMBEDDINGS_SIM,
+        rates=RATES_SIM,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="../../utils/evaluate_performance.py",
+    output:
+        PERFORMANCE_SIM
+    params:
+        N0=N0,
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=PERFORMANCE_SIM_FILE,
+        min_time=MIN_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --embeddings_path {input.embeddings} \
+            --rates_path {input.rates} \
+            --N0 {params.N0} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+
+rule evaluate_performance_infer:
+    input:
+        embeddings=EMBEDDINGS_INFER,
+        rates=RATES_INFER,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="../../utils/evaluate_performance.py",
+
+    output:
+        PERFORMANCE_INFER
+    params:
+        N0=N0,
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=PERFORMANCE_INFER_FILE,
+        min_time=MIN_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --embeddings_path {input.embeddings} \
+            --rates_path {input.rates} \
+            --N0 {params.N0} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
         """
