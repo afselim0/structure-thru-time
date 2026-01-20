@@ -9,7 +9,6 @@ job_logs/
 *.parquet
 *.html
 *.png
-*.csv
 *.pdf
 
 ## Inferred Trees
@@ -34,6 +33,5 @@ local_data/
 finished_sim.txt
 finished_infer.txt
 
-results/simulations/scripts/run_test.sh
-results/simulations/scripts/test_script.py
+results/simulations/outputs/
 *(jnovembre@uchicago.edu)*
