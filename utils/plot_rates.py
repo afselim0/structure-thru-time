@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-def plot_rates(rates_df, pop_colors, pop_labels):
+def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
     setup_plotting_style()
     populations = pop_labels['population'].unique()
 
@@ -16,7 +16,7 @@ def plot_rates(rates_df, pop_colors, pop_labels):
     times = rates_df.columns.astype(int)
 
     fig, ax = plt.subplots(1,len(populations), figsize=(3*len(populations),3),sharex=True,sharey=True)
-    fig.supylabel("Coalescence Rate")
+    fig.supylabel(ylabel)
     for i in range(len(populations)):
         if n_populations == 1:  
             ax = [ax]
