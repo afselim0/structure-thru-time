@@ -76,16 +76,20 @@ INFER_FINISHED_FILE      = f"finished_infer{INFER_TAG}.txt"
 
 PCA_PLOT_FILE            = f"pca.png"
 RATES_TRUE_PLOT_FILE     = f"rates_true.png"
-RATES_SIM_PLOT_FILE      = f"rates_sim.{SIM_TAG + RATES_TAG}..png"
-RATES_INFER_PLOT_FILE    = f"rates_infer.{INFER_TAG + RATES_TAG}..png"
+RATES_SIM_PLOT_FILE      = f"rates_sim.{SIM_TAG + RATES_TAG}.png"
+RATES_INFER_PLOT_FILE    = f"rates_infer.{INFER_TAG + RATES_TAG}.png"
 
 EMB_TRUE_PLOT_FILE       = f"embeddings_true.N0{N0}.html"
 EMB_SIM_PLOT_FILE        = f"embeddings_sim.{SIM_TAG + EMBEDDINGS_TAG}.html"
 EMB_INFER_PLOT_FILE      = f"embeddings_infer.{INFER_TAG + EMBEDDINGS_TAG}.html"
 
 PERFORMANCE_TRUE_FILE    = f"performance_true.N0{N0}.parquet"
-PERFORMANCE_SIM_FILE     = f"embeddings_true.{SIM_TAG + EMBEDDINGS_TAG}.parquet"
-PERFORMANCE_INFER_FILE   = f"embeddings_true.{INFER_TAG + EMBEDDINGS_TAG}.parquet"
+PERFORMANCE_SIM_FILE     = f"performance_sim{SIM_TAG + EMBEDDINGS_TAG}.parquet"
+PERFORMANCE_INFER_FILE   = f"performance_infer{INFER_TAG + EMBEDDINGS_TAG}.parquet"
+
+PERFORMANCE_TRUE_PLOT_FILE    = f"performance_true.N0{N0}.png"
+PERFORMANCE_SIM_PLOT_FILE     = f"performance_sim{SIM_TAG + EMBEDDINGS_TAG}.png"
+PERFORMANCE_INFER_PLOT_FILE   = f"performance_infer{INFER_TAG + EMBEDDINGS_TAG}.png"
 
 DEMOGRAPHY_PLOT_FILE     = "demography.png"
 
@@ -100,29 +104,35 @@ SIM_FINISHED        = os.path.join(SIM_TREE_OUTPUT_PATH, SIM_FINISHED_FILE)
 INFER_FINISHED      = os.path.join(INFER_TREE_OUTPUT_PATH, INFER_FINISHED_FILE)
 
 # STT outputs
-RATES_TRUE          = os.path.join(DATA_OUTPUT_PATH, RATES_TRUE_FILE)
+RATES_TRUE               = os.path.join(DATA_OUTPUT_PATH, RATES_TRUE_FILE)
 
-PDF_SIM           = os.path.join(DATA_OUTPUT_PATH, PDF_SIM_FILE)
-RATES_SIM           = os.path.join(DATA_OUTPUT_PATH, RATES_SIM_FILE)
-PDF_INFER           = os.path.join(DATA_OUTPUT_PATH, PDF_INFER_FILE)
-RATES_INFER         = os.path.join(DATA_OUTPUT_PATH, RATES_INFER_FILE)
+PDF_SIM                  = os.path.join(DATA_OUTPUT_PATH, PDF_SIM_FILE)
+RATES_SIM                = os.path.join(DATA_OUTPUT_PATH, RATES_SIM_FILE)
+PDF_INFER                = os.path.join(DATA_OUTPUT_PATH, PDF_INFER_FILE)
+RATES_INFER              = os.path.join(DATA_OUTPUT_PATH, RATES_INFER_FILE)
 
-EMBEDDINGS_TRUE     = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
-EMBEDDINGS_SIM      = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
-EMBEDDINGS_INFER    = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
+EMBEDDINGS_TRUE          = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_TRUE_FILE)
+EMBEDDINGS_SIM           = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_SIM_FILE)
+EMBEDDINGS_INFER         = os.path.join(DATA_OUTPUT_PATH, EMBEDDINGS_INFER_FILE)
 
-RATES_TRUE_PLOT     = os.path.join(PLOT_OUTPUT_PATH, RATES_TRUE_PLOT_FILE)
-RATES_SIM_PLOT      = os.path.join(PLOT_OUTPUT_PATH, RATES_SIM_PLOT_FILE)
-RATES_INFER_PLOT    = os.path.join(PLOT_OUTPUT_PATH, RATES_INFER_PLOT_FILE)
+RATES_TRUE_PLOT          = os.path.join(PLOT_OUTPUT_PATH, RATES_TRUE_PLOT_FILE)
+RATES_SIM_PLOT           = os.path.join(PLOT_OUTPUT_PATH, RATES_SIM_PLOT_FILE)
+RATES_INFER_PLOT         = os.path.join(PLOT_OUTPUT_PATH, RATES_INFER_PLOT_FILE)
 
-EMB_TRUE_PLOT       = os.path.join(PLOT_OUTPUT_PATH, EMB_TRUE_PLOT_FILE)
-EMB_SIM_PLOT        = os.path.join(PLOT_OUTPUT_PATH, EMB_SIM_PLOT_FILE)
-EMB_INFER_PLOT      = os.path.join(PLOT_OUTPUT_PATH, EMB_INFER_PLOT_FILE)
+EMB_TRUE_PLOT            = os.path.join(PLOT_OUTPUT_PATH, EMB_TRUE_PLOT_FILE)
+EMB_SIM_PLOT             = os.path.join(PLOT_OUTPUT_PATH, EMB_SIM_PLOT_FILE)
+EMB_INFER_PLOT           = os.path.join(PLOT_OUTPUT_PATH, EMB_INFER_PLOT_FILE)
 
-PERFORMANCE_TRUE    = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_TRUE_FILE)
-PERFORMANCE_SIM     = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_SIM_FILE)
-PERFORMANCE_INFER   = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_INFER_FILE)
+PERFORMANCE_TRUE         = os.path.join(DATA_OUTPUT_PATH, PERFORMANCE_TRUE_FILE)
+PERFORMANCE_SIM          = os.path.join(DATA_OUTPUT_PATH, PERFORMANCE_SIM_FILE)
+PERFORMANCE_INFER        = os.path.join(DATA_OUTPUT_PATH, PERFORMANCE_INFER_FILE)
 
+PERFORMANCE_TRUE_PLOT    = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_TRUE_PLOT_FILE)
+PERFORMANCE_SIM_PLOT     = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_SIM_PLOT_FILE)
+PERFORMANCE_INFER_PLOT   = os.path.join(PLOT_OUTPUT_PATH, PERFORMANCE_INFER_PLOT_FILE)
+
+## Remove file extensions and add them in scripts
+## Add performance plots
 
 BASE_TARGETS = [
     POP_COLORS,
@@ -132,7 +142,9 @@ BASE_TARGETS = [
     RATES_SIM,
     EMBEDDINGS_SIM,
     EMB_SIM_PLOT,
-    PERFORMANCE_SIM
+    PERFORMANCE_TRUE,
+    PERFORMANCE_SIM,
+    PERFORMANCE_SIM_PLOT
 ]
 
 INFER_TARGETS = [
@@ -150,8 +162,9 @@ if n_pops<20:
     BASE_TARGETS.append(RATES_SIM_PLOT)
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
-    BASE_TARGETS.append(PERFORMANCE_TRUE)
     INFER_TARGETS.append(RATES_INFER_PLOT)
+    BASE_TARGETS.append(PERFORMANCE_TRUE_PLOT)
+    INFER_TARGETS.append(PERFORMANCE_INFER_PLOT)
     
 rule all:
     input:
@@ -235,6 +248,7 @@ rule simulate_trees:
         num_contigs=NUM_CONTIGS,
         num_replicates=NUM_REPLICATES,
         contig_length=CONTIG_LENGTH,
+        sim_params=SIM_FINISHED_FILE
     shell:
         """
         mkdir -p {params.outdir}
@@ -244,7 +258,8 @@ rule simulate_trees:
             --labels {input.pop_labels} \
             --num_contigs {params.num_contigs} \
             --num_replicates {params.num_replicates} \
-            --contig_length {params.contig_length}
+            --contig_length {params.contig_length} \
+            --sim_params {params.sim_params}
 
         """
 
@@ -587,7 +602,6 @@ rule plot_embeddings_infer:
         min_time=MIN_TIME
     shell:
         """
-        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.embeddings} \
             --colors {input.pop_colors} \
@@ -606,23 +620,26 @@ rule evaluate_performance_true:
         pop_labels=POP_LABELS,
         script="../../utils/evaluate_performance.py",
     output:
-        PERFORMANCE_TRUE
+        PERFORMANCE_TRUE,
+        PERFORMANCE_TRUE_PLOT
     params:
         N0=N0,
-        outdir=PLOT_OUTPUT_PATH,
-        output_name=PERFORMANCE_TRUE_FILE,
-        min_time=MIN_TIME
+        data_output_path=DATA_OUTPUT_PATH,
+        plot_output_path=PLOT_OUTPUT_PATH,
+        data_output_name=PERFORMANCE_TRUE_FILE,
+        plot_output_name=PERFORMANCE_TRUE_PLOT_FILE
     shell:
         """
-        mkdir -p {params.outdir}
         python {input.script} \
-            --embeddings_path {input.embeddings} \
-            --rates_path {input.rates} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
             --N0 {params.N0} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
-            --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
         """
 
 rule evaluate_performance_sim:
@@ -633,23 +650,26 @@ rule evaluate_performance_sim:
         pop_labels=POP_LABELS,
         script="../../utils/evaluate_performance.py",
     output:
-        PERFORMANCE_SIM
+        PERFORMANCE_SIM,
+        PERFORMANCE_SIM_PLOT
     params:
         N0=N0,
-        outdir=PLOT_OUTPUT_PATH,
-        output_name=PERFORMANCE_SIM_FILE,
-        min_time=MIN_TIME
+        data_output_path=DATA_OUTPUT_PATH,
+        plot_output_path=PLOT_OUTPUT_PATH,
+        data_output_name=PERFORMANCE_SIM_FILE,
+        plot_output_name=PERFORMANCE_SIM_PLOT_FILE
     shell:
         """
-        mkdir -p {params.outdir}
         python {input.script} \
-            --embeddings_path {input.embeddings} \
-            --rates_path {input.rates} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
             --N0 {params.N0} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
-            --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
         """
 
 rule evaluate_performance_infer:
@@ -659,23 +679,26 @@ rule evaluate_performance_infer:
         pop_colors=POP_COLORS,
         pop_labels=POP_LABELS,
         script="../../utils/evaluate_performance.py",
-
     output:
-        PERFORMANCE_INFER
+        PERFORMANCE_INFER,
+        PERFORMANCE_INFER_PLOT
     params:
         N0=N0,
-        outdir=PLOT_OUTPUT_PATH,
-        output_name=PERFORMANCE_INFER_FILE,
-        min_time=MIN_TIME
+        data_output_path=DATA_OUTPUT_PATH,
+        plot_output_path=PLOT_OUTPUT_PATH,
+        data_output_name=PERFORMANCE_INFER_FILE,
+        plot_output_name=PERFORMANCE_INFER_PLOT_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
-            --embeddings_path {input.embeddings} \
-            --rates_path {input.rates} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
             --N0 {params.N0} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
-            --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
         """

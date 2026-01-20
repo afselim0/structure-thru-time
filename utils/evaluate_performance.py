@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import sys
+sys.path.append("../../src")
 sys.path.append("../src")
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings, compute_f
 from plot_rates import plot_rates
@@ -31,30 +32,32 @@ def performance_across_pairs(rates, reconstructed_rates):
 
 def main():
     argparser = argparse.ArgumentParser(description="Evaluate performance of rate reconstruction from embeddings")
-    argparser.add_argument("--embeddings_path", type=str, required=True, help="Path to embeddings parquet file")
-    argparser.add_argument("--rates_path", type=str, required=True, help="Path to true rates parquet file")
-    argparser.add_argument("--pop_colors_path", type=str, required=True, help="Path to population colors csv file")
-    argparser.add_argument("--pop_labels_path", type=str, required=True, help="Path to population labels csv file")
+    argparser.add_argument("--embeddings", type=str, required=True, help="Path to embeddings parquet file")
+    argparser.add_argument("--rates", type=str, required=True, help="Path to true rates parquet file")
+    argparser.add_argument("--colors", type=str, required=True, help="Path to population colors csv file")
+    argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N0", type=float, default=None, help="N0 used to compute embeddings")
-    argparser.add_argument("--output_path", type=str, required=True, help="Path to output directory")
-    argparser.add_argument("--output_name", type=str, required=True, help="Name of the output file")
+    argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
+    argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
+    argparser.add_argument("--data_output_name", type=str, required=True, help="Name of the output file")
+    argparser.add_argument("--plot_output_name", type=str, required=True, help="Name of the output file")
+    
     args = argparser.parse_args()
 
-    embeddings = pd.read_parquet(args.embeddings_path)
-    rates = pd.read_parquet(args.rates_path)
-    pop_colors = pd.read_csv(args.pop_colors_path)
-    pop_labels = pd.read_csv(args.pop_labels_path)
+    embeddings = pd.read_parquet(args.embeddings)
+    rates = pd.read_parquet(args.rates)
+    pop_colors = pd.read_csv(args.colors)
+    pop_labels = pd.read_csv(args.labels)
 
     LSE = LatentSpaceEmbeddings(rates)
     N0 = LSE.N0 if args.N0 is None else args.N0
     reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
     error = performance_across_pairs(rates, reconstructed_rates)
-    error.to_parquet(f"{args.output_path}/{args.output_name}.parquet")
+    error.to_parquet(f"{args.data_output_path}/{args.data_output_name}")
 
     if len(pop_colors) < 10:
-        fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates", title="Reconstruction Error of Pairwise Rates")
-        fig.savefig(f"{args.output_path}/{args.output_name}.png", dpi=500)
-
+        fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
+        fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
 if __name__ == "__main__":
     main()
 # %%

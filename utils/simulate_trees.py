@@ -68,6 +68,7 @@ def main():
     parser.add_argument("--num_contigs", required=True, help="number of contigs to simulate")
     parser.add_argument("--num_replicates", required=True, help="number of replicates per contig")
     parser.add_argument("--contig_length", required=True, help="length of each contig")
+    parser.add_argument("--sim_params", required=True, help="simulation_parameters")
    
     
     args = parser.parse_args()
@@ -77,9 +78,9 @@ def main():
     num_contigs = int(args.num_contigs)
     num_replicates = int(args.num_replicates)
     contig_length = int(args.contig_length)
-    
+    sim_params = args.sim_params
     time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length, num_replicates)
-    with open(f"{output_path}/finished_sim.txt", "w") as f:
+    with open(f"{output_path}/{sim_params}", "w") as f:
         f.write(f"Simulation took {time_taken/60:.2f} minutes")
 
 if __name__ == "__main__":
