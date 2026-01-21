@@ -33,7 +33,10 @@ Minor:
 - Outputs to log files... 
 
 To Discuss:
-- 1/19 Are the demes files for human examples stdpopsim all handy? 
+- 1/20 Quite puzzled by performance issue that the predicted rates from spatial positions are not scaled correctly -- scaling the loss function by a constant should not change the minimizing value right; is there just a bug somewhere?  
+- 1/20 Check factors of Delta_t 
+- 1/20 Line 52 of evaluate_performance.py - looks almost like it re-runs the embedding? 
+- 1/19 Are the demes files for human examples stdpopsim all handy?  I think you exported them from stdpopsim at some point for doing the gallery of human examples? 
 - 1/18 Results are coming in squished on the 2nd dimension?  
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 the population combos script developed for chimps should be brought in as a general utility script
