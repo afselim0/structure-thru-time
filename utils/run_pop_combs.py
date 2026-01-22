@@ -20,12 +20,6 @@ def find_active_pops(rates_df, pop_labels, pop_colors):
     return populations, pop_labels, pop_colors
 
 def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N0, generation_time=None):
-    comb_data_dir =os.path.join(data_dir,"combinations")
-    comb_plot_dir = os.path.join(plots_dir,"combinations")
-
-    os.makedirs(comb_data_dir, exist_ok=True)
-    os.makedirs(comb_plot_dir, exist_ok=True)
-
     populations, pop_labels, pop_colors = find_active_pops(rates, pop_labels, pop_colors)
     population_combinations = []
     for r in range(1, len(populations) + 1):
@@ -41,15 +35,15 @@ def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N0,
         LSE = LatentSpaceEmbeddings(rates_subset, N0=N0)
         _ = LSE.compute_embeddings_through_time()
         embeddings_df = LSE.get_embeddings_df()
-        embeddings_df.to_parquet(f"{comb_data_dir}/{filename}.parquet")
+        embeddings_df.to_parquet(f"{data_dir}/{filename}.parquet")
 
         plotter = PlotEmbeddings(embeddings_df, label_subset, colors_subset, generation_time=generation_time)
         plotter.init_plot(time_scale="log")
         plotter.add_sample_trajectories()
         plotter.add_population_medians()
         plotter.add_legend()
-        plotter.save_static(filename=f"{comb_plot_dir}/{filename}", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
-        plotter.fig.write_html(f"{comb_plot_dir}/{filename}.html")
+        plotter.save_static(filename=f"{plots_dir}/{filename}", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+        plotter.fig.write_html(f"{plots_dir}/{filename}.html")
 
 def main():
     argparser = argparse.ArgumentParser(description="Run latent space embeddings and plot for all population combinations.")
@@ -69,4 +63,10 @@ def main():
     pop_colors = pd.read_csv(args.pop_colors)
     rates = pd.read_parquet(args.rates_file)
 
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(plots_dir, exist_ok=True)
+    
     run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N0, generation_time)
+
+if __name__ == "__main__":
+    main()

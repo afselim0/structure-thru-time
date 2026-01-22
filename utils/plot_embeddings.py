@@ -47,55 +47,6 @@ def main():
     plotter.add_convex_hull()
     plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
     plotter.fig.show()
-
-    # embeddings_dyn_fig.update_traces(opacity=1,line=dict(width=1))
-    # embeddings_dyn_fig.update_layout(
-    #     width=600,
-    #     height=600,
-    #     paper_bgcolor="white",
-    #     scene=dict(
-    #         camera=dict(
-    #             eye=dict(x=1.8, y=1.8, z=0.3),
-    #             up=dict(x=0, y=0, z=1),
-    #         ),
-    #         aspectmode="data",
-    #         zaxis_title='Time (generations ago)',
-            
-    #         xaxis=dict(nticks=5, showbackground=True, backgroundcolor="whitesmoke", 
-    #                     showgrid=True, gridcolor="lightgray",
-    #                     showline=True,
-    #                     linecolor="black",
-    #                     linewidth=2,
-    #                     zeroline=True),
-    #         yaxis=dict(nticks=5, showbackground=True, backgroundcolor="whitesmoke", 
-    #                     showgrid=True, gridcolor="lightgray",
-    #                     showline=True,
-    #                     linecolor="black",
-    #                     linewidth=2,
-    #                     zeroline=True),
-    #         zaxis=dict(nticks=5, showbackground=True, backgroundcolor="whitesmoke", 
-    #                     showgrid=True, gridcolor="white",
-    #                     showline=True,
-    #                     linecolor="black",
-    #                     linewidth=2,zeroline=True),
-    #     )
-    # )
-    # static_output_filename = f"{output_path}/{output_name}".removesuffix(".html")
-    # embeddings_dyn_fig.write_image(f"{static_output_filename}.pdf",scale=2)
-     
-     
-    # embeddings_dyn_fig.update_layout(
-    #     scene=dict(
-    #         camera=dict(
-    #             eye=dict(x=-0.75, y=-1.5, z=0.3),
-    #             up=dict(x=0, y=0, z=1),
-    #         )
-    #     )
-    # )
-    # embeddings_dyn_fig.write_image(f"{static_output_filename}_v2.pdf",scale=2)
-    
-    # embeddings_static_fig=plotter.static_3d_plot()
-    # embeddings_static_fig.write_image(f"{static_output_filename}_v3.pdf",scale=2)
     
 if __name__ == "__main__":
     main()
