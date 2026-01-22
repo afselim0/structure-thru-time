@@ -18,6 +18,7 @@ tests/
 *old*
 misc/
 local_data/
+test.sh
 
 ## Tree inference
 *.hap

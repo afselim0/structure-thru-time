@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
@@ -60,4 +61,21 @@ def main():
         fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
 if __name__ == "__main__":
     main()
+# %%
+import matplotlib.pyplot as plt
+debug = True
+if debug:
+    rates = pd.read_parquet("../results/simulations/outputs/zigzag/data/rates_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.parquet")
+    embeddings = pd.read_parquet("../results/simulations/outputs/zigzag/data/embeddings_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.N01.parquet")
+    N0 = 1
+
+    reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
+    # t_idx = int(4000/4)
+    # plt.scatter(rates.iloc[:,t_idx], reconstructed_rates.iloc[:,t_idx])
+    # plt.title(f"Time {rates.columns[t_idx]}")
+    # plt.plot([0,np.max(rates.iloc[:,t_idx])], [0,np.max(rates.iloc[:,t_idx])], color="red", linestyle="--")
+    plt.plot(rates.iloc[10,:],alpha=0.5, label="True Rates")
+    plt.plot(reconstructed_rates.iloc[10,:],alpha=0.5, label="Reconstructed Rates")
+    plt.xscale("log")
+
 # %%
