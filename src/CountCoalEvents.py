@@ -44,7 +44,8 @@ class CountCoalEvents:
         if num_posterior_samples == 1:
             self.num_posterior_samples = 1
             self.num_contigs = len(self.ts_files)
-            self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+            #self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+            self.contig_ids = [ts_file.removesuffix(".trees") for ts_file in self.ts_files]
             self.contig_lengths = np.array([tskit.load(os.path.join(ts_dir, contig_id + ".trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)]).astype(np.uint64)
         else:
             self.num_posterior_samples = num_posterior_samples
@@ -92,7 +93,8 @@ class CountCoalEvents:
         """
         # Find the contig ID associated with the tree sequence file
         if self.num_posterior_samples == 1:
-            contig_id = ts_file.rstrip('.trees')
+            #contig_id = ts_file.rstrip('.trees')
+            contig_id = ts_file.removesuffix(".trees")
         else:
             contig_id = re.sub(r'_[0-9]+\.trees$', '', ts_file)
 
