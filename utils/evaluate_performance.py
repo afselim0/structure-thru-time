@@ -54,8 +54,16 @@ def main():
     N0 = LSE.N0 if args.N0 is None else args.N0
     reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
     error = performance_across_pairs(rates, reconstructed_rates)
+    print(f"{args.data_output_path}/{args.data_output_name}")
     error.to_parquet(f"{args.data_output_path}/{args.data_output_name}")
 
+
+    # Subsetting labels_df and colors_df to active samples only
+    active_pairs = error.index.values
+    active_samples = np.unique([item for sublist in active_pairs for item in sublist])
+    pop_labels = pop_labels[pop_labels['sample_id'].isin(active_samples)]
+    populations = pop_labels['population'].unique()
+    pop_colors = pop_colors[pop_colors['population'].isin(populations)]
     if len(pop_colors) < 10:
         fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
         fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
@@ -63,7 +71,7 @@ if __name__ == "__main__":
     main()
 # %%
 import matplotlib.pyplot as plt
-debug = True
+debug = False
 if debug:
     rates = pd.read_parquet("../results/simulations/outputs/zigzag/data/rates_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.parquet")
     embeddings = pd.read_parquet("../results/simulations/outputs/zigzag/data/embeddings_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.N01.parquet")

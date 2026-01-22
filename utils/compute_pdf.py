@@ -32,6 +32,9 @@ def main():
     n_samples_per_pop = args.n_samples_per_pop
     pop_labels_path = args.pop_labels
     population_labels = pd.read_csv(pop_labels_path)
+    
+    chosen_pops = None if chosen_pops == "all" else chosen_pops
+    n_samples_per_pop = None if n_samples_per_pop == "all" else n_samples_per_pop
 
     os.makedirs(output_path, exist_ok=True)
     
