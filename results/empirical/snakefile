@@ -1,5 +1,5 @@
 import os
-
+import pandas as pd
 # Counting params
 dataset = config["dataset"]
 trees_dir = config["trees_dir"] if "trees_dir" in config else f"../../data/trees/{dataset}"
@@ -22,7 +22,7 @@ else:
 window_size = config["window_size"] if "window_size" in config else 100
 
 # Embedding params
-min_time = config["min_time"] if "min_time" in config else 500
+min_time = config["min_time"] if "min_time" in config else 100
 N0 = config["N0"] if "N0" in config else 1000
 
 
