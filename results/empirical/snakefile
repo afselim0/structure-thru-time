@@ -2,7 +2,7 @@ import os
 
 # Counting params
 dataset = config["dataset"]
-trees_dir = config["trees_dir"]
+trees_dir = config["trees_dir"] if "trees_dir" in config else f"../../data/trees/{dataset}"
 
 pops = config["pops"] if "pops" in config else None
 n_samples = config["n_samples"] if "n_samples" in config else "all"
@@ -18,12 +18,10 @@ window_size = config["window_size"] if "window_size" in config else 100
 min_time = config["min_time"] if "min_time" in config else 500
 N0 = config["N0"] if "N0" in config else 1000
 
-if dataset == "Wohns":
-    pop_colors = "../../data/metadata/wohns_pop_colors.csv"
-    pop_labels = "../../data/metadata/wohns_pop_labels.csv"
-elif dataset == "DeManuel":
-    pop_colors = "../../data/metadata/chimps_pop_colors.csv"
-    pop_labels = "../../data/metadata/chimps_pop_labels.csv"
+
+pop_colors = f"../../data/metadata/{dataset}_pop_colors.csv"
+pop_labels = f"../../data/metadata/{dataset}_pop_labels.csv"
+
 pops = pops.replace(","," ") if pops is not None else "all"
 
 output_dir = config["output_dir"] if "output_dir" in config else f"{dataset}/{pops.replace(" ","_")}_npp.{n_samples}"
