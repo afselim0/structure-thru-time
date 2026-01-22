@@ -7,6 +7,7 @@ from tqdm import tqdm
 import re
 import tskit
 from joblib import Parallel, delayed
+from pathos.multiprocessing import ProcessingPool as Pool
 from scipy.signal import savgol_filter
 
 class CountCoalEvents:
@@ -168,10 +169,21 @@ class CountCoalEvents:
                 return
             
             chunks = np.array_split(self.ts_files, num_threads)
-            Parallel(n_jobs=num_threads)(
-                delayed(process_chunk)(ts_files_chunk, chunk_id)
-                for chunk_id, ts_files_chunk in enumerate(chunks)
-            )
+
+            # Joblib parallelization
+            # Parallel(n_jobs=num_threads)(
+            #     delayed(process_chunk)(ts_files_chunk, chunk_id)
+            #     for chunk_id, ts_files_chunk in enumerate(chunks)
+            # )
+            
+            # Pathos parallelization
+            def _process_chunk_wrapper(args):
+                return process_chunk(*args)
+            pool = Pool(nodes=num_threads)
+            results = pool.map(
+                _process_chunk_wrapper,
+                [(ts_files_chunk, chunk_id)
+                for chunk_id, ts_files_chunk in enumerate(chunks)])
 
             # Aggregating the results from chunk files
             for chunk_id in range(len(chunks)):

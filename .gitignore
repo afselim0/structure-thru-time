@@ -30,7 +30,7 @@ test.sh
 *.vcf
 *.zip
 
-*.snakemake
+*.snakemake*
 finished_sim.txt
 finished_infer.txt
 
