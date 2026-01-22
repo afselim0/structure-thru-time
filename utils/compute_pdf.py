@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--num_posterior_samples", type=int, default=1, help="Number of posterior samples to use")
     parser.add_argument("--fraction_pairs", type=float, default=1, help="Fraction of pairs to sample for coalescence counting")
     parser.add_argument("--pops", nargs='+', help="Population labels to compute rates for")
-    parser.add_argument("--n_samples_per_pop", type=int, help="Number of samples to draw per population")
+    parser.add_argument("--n_samples_per_pop", type=int, default= -1, help="Number of samples to draw per population")
     parser.add_argument("--pop_labels", type=str, help="Path to population labels file")
     
     args = parser.parse_args()
@@ -34,7 +34,7 @@ def main():
     population_labels = pd.read_csv(pop_labels_path)
     
     chosen_pops = None if chosen_pops == "all" else chosen_pops
-    n_samples_per_pop = None if n_samples_per_pop == "all" else n_samples_per_pop
+    n_samples_per_pop = None if n_samples_per_pop == -1 else n_samples_per_pop
 
     os.makedirs(output_path, exist_ok=True)
     

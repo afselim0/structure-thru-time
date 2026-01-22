@@ -5,7 +5,7 @@ dataset = config["dataset"]
 trees_dir = config["trees_dir"] if "trees_dir" in config else f"../../data/trees/{dataset}"
 
 pops = config["pops"] if "pops" in config else None
-n_samples = config["n_samples"] if "n_samples" in config else "all"
+n_samples = config["n_samples"] if "n_samples" in config else -1
 max_time = config["max_time"] if "max_time" in config else 10000
 n_timepoints = config["n_timepoints"] if "n_timepoints" in config else 500
 fraction_pairs = config["fraction"] if "fraction" in config else 1
@@ -29,7 +29,12 @@ N0 = config["N0"] if "N0" in config else 1000
 pop_colors = f"../../data/metadata/{dataset}_pop_colors.csv"
 pop_labels = f"../../data/metadata/{dataset}_pop_labels.csv"
 
-pops = pops.replace(","," ") if pops is not None else "all"
+if pops is None:
+    pops = "all"
+    n_pops = len(pd.read_csv(pop_colors))
+else:
+    pops = pops.replace(","," ")
+    n_pops = len(pops.split(","))
 
 output_dir = config["output_dir"] if "output_dir" in config else f"{dataset}/{pops.replace(" ","_")}_npp.{n_samples}"
 
@@ -61,8 +66,14 @@ COMPUTE_RATES_SCRIPT = "../../src/compute_coal_rates.py"
 COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
-BASE_TARGETS = [pdf_data,rates_data,rates_plot,embeddings_data,embeddings_3d_plot,performance_data,performance_plot]
-COMB_TARGETS = [pdf_data,rates_data,rates_plot,embeddings_data,embeddings_3d_plot,performance_data,performance_plot,combs_data_dir,combs_plots_dir]
+BASE_TARGETS = [pdf_data,rates_data,embeddings_data,embeddings_3d_plot,performance_data]
+COMB_TARGETS = [pdf_data,rates_data,embeddings_data,embeddings_3d_plot,performance_data,combs_data_dir,combs_plots_dir]
+
+if n_pops < 10:
+    BASE_TARGETS.append(rates_plot)
+    BASE_TARGETS.append(performance_plot)
+    COMB_TARGETS.append(rates_plot)
+    COMB_TARGETS.append(performance_plot)
 
 rule all:
     input: BASE_TARGETS

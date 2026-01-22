@@ -2,7 +2,7 @@
 
 ## outputs / workflow engineering
 - Finalize performance evaluation
-- Wohns et al and Chimp et al  
+- Wohns et al and Chimp et al
     - same chrom, chimps and humans, singer relate
         - choose a syntenic hom chrom
     - Getting it to run and match the signal observed in previous runs
@@ -15,7 +15,7 @@
     - For manuscript - template figure in the latex 
     - In the working directories - several figure outputs; 
     - One pop at a time - plus the joint
-    - DONE Getting outputs similar to sim structure so same util scripts can run on it 
+    
 
 - Adding option for Singer vs tsinfer/tsdate, and relate
     - add to simulation pipeline
@@ -30,16 +30,14 @@ Minor:
 - Set up syncronization so that overleaf has access to fig outputs directory(ies)
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
 - Outputs to log files... 
-- the population combos script developed for chimps should be brought in as a general utility script
+
 
 To Discuss:
 - 1/18 Results are coming in squished on the 2nd dimension?  
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 Where are the empirical outputs... let's be sure to keep example runs
 
-Misc:
-
-
+# Misc:
 ### Moot discussion points
 
 - 1/18 JN : Didn't accomplish too much except to realize how fussy plotly static export is!  Static figures are improved somewhat; 2 camera outputs; and figure scraper is set up; see note above about need to step up and link in Luke's code  
@@ -57,3 +55,5 @@ Misc:
   - How well does the embedding represent the input rate matrix?  
      - Through time across all lineages and on average over time
      - How well per lineage per moment in time (and perhaps use that as color in plot!)
+- DONE the population combos script developed for chimps should be brought in as a general utility script
+- DONE Getting outputs similar to sim structure so same util scripts can run on it 
