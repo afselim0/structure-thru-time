@@ -271,13 +271,15 @@ rule infer_trees:
         INFER_FINISHED
     params:
         sim_tree_dir=SIM_TREE_OUTPUT_PATH,
-        outdir=INFER_TREE_OUTPUT_PATH
+        outdir=INFER_TREE_OUTPUT_PATH,
+        output_name = INFER_FINISHED_FILE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --sim_tree_path {params.sim_tree_dir} \
-            --output_path {params.outdir}
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
         """
 
 # --------------------Coalescent Rates--------------------
