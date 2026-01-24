@@ -19,6 +19,7 @@ dependencies:
   - numba
   - tqdm
   - pathos
+  - scikit-image
   - fastparquet=2024.11.0
   - pyarrow=20.0.0
   - pip
