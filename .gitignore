@@ -18,6 +18,7 @@ tests/
 *old*
 misc/
 local_data/
+test.sh
 
 ## Tree inference
 *.hap
@@ -29,7 +30,7 @@ local_data/
 *.vcf
 *.zip
 
-*.snakemake
+*.snakemake*
 finished_sim.txt
 finished_infer.txt
 

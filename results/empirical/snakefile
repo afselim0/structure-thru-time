@@ -1,35 +1,64 @@
 import os
+import pandas as pd
+# Counting params
+dataset = config["dataset"]
+trees_dir = config["trees_dir"] if "trees_dir" in config else f"../../data/trees/{dataset}"
 
-trees_dir = config["trees_dir"]
-output_dir = config["output_dir"]
-pops = config["pops"]
-max_time = config["max_time"]
-n_samples = config["n_samples"]
-species = config["species"]
-fraction_pairs = config["fraction"]
-min_time = config["min_time"]
+pops = config["pops"] if "pops" in config else None
+n_samples = config["n_samples"] if "n_samples" in config else -1
+max_time = config["max_time"] if "max_time" in config else 10000
+n_timepoints = config["n_timepoints"] if "n_timepoints" in config else 500
+fraction_pairs = config["fraction"] if "fraction" in config else 1
+num_posterior_samples = config["num_posterior_samples"] if "num_posterior_samples" in config else 1
+if "generation_time" in config:
+    generation_time = config["generation_time"]
+else:
+    if dataset == "Wohns":
+        generation_time = 28
+    elif dataset == "DeManuel":
+        generation_time = 10
 
-try:
-    num_posterior_samples = config["num_posterior_samples"]
-except:
-    num_posterior_samples = 1
-pops = pops.replace(","," ")
+# Rate params
+window_size = config["window_size"] if "window_size" in config else 100
 
-
-if species == "humans":
-    pop_colors = "wohns_pop_colors.csv"
-    pop_labels = "wohns_pop_labels.csv"
-elif species == "chimps":
-    pop_colors = "chimps_pop_colors.csv"
-    pop_labels = "chimps_pop_labels.csv"
+# Embedding params
+min_time = config["min_time"] if "min_time" in config else 100
+N0 = config["N0"] if "N0" in config else 1000
 
 
-pdf_data = os.path.join(output_dir,"pdf.parquet")
-rates_data = os.path.join(output_dir,"rates.parquet")
-rates_plot = os.path.join(output_dir,"rates.png")
-embeddings_data = os.path.join(output_dir,"embeddings.parquet")
-embeddings_3d_plot = os.path.join(output_dir,"embeddings.html")
-embeddings_static_plot = os.path.join(output_dir,"embeddings.png")
+pop_colors = f"../../data/metadata/{dataset}_pop_colors.csv"
+pop_labels = f"../../data/metadata/{dataset}_pop_labels.csv"
+
+if pops is None:
+    pops = "all"
+    n_pops = len(pd.read_csv(pop_colors))
+else:
+    pops = pops.replace(","," ")
+    n_pops = len(pops.split(","))
+
+output_dir = config["output_dir"] if "output_dir" in config else f"{dataset}/{pops.replace(" ","_")}_npp.{n_samples}"
+
+# Tags
+COUNTING_TAG        = f".max_t{max_time}.num_t{n_timepoints}.fp{fraction_pairs}"
+RATES_TAG           = COUNTING_TAG + f".WS{window_size}"
+EMBEDDINGS_TAG      = RATES_TAG + f".N0{N0}"
+EMBEDDINGS_PLOT_TAG = EMBEDDINGS_TAG + f".min_t{min_time}"
+
+
+data_output_path = os.path.join(output_dir,"data")
+plot_output_path = os.path.join(output_dir,"plots")
+
+# File Names
+pdf_data = os.path.join(data_output_path,f"pdf{COUNTING_TAG}.parquet")
+rates_data = os.path.join(data_output_path,f"rates{RATES_TAG}.parquet")
+rates_plot = os.path.join(plot_output_path,f"rates{RATES_TAG}.png")
+embeddings_data = os.path.join(data_output_path,f"embeddings{EMBEDDINGS_TAG}.parquet")
+embeddings_3d_plot = os.path.join(plot_output_path,f"embeddings{EMBEDDINGS_PLOT_TAG}.html")
+performance_data = os.path.join(data_output_path,f"performance{EMBEDDINGS_TAG}.parquet")
+performance_plot = os.path.join(plot_output_path,f"performance{EMBEDDINGS_TAG}.png")
+
+combs_data_dir  = os.path.join(data_output_path,f"combinatinons{RATES_TAG}")
+combs_plots_dir = os.path.join(plot_output_path,f"combinatinons{RATES_TAG}")
 
 # Main Script Paths
 CountCoalEvents_SCRIPT = "../../src/CountCoalEvents.py"
@@ -37,19 +66,19 @@ COMPUTE_RATES_SCRIPT = "../../src/compute_coal_rates.py"
 COMPUTE_EMBEDDINGS_SCRIPT = "../../src/LatentSpaceEmbeddings.py"
 PLOT_EMBEDDINGS_SCRIPT = "../../src/PlotEmbeddings.py"
 
-# Fixed params
-window_size = 500
-n_timepoints = 6000
+BASE_TARGETS = [pdf_data,rates_data,embeddings_data,embeddings_3d_plot,performance_data]
+COMB_TARGETS = [pdf_data,rates_data,embeddings_data,embeddings_3d_plot,performance_data,combs_data_dir,combs_plots_dir]
 
-
+if n_pops < 10:
+    BASE_TARGETS.append(rates_plot)
+    BASE_TARGETS.append(performance_plot)
+    COMB_TARGETS.append(rates_plot)
+    COMB_TARGETS.append(performance_plot)
 
 rule all:
-    input:
-        pdf_data,
-        rates_data,
-        rates_plot,
-        embeddings_data,
-        embeddings_3d_plot
+    input: BASE_TARGETS
+rule combs:
+    input: COMB_TARGETS
 
 rule compute_pdf:
     input:
@@ -57,11 +86,11 @@ rule compute_pdf:
         script = "../../utils/compute_pdf.py"
     params:
         trees_dir = trees_dir,
-        output_dir = output_dir,
-        output_name = "pdf.parquet",
+        outdir = data_output_path,
+        output_name = os.path.basename(pdf_data),
         max_time = max_time,
-        n_samples = n_samples,
         n_timepoints = n_timepoints,
+        n_samples = n_samples,
         num_posterior_samples = num_posterior_samples,
         fraction_pairs = fraction_pairs,
         pops = pops,
@@ -71,9 +100,10 @@ rule compute_pdf:
         pdf_data
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input_path {params.trees_dir} \
-            --output_path {params.output_dir} \
+            --output_path {params.outdir} \
             --output_name {params.output_name} \
             --max_time {params.max_time} \
             --n_timepoints {params.n_timepoints} \
@@ -91,8 +121,8 @@ rule compute_rates:
     output:
         rates_data
     params:
-        outdir=output_dir,
-        output_name="rates.parquet",
+        outdir=data_output_path,
+        output_name=os.path.basename(rates_data),
         window_size=window_size
     shell:
         """
@@ -113,10 +143,11 @@ rule plot_rates:
     output:
         rates_plot
     params:
-        outdir=output_dir,
-        output_name="rates.png",
+        outdir=plot_output_path,
+        output_name=os.path.basename(rates_plot),
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --colors {input.pop_colors} \
@@ -133,18 +164,20 @@ rule compute_embeddings:
     output:
         embeddings_data
     params:
-        outdir=output_dir,
-        output_name="embeddings.parquet"
+        N0 = N0,
+        outdir=data_output_path,
+        output_name=os.path.basename(embeddings_data)
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
             --input {input.rates} \
             --output_path {params.outdir} \
-            --output_name {params.output_name}
+            --output_name {params.output_name} \
+            --N0 {params.N0}
         """
 
-rule plot_embeddings_sim:
+rule plot_embeddings:
     input:
         embeddings=embeddings_data,
         pop_colors=pop_colors,
@@ -154,9 +187,10 @@ rule plot_embeddings_sim:
     output:
         embeddings_3d_plot
     params:
-        outdir=output_dir,
-        output_name="embeddings.html",
-        min_time=min_time
+        outdir=plot_output_path,
+        output_name=os.path.basename(embeddings_3d_plot),
+        min_time=min_time,
+        generation_time=generation_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -166,6 +200,62 @@ rule plot_embeddings_sim:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --min_time {params.min_time}
+            --min_time {params.min_time} \
+            --generation_time {params.generation_time}
         """
 
+rule evaluate_performance:
+    input:
+        embeddings=embeddings_data,
+        rates=rates_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="../../utils/evaluate_performance.py"
+    output:
+        performance_data,
+        performance_plot
+    params:
+        N0=N0,
+        data_output_path=data_output_path,
+        plot_output_path=plot_output_path,
+        data_output_name=os.path.basename(performance_data),
+        plot_output_name=os.path.basename(performance_plot)
+    shell:
+        """
+        python {input.script} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
+            --N0 {params.N0} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
+        """
+rule population_combinations:
+    input:
+        pop_labels=pop_labels,
+        pop_colors=pop_colors,
+        rates=rates_data,
+        script="../../utils/run_pop_combs.py"
+    params:
+        data_dir=combs_data_dir,
+        plots_dir=combs_plots_dir,
+        N0=N0,
+        generation_time=generation_time
+    output:
+        directory(combs_data_dir),
+        directory(combs_plots_dir)
+    shell:
+        """
+        python {input.script} \
+            --data_dir {params.data_dir} \
+            --plots_dir {params.plots_dir} \
+            --pop_labels {input.pop_labels} \
+            --pop_colors {input.pop_colors} \
+            --rates_file {input.rates} \
+            --N0 {params.N0} \
+            --generation_time {params.generation_time}
+        """
+    

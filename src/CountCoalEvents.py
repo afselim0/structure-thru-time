@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
@@ -7,6 +8,7 @@ from tqdm import tqdm
 import re
 import tskit
 from joblib import Parallel, delayed
+from pathos.multiprocessing import ProcessingPool as Pool
 from scipy.signal import savgol_filter
 
 class CountCoalEvents:
@@ -44,7 +46,8 @@ class CountCoalEvents:
         if num_posterior_samples == 1:
             self.num_posterior_samples = 1
             self.num_contigs = len(self.ts_files)
-            self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+            #self.contig_ids = [ts_file.rstrip('.trees') for ts_file in self.ts_files]
+            self.contig_ids = [ts_file.removesuffix(".trees") for ts_file in self.ts_files]
             self.contig_lengths = np.array([tskit.load(os.path.join(ts_dir, contig_id + ".trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)]).astype(np.uint64)
         else:
             self.num_posterior_samples = num_posterior_samples
@@ -92,7 +95,8 @@ class CountCoalEvents:
         """
         # Find the contig ID associated with the tree sequence file
         if self.num_posterior_samples == 1:
-            contig_id = ts_file.rstrip('.trees')
+            #contig_id = ts_file.rstrip('.trees')
+            contig_id = ts_file.removesuffix(".trees")
         else:
             contig_id = re.sub(r'_[0-9]+\.trees$', '', ts_file)
 
@@ -166,10 +170,21 @@ class CountCoalEvents:
                 return
             
             chunks = np.array_split(self.ts_files, num_threads)
-            Parallel(n_jobs=num_threads)(
-                delayed(process_chunk)(ts_files_chunk, chunk_id)
-                for chunk_id, ts_files_chunk in enumerate(chunks)
-            )
+
+            # Joblib parallelization
+            # Parallel(n_jobs=num_threads)(
+            #     delayed(process_chunk)(ts_files_chunk, chunk_id)
+            #     for chunk_id, ts_files_chunk in enumerate(chunks)
+            # )
+            
+            # Pathos parallelization
+            def _process_chunk_wrapper(args):
+                return process_chunk(*args)
+            pool = Pool(nodes=num_threads)
+            results = pool.map(
+                _process_chunk_wrapper,
+                [(ts_files_chunk, chunk_id)
+                for chunk_id, ts_files_chunk in enumerate(chunks)])
 
             # Aggregating the results from chunk files
             for chunk_id in range(len(chunks)):
@@ -188,48 +203,23 @@ class CountCoalEvents:
         return pdf_df
     
 
-def gaussian_smoothing_matrix(T, time_step, sigma, truncate=2):
-    K = int(truncate * sigma / time_step)
-    offsets = np.arange(-K, K + 1)
-    kernel = np.exp(-(offsets*time_step)**2 / (2 * sigma**2))
-
-    G = np.zeros((T, T))
-    for t in range(T):
-        for k, w in zip(offsets, kernel):
-            j = t + k
-            if 0 <= j < T:
-                G[t, j] += w
-
-        # normalize each row
-        G[t] /= G[t].sum()
-
-    return G
-
-def compute_coal_rates(pdf_df, window_size,gaussian_sigma=None):
+def compute_coal_rates(pdf_df, window_size, local_poly_order = 3):
     """Compute pairwise coalescent rates
 
     Args:
         pdf_df (pd.DataFrame): PDF computed from compute_coal_time_pdf
         window_size (int): window size used to calculate derivatives of the negative log survival function
-        gaussian_sigma (float, optional): Standard deviation for Gaussian smoothing. If None, no smoothing is applied. Defaults to None.
 
     Returns:
         pd.DataFrame: A dataframe for pairwise coalescent rates where each row corresponds to a sample pair, and each column corresponds to a time bin. The values represent the estimated coalescent rate within the respective time bin for the sample pair.
     """
     times = pdf_df.columns
     time_step = times[1]-times[0]
-    # if gaussian_sigma is None:
-    #     G = np.eye(len(times))
-    # else:
-    #     G = gaussian_smoothing_matrix(len(times), time_step, sigma=gaussian_sigma, truncate=2)
-    
     survival_df = 1 - pdf_df.cumsum(axis=1)
     m = int(window_size//time_step)
-    if m <2:
-        m = 2
+    if m < local_poly_order+1:
+        m = local_poly_order+1
     H = -np.log(survival_df) # Cumulative hazard function (cumulative coalescent rate)
-    # H = H @ G.T
-    rates = savgol_filter(H,window_length=m,polyorder=1,deriv=1,delta=time_step,axis=1)
-    # rates = (H[:,m:] - H[:,:-m])/(m*time_step)
+    rates = savgol_filter(H,window_length=m,polyorder=local_poly_order,deriv=1,delta=time_step,axis=1)
     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
     return rates_df

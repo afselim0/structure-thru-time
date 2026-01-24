@@ -12,7 +12,7 @@ dependencies:
   - matplotlib
   - seaborn
   - plotly
-  - tskit
+  - tskit=0.6.4
   - msprime
   - stdpopsim
   - demes

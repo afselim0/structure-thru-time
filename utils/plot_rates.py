@@ -7,6 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+
+# ______________________________Plotting Params______________________________
+INDIVIDUAL_LINE_WIDTH = 0.5
+INDIVIDUAL_LINE_ALPHA = 0.2
+MEAN_LINE_WIDTH = 1
+MEAN_LINE_ALPHA = 0.7
+# ___________________________________________________________________________
 def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
     setup_plotting_style()
     populations = pop_labels['population'].unique()
@@ -42,9 +49,9 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
             mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
-            ax[i].plot(times, mean_rates, color=color, lw = 1, alpha=0.7)
+            ax[i].plot(times, mean_rates, color=color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
             for pair in sample_pairs:
-                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=0.2, alpha=0.01)
+                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
 
     legend_handles = [Line2D(
             [0], [0],
