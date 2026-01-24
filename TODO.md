@@ -13,13 +13,15 @@
       - Goal:  Focused on chr 21
       - 4-pop HPRC (Please post output files to project/jnovembre)
          - GO Double SINGER params and re-run chr 21 as needed [ Haoyang]
-         - GO Relate - chr 21 
+         - GO Relate - chr 21
          - DONE Relate trees - chr 20, 22
          - Run the "all" and "combs" rule [ Ahmed ]
       - 26-pop HPRC (4 per pop)  
          - DONE Relate trees - chr 20, 22   
          - GO Relate - Chr 21
+            - Relate tree path: /project/jnovembre/hyhu/work/relate/chr21/chr21_tree
          - GO Double check SINGER params and re-run chr 21 as needed [ Haoyang ]
+            - SINGER trees path: /project/jnovembre/hyhu/work/singer/chr21/chr21_tree
          - Once ready, Run the "all" rule 
       - Wohns (1 per pop) - Bonus 
       - Chimps      
