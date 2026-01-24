@@ -1,21 +1,32 @@
 # simulations
 
 ## outputs / workflow engineering
+
+- Polish the rate inference - because of newly appreciated issues with recent times [Ahmed]
+
 - Finalize performance evaluation
+
 - Wohns et al and Chimp et al
-    - same chrom, chimps and humans, singer relate
+    - PAUSED same chrom, chimps and humans, singer relate  [Chimp takes too long to run]
         - choose a syntenic hom chrom
-    - Getting it to run and match the signal observed in previous runs
-      - Goal: 
-      - 4-pop (Please post output files to project/jnovembre)
-      - 1 per pop Wohns 
+    - ONGOING Getting it to run and match the signal observed in previous runs
+      - Goal:  Focused on chr 21
+      - 4-pop HPRC (Please post output files to project/jnovembre)
+         - Run the "combs" rule [ Ahmed ]
+      - 26-pop HPRC (4 per pop) 
+         - Double check SINGER params and re-run as needed
+         - Once ready,  re-run with latest scripts changes
+      - Wohns (1 per pop) 
       - Chimps 
+         - Try a run that subsets the genome more aggressively 
+         - Chop post-singer chr 21 into chunks and running stt with the goal of running larger sampler set [ Haoyang ]  
+         - Run the "combs" rule 
  
+
     - Revised set of preliminary figures 
-    - For manuscript - template figure in the latex 
-    - In the working directories - several figure outputs; 
-    - One pop at a time - plus the joint
-    
+    - AT For manuscript - template figure in the latex 
+    - AT In the working directories - several figure outputs;     
+
 
 - Adding option for Singer vs tsinfer/tsdate, and relate
     - add to simulation pipeline
