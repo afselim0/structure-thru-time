@@ -7,20 +7,27 @@
 - Finalize performance evaluation
 
 - Wohns et al and Chimp et al
-    - PAUSED same chrom, chimps and humans, singer relate  [Chimp takes too long to run]
+    - PAUSED same large chrom, chimps and humans, singer relate  [Chimp takes too long to run]
         - choose a syntenic hom chrom
     - ONGOING Getting it to run and match the signal observed in previous runs
       - Goal:  Focused on chr 21
       - 4-pop HPRC (Please post output files to project/jnovembre)
-         - Run the "combs" rule [ Ahmed ]
-      - 26-pop HPRC (4 per pop) 
-         - Double check SINGER params and re-run as needed
-         - Once ready,  re-run with latest scripts changes
-      - Wohns (1 per pop) 
-      - Chimps 
-         - Try a run that subsets the genome more aggressively 
-         - Chop post-singer chr 21 into chunks and running stt with the goal of running larger sampler set [ Haoyang ]  
-         - Run the "combs" rule 
+         - GO Double SINGER params and re-run chr 21 as needed [ Haoyang]
+         - GO Relate - chr 21 
+         - DONE Relate trees - chr 20, 22
+         - Run the "all" and "combs" rule [ Ahmed ]
+      - 26-pop HPRC (4 per pop)  
+         - DONE Relate trees - chr 20, 22   
+         - GO Relate - Chr 21
+         - GO Double check SINGER params and re-run chr 21 as needed [ Haoyang ]
+         - Once ready, Run the "all" rule 
+      - Wohns (1 per pop) - Bonus 
+      - Chimps      
+          - DONE chr 21 - whole chromosome with n=10(?) per pop
+          - DONE Nuria's Singer chr 21 
+          - Try a run that subsets chr 21 more aggressively but max's out n [ Haoyang ]
+             - Chop post-singer chr 21 into chunks and running stt with the goal of running larger sampler set [ Haoyang ]  
+         - Run the "all" and the "combs" rule 
  
 
     - Revised set of preliminary figures 

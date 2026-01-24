@@ -2,6 +2,7 @@
 import argparse
 import sys
 import os
+import numpy as np
 sys.path.append("../src")
 sys.path.append("../../src")
 from CountCoalEvents import CountCoalEvents
@@ -35,6 +36,8 @@ def main():
     chosen_pops = None if chosen_pops == ["all"] else chosen_pops
 
     os.makedirs(output_path, exist_ok=True)
+    all_pops = population_labels["population"].unique()
+    assert chosen_pops is None or np.all(np.isin(chosen_pops, all_pops)), "Some chosen populations are not in the population labels file."
 
     population_labels = population_labels[population_labels["population"].isin(chosen_pops)] if chosen_pops is not None else population_labels
 
@@ -50,15 +53,16 @@ def main():
             else:
                 subsample_ids = sample_ids
             chosen_samples.extend(subsample_ids)
+    elif chosen_pops is not None:
+        chosen_samples = population_labels["sample_id"].values
+    elif chosen_pops is None and n_samples_per_pop is None:
+        chosen_samples = None
 
     data_dir = os.path.join(output_path, "pdf_data")
     os.makedirs(data_dir, exist_ok=True)
 
-    print(len(chosen_samples))
-
-
     CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_pairs=fraction_pairs, sample_ids=chosen_samples)
-    pdf_df = CCE.compute_coal_time_pdf(num_threads=10, data_output=data_dir)
+    pdf_df = CCE.compute_coal_time_pdf(num_threads=12, data_output=data_dir)
     pdf_df.to_parquet(f"{output_path}/{args.output_name}")
 
 if __name__ == "__main__":

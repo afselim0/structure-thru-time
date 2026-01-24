@@ -202,24 +202,3 @@ class CountCoalEvents:
         pdf_df = pdf_df / (total_segments_per_pair.reshape(-1,1)*self.num_posterior_samples)
         return pdf_df
     
-
-def compute_coal_rates(pdf_df, window_size, local_poly_order = 3):
-    """Compute pairwise coalescent rates
-
-    Args:
-        pdf_df (pd.DataFrame): PDF computed from compute_coal_time_pdf
-        window_size (int): window size used to calculate derivatives of the negative log survival function
-
-    Returns:
-        pd.DataFrame: A dataframe for pairwise coalescent rates where each row corresponds to a sample pair, and each column corresponds to a time bin. The values represent the estimated coalescent rate within the respective time bin for the sample pair.
-    """
-    times = pdf_df.columns
-    time_step = times[1]-times[0]
-    survival_df = 1 - pdf_df.cumsum(axis=1)
-    m = int(window_size//time_step)
-    if m < local_poly_order+1:
-        m = local_poly_order+1
-    H = -np.log(survival_df) # Cumulative hazard function (cumulative coalescent rate)
-    rates = savgol_filter(H,window_length=m,polyorder=local_poly_order,deriv=1,delta=time_step,axis=1)
-    rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
-    return rates_df

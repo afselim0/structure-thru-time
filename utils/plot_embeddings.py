@@ -44,9 +44,9 @@ def main():
     plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
     plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
-    plotter.add_convex_hull()
-    plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
-    plotter.fig.show()
+    # plotter.add_convex_hull()
+    # plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
+    # plotter.fig.show()
     
 if __name__ == "__main__":
     main()

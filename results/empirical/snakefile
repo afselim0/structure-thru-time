@@ -10,13 +10,13 @@ max_time = config["max_time"] if "max_time" in config else 10000
 n_timepoints = config["n_timepoints"] if "n_timepoints" in config else 500
 fraction_pairs = config["fraction"] if "fraction" in config else 1
 num_posterior_samples = config["num_posterior_samples"] if "num_posterior_samples" in config else 1
-if "generation_time" in config:
-    generation_time = config["generation_time"]
-else:
-    if dataset == "Wohns":
-        generation_time = 28
-    elif dataset == "DeManuel":
-        generation_time = 10
+# if "generation_time" in config:
+#     generation_time = config["generation_time"]
+# else:
+#     if dataset == "Wohns":
+#         generation_time = 28
+#     elif dataset == "DeManuel":
+#         generation_time = 10
 
 # Rate params
 window_size = config["window_size"] if "window_size" in config else 100
@@ -200,8 +200,7 @@ rule plot_embeddings:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --min_time {params.min_time} \
-            --generation_time {params.generation_time}
+            --min_time {params.min_time}
         """
 
 rule evaluate_performance:
@@ -255,7 +254,5 @@ rule population_combinations:
             --pop_labels {input.pop_labels} \
             --pop_colors {input.pop_colors} \
             --rates_file {input.rates} \
-            --N0 {params.N0} \
-            --generation_time {params.generation_time}
+            --N0 {params.N0}
         """
-    

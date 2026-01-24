@@ -14,7 +14,7 @@ n_pops = demography.num_populations
 ## Simulation Parameters
 NUM_CONTIGS = config["num_contigs"] if "num_contigs" in config else 100
 NUM_REPLICATES = config["num_replicates"] if "num_replicates" in config else 1
-CONTIG_LENGTH = config["contig_length"] if "contig_length" in config else 3000000
+CONTIG_LENGTH = config["contig_length"] if "contig_length" in config else 1000000
 N_PER_POP = config["n_per_pop"] if "n_per_pop" in config else 10
 INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 
@@ -142,9 +142,9 @@ BASE_TARGETS = [
     RATES_SIM,
     EMBEDDINGS_SIM,
     EMB_SIM_PLOT,
-    PERFORMANCE_TRUE,
-    PERFORMANCE_SIM,
-    PERFORMANCE_SIM_PLOT
+    # PERFORMANCE_TRUE,
+    # PERFORMANCE_SIM,
+    # PERFORMANCE_SIM_PLOT
 ]
 
 INFER_TARGETS = [
@@ -152,7 +152,7 @@ INFER_TARGETS = [
     RATES_INFER_PLOT,
     EMBEDDINGS_INFER,
     EMB_INFER_PLOT,
-    PERFORMANCE_INFER
+    # PERFORMANCE_INFER
 ]
 
 if n_pops<20:
@@ -163,8 +163,8 @@ if n_pops<20:
     BASE_TARGETS.append(EMBEDDINGS_TRUE)
     BASE_TARGETS.append(EMB_TRUE_PLOT)
     INFER_TARGETS.append(RATES_INFER_PLOT)
-    BASE_TARGETS.append(PERFORMANCE_TRUE_PLOT)
-    INFER_TARGETS.append(PERFORMANCE_INFER_PLOT)
+    # BASE_TARGETS.append(PERFORMANCE_TRUE_PLOT)
+    # INFER_TARGETS.append(PERFORMANCE_INFER_PLOT)
     
 rule all:
     input:
