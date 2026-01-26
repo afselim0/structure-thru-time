@@ -53,6 +53,14 @@ Minor:
 
 
 To Discuss:
+- 1/26 Add outpus diagnostic to embedding doc - csv - # of iterative steps per time t; loss function value achieved per time t;   
+- 1/26 I think we need plotting / animations for time slices through the embeddings - as complement for colorblind - use abbreviations per individual (e.g numbers or two letter)
+- 1/26 We should do a forensic analysis of why the other chimp analysis is so different -- is it change in distance functino? Other tunables? 
+- 1/26 What conidtions allowed us to the Wohns with 900 individuals and what specific changes are holding us back now?  
+- 1/26 Need to profile memory usage and if we can get control of it 
+- 1/26 Future direction: admixture is pernicious too in that it pulls source populations closer together than they should be; Can we downweight attraction to samples who themselves have highby cross locus variance in weights - so if sample has high variance - it's attracted to others, but others are not attracted to it; might work in an alternate distance formulation
+- 1/26 Fixed L derivation so that we have likelihoods given an assumed effective sample size of $L$
+- 1/24 How to deal with issue that when lambda = 0 between any pair exact spacing will depend on BFGS tolerance - we should make this more explicit perhaps; e.g. lambda = 1/(N0+d_ij)-1/Nmax ; where Nmax is say N_0*10^5 for default 
 - 1/18 Results are coming in squished on the 2nd dimension?  
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 Where are the empirical outputs... let's be sure to keep example runs
