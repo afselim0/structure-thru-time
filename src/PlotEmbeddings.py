@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
+from pathlib import Path
+
 import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
@@ -9,6 +11,7 @@ from scipy.spatial import ConvexHull
 from scipy.ndimage import gaussian_filter
 from skimage.measure import marching_cubes
 from matplotlib.path import Path as MplPath
+
 # ----------------------- tunables ------------------------------------------
 sample_line_width = 2
 sample_line_alpha = 0.5
@@ -196,28 +199,80 @@ class PlotEmbeddings:
                 )
             )
 
-    def add_convex_hull(self):
+    def add_convex_hull(self, *, verbose: bool = False, debug_dir: str | None = None):
         for population in self.populations:
             color = self.colors_dict.get(population, "#808080")
-            vol_data=build_volume(self.embeddings_df,population,grid_res_xy)
-            vol,xs,ys,ts=vol_data
-            surf=surface_from_volume(vol,xs,ys,ts,gauss_sigma)
-            if surf is not None:
-                verts,faces=surf
-                i,j,k=faces.T
-                self.fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=i,j=j,k=k,
-                                         color=color,opacity=tube_alpha,name=population,legendgroup=population,showlegend=False,hoverinfo='skip'))
 
-def slice_convex_hull(points: np.ndarray) -> np.ndarray:
-    # Computes the convex hull for a given population at a given time point
-    # points: Nx2 array of (x,y) coordinates of samples belonging to the population at that time point
-    if len(points)<3: return points
-    center=points.mean(axis=0)
-    d=np.linalg.norm(points-center,axis=1)
-    keep=points[d<=np.percentile(d, central_percentile*100)]
-    if len(keep)<3: return keep
-    hull=ConvexHull(keep)
-    return keep[hull.vertices]
+            vol, xs, ys, ts = build_volume(
+                self.embeddings_df,
+                population,
+                grid_res_xy,
+                verbose=verbose,
+                debug_dir=debug_dir,
+            )
+
+            surf = surface_from_volume(vol, xs, ys, ts, gauss_sigma)
+            if surf is not None:
+                verts, faces = surf
+                i, j, k = faces.T
+                self.fig.add_trace(
+                    go.Mesh3d(
+                        x=verts[:, 0],
+                        y=verts[:, 1],
+                        z=verts[:, 2],
+                        i=i,
+                        j=j,
+                        k=k,
+                        color=color,
+                        opacity=tube_alpha,
+                        name=population,
+                        legendgroup=population,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
+                )
+            else:
+                if verbose:
+                    print(f"[{population}] surface_from_volume returned None (no surface)")
+
+def slice_convex_hull(points: np.ndarray, return_stats: bool = False):
+    """
+    Computes the convex hull for a given population at a given time point.
+
+    Returns:
+      - poly (Nx2 array) of hull vertices (ordered)
+      - if return_stats=True, also returns stats dict
+    """
+    stats = {
+        "n_points": int(len(points)),
+        "n_keep": 0,
+        "n_hull_verts": 0,
+    }
+
+    if len(points) < 3:
+        if return_stats:
+            return points, stats
+        return points
+
+    center = points.mean(axis=0)
+    d = np.linalg.norm(points - center, axis=1)
+
+    # central trimming (remove far outliers)
+    keep = points[d <= np.percentile(d, central_percentile * 100)]
+    stats["n_keep"] = int(len(keep))
+
+    if len(keep) < 3:
+        if return_stats:
+            return keep, stats
+        return keep
+
+    hull = ConvexHull(keep)
+    poly = keep[hull.vertices]
+    stats["n_hull_verts"] = int(len(poly))
+
+    if return_stats:
+        return poly, stats
+    return poly
 
 def rasterise_polygon(poly: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
     if len(poly)<3: return np.zeros((len(ys),len(xs)),dtype=bool)
@@ -226,27 +281,192 @@ def rasterise_polygon(poly: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.nd
     pts=np.vstack([xv.ravel(),yv.ravel()]).T
     return path.contains_points(pts).reshape(len(ys),len(xs))
 
-def build_volume(df: pd.DataFrame,pop:str,grid_res:int):
-    sub=df[df.population==pop]
-    xs_all,ys_all=sub['X1'],sub['X2']
-    pad_x=0.05*(xs_all.max()-xs_all.min())
-    pad_y=0.05*(ys_all.max()-ys_all.min())
-    xs=np.linspace(xs_all.min()-pad_x,xs_all.max()+pad_x,grid_res)
-    ys=np.linspace(ys_all.min()-pad_y,ys_all.max()+pad_y,grid_res)
-    times=np.sort(sub.time.unique())
-    ts = times
-    vol=np.zeros((len(ts),grid_res,grid_res),dtype=bool)
-    for i,t in enumerate(times): vol[i]=rasterise_polygon(slice_convex_hull(sub[sub.time==t][['X1','X2']].values),xs,ys)
-    return vol,xs,ys,ts
+def _safe_log10(x: np.ndarray) -> np.ndarray:
+    # avoid -inf for 0/negative times; caller should ideally ensure time>0 already
+    x = np.asarray(x, dtype=float)
+    x = np.where(x <= 0, np.nan, x)
+    return np.log10(x)
 
-def surface_from_volume(vol:np.ndarray,xs:np.ndarray,ys:np.ndarray,ts:np.ndarray,sigma:float):
-    blurred=gaussian_filter(vol.astype(float),sigma=sigma)
-    lo,hi=blurred.min(),blurred.max()
-    if hi<=lo: print("Empty volume; skipping iso-surface (%.3f–%.3f)",lo,hi); return None
-    level=0.5
-    if not(lo<level<hi): level=lo+0.5*(hi-lo)#; print("Adjusted iso level → %.3f (%.3f–%.3f)",level,lo,hi)
-    try: verts,faces,_,_=marching_cubes(blurred,level=level)
-    except RuntimeError as e: print("No surface found: %s; skipping",e); return None
-    nx,ny,nz=len(xs)-1,len(ys)-1,len(ts)-1
-    vx=xs[0]+verts[:,2]/nx*(xs[-1]-xs[0]); vy=ys[0]+verts[:,1]/ny*(ys[-1]-ys[0]); vz=ts[0]+verts[:,0]/nz*(ts[-1]-ts[0])
-    return np.stack([vx,vy,vz],axis=1),faces
+def _make_time_bins(times: np.ndarray, n_bins: int, time_scale: str):
+    """
+    Returns:
+      bin_edges (n_bins+1), bin_centers (n_bins)
+    Bins in log10(time) if time_scale == "log", else in time.
+    """
+    times = np.asarray(times, dtype=float)
+    if time_scale == "log":
+        t = _safe_log10(times)
+        t = t[~np.isnan(t)]
+    else:
+        t = times
+
+    if len(t) == 0:
+        return None, None
+
+    lo, hi = np.nanmin(t), np.nanmax(t)
+    if lo == hi:
+        # degenerate: everything at same time
+        edges = np.array([lo, hi + 1e-9])
+        centers = np.array([lo])
+        return edges, centers
+
+    edges = np.linspace(lo, hi, n_bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    return edges, centers
+
+def build_volume(
+    df: pd.DataFrame,
+    pop: str,
+    grid_res: int,
+    *,
+    verbose: bool = False,
+    debug_top_k: int = 5,
+    debug_dir: str | None = None,
+):
+    """
+    Build a boolean volume vol[t, y, x] for one population by:
+      1) slicing points at each time
+      2) computing a 2D convex hull polygon (with central trimming)
+      3) rasterising the polygon on an XY grid
+
+    Diagnostics (verbose):
+      - per-slice: n_points, n_keep, n_hull_verts, occ_frac
+      - summary: empty slices, points/bin stats, emptiest bins
+
+    Optional:
+      - debug_dir: if set, writes CSVs for the emptiest bins (raw points).
+    """
+    sub = df[df.population == pop]
+    if sub.empty:
+        if verbose:
+            print(f"[{pop}] No rows for population; returning empty volume")
+        xs = np.linspace(0, 1, grid_res)
+        ys = np.linspace(0, 1, grid_res)
+        ts = np.array([0.0])
+        vol = np.zeros((len(ts), grid_res, grid_res), dtype=bool)
+        return vol, xs, ys, ts
+
+    xs_all, ys_all = sub["X1"], sub["X2"]
+    pad_x = 0.05 * (xs_all.max() - xs_all.min()) if xs_all.max() > xs_all.min() else 1.0
+    pad_y = 0.05 * (ys_all.max() - ys_all.min()) if ys_all.max() > ys_all.min() else 1.0
+    xs = np.linspace(xs_all.min() - pad_x, xs_all.max() + pad_x, grid_res)
+    ys = np.linspace(ys_all.min() - pad_y, ys_all.max() + pad_y, grid_res)
+
+    times = np.sort(sub.time.unique())
+    ts = times
+    vol = np.zeros((len(ts), grid_res, grid_res), dtype=bool)
+
+    # ---- diagnostics accumulators ----
+    slice_stats = []  # dicts per slice
+    points_per_slice = []
+    empty_slices = 0
+
+    for i, t in enumerate(times):
+        pts = sub[sub.time == t][["X1", "X2"]].values
+        n_pts = len(pts)
+        points_per_slice.append(n_pts)
+
+        poly, poly_stats = slice_convex_hull(pts, return_stats=True)
+        mask = rasterise_polygon(poly, xs, ys)
+        vol[i] = mask
+
+        occ = float(mask.mean())  # fraction of grid occupied
+        is_empty = (n_pts < 3) or (mask.sum() == 0)
+        if is_empty:
+            empty_slices += 1
+
+        stat = {
+            "idx": i,
+            "time": float(t),
+            "n_points": int(n_pts),
+            "n_keep": int(poly_stats.get("n_keep", 0)),
+            "n_hull_verts": int(poly_stats.get("n_hull_verts", 0)),
+            "occ_frac": occ,
+            "mask_sum": int(mask.sum()),
+        }
+        slice_stats.append(stat)
+
+        if verbose:
+            # concise per-slice line (easy to scan)
+            print(
+                f"[{pop}] slice {i:03d}/{len(times)-1:03d} "
+                f"t={float(t):.6g} n={n_pts:5d} keep={stat['n_keep']:5d} "
+                f"verts={stat['n_hull_verts']:4d} occ={occ:.6f} "
+                f"{'EMPTY' if is_empty else ''}"
+            )
+
+    # ---- summary diagnostics ----
+    if verbose:
+        arr = np.asarray(points_per_slice, dtype=int)
+        empties = [s for s in slice_stats if s["n_points"] == 0]
+        empties_sorted = sorted(empties, key=lambda d: d["idx"])[:debug_top_k]
+
+        # points/bin min/median/max
+        pmin = int(arr.min()) if len(arr) else 0
+        pmed = int(np.median(arr)) if len(arr) else 0
+        pmax = int(arr.max()) if len(arr) else 0
+
+        # "emptiest" bins: smallest n_points, then smallest occ_frac
+        emptiest = sorted(slice_stats, key=lambda d: (d["n_points"], d["occ_frac"]))[:debug_top_k]
+        emptiest_str = ", ".join([f"{d['idx']}:{d['n_points']}" for d in emptiest])
+
+        empty_frac = (empty_slices / len(times)) * 100.0 if len(times) else 0.0
+        print(
+            f"[{pop}] slices={len(times)}, empty={empty_slices} (empty_frac={empty_frac:.2f}%) "
+            f"; points/bin min={pmin}, med={pmed}, max={pmax}"
+        )
+        print(f"    emptiest bins: {emptiest_str}")
+
+        # Optional: dump CSVs for worst slices for later 2D inspection
+        if debug_dir is not None:
+            debug_path = Path(debug_dir)
+            debug_path.mkdir(parents=True, exist_ok=True)
+            for d in emptiest:
+                t = d["time"]
+                pts = sub[sub.time == t][["X1", "X2"]].copy()
+                out_csv = debug_path / f"{pop}_slice_{d['idx']:03d}_t_{t:.6g}.csv"
+                pts.to_csv(out_csv, index=False)
+
+    return vol, xs, ys, ts
+
+def _print_volume_summary(pop: str, counts: list[int], empty: int, n_slices: int, mode: str):
+    arr = np.array(counts, dtype=int) if len(counts) else np.array([], dtype=int)
+    if arr.size == 0:
+        print(f"[{pop}] mode={mode}: no slices.")
+        return
+    print(
+        f"[{pop}] mode={mode}: slices={n_slices}, empty={empty} "
+        f"(empty_frac={empty/n_slices:.2%}); "
+        f"points/bin min={arr.min()}, med={int(np.median(arr))}, max={arr.max()}"
+    )
+    # show a few emptiest bins for quick debugging
+    worst = np.argsort(arr)[:5]
+    print(f"    emptiest bins: " + ", ".join([f"{i}:{arr[i]}" for i in worst]))
+
+def surface_from_volume(vol: np.ndarray, xs: np.ndarray, ys: np.ndarray, ts: np.ndarray,
+                        sigma_xy: float, sigma_t: float = 0.0):
+    # NOTE: vol has shape (T, Y, X) in your build_volume()
+    blurred = gaussian_filter(
+        vol.astype(float),
+        sigma=(sigma_t, sigma_xy, sigma_xy)  # time, y, x
+    )
+    lo, hi = blurred.min(), blurred.max()
+    if hi <= lo:
+        print(f"Empty volume; skipping iso-surface ({lo:.3f}–{hi:.3f})")
+        return None
+
+    level = 0.5
+    if not (lo < level < hi):
+        level = lo + 0.5 * (hi - lo)
+
+    try:
+        verts, faces, _, _ = marching_cubes(blurred, level=level)
+    except RuntimeError as e:
+        print(f"No surface found: {e}; skipping")
+        return None
+
+    nx, ny, nz = len(xs) - 1, len(ys) - 1, len(ts) - 1
+    vx = xs[0] + verts[:, 2] / nx * (xs[-1] - xs[0])
+    vy = ys[0] + verts[:, 1] / ny * (ys[-1] - ys[0])
+    vz = ts[0] + verts[:, 0] / nz * (ts[-1] - ts[0])
+    return np.stack([vx, vy, vz], axis=1), faces
