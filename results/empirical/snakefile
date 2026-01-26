@@ -19,7 +19,8 @@ num_posterior_samples = config["num_posterior_samples"] if "num_posterior_sample
 #         generation_time = 10
 
 # Rate params
-window_size = config["window_size"] if "window_size" in config else 100
+min_window_size = config["min_window_size"] if "min_window_size" in config else 101
+max_window_size = config["max_window_size"] if "max_window_size" in config else 1001
 
 # Embedding params
 min_time = config["min_time"] if "min_time" in config else 100
@@ -40,7 +41,7 @@ output_dir = config["output_dir"] if "output_dir" in config else f"{dataset}/{po
 
 # Tags
 COUNTING_TAG        = f".max_t{max_time}.num_t{n_timepoints}.fp{fraction_pairs}"
-RATES_TAG           = COUNTING_TAG + f".WS{window_size}"
+RATES_TAG           = COUNTING_TAG + f".min_WS{min_window_size}.max_WS{max_window_size}"
 EMBEDDINGS_TAG      = RATES_TAG + f".N0{N0}"
 EMBEDDINGS_PLOT_TAG = EMBEDDINGS_TAG + f".min_t{min_time}"
 
@@ -123,7 +124,8 @@ rule compute_rates:
     params:
         outdir=data_output_path,
         output_name=os.path.basename(rates_data),
-        window_size=window_size
+        min_window_size=min_window_size,
+        max_window_size=max_window_size
     shell:
         """
         mkdir -p {params.outdir}
@@ -131,7 +133,8 @@ rule compute_rates:
             --pdf_path {input.pdf_data} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --window_size {params.window_size} 
+            --minimum_window_size {params.min_window_size} \
+            --maximum_window_size {params.max_window_size}
         """
 
 rule plot_rates:
@@ -190,7 +193,7 @@ rule plot_embeddings:
         outdir=plot_output_path,
         output_name=os.path.basename(embeddings_3d_plot),
         min_time=min_time,
-        generation_time=generation_time
+        # generation_time=generation_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -242,7 +245,7 @@ rule population_combinations:
         data_dir=combs_data_dir,
         plots_dir=combs_plots_dir,
         N0=N0,
-        generation_time=generation_time
+        # generation_time=generation_time
     output:
         directory(combs_data_dir),
         directory(combs_plots_dir)

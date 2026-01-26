@@ -12,7 +12,7 @@ n_pops = demography.num_populations
 
 # Parameters
 ## Simulation Parameters
-NUM_CONTIGS = config["num_contigs"] if "num_contigs" in config else 100
+NUM_CONTIGS = config["num_contigs"] if "num_contigs" in config else 500
 NUM_REPLICATES = config["num_replicates"] if "num_replicates" in config else 1
 CONTIG_LENGTH = config["contig_length"] if "contig_length" in config else 1000000
 N_PER_POP = config["n_per_pop"] if "n_per_pop" in config else 10
@@ -20,7 +20,8 @@ INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 
 ## STT Parameters
 FRACTION_PAIRS = config["fraction_pairs"] if "fraction_pairs" in config else 1
-WINDOW_SIZE = config["window_size"] if "window_size" in config else 100
+MIN_WINDOW_SIZE = config["min_window_size"] if "min_window_size" in config else 51
+MAX_WINDOW_SIZE = config["max_window_size"] if "max_window_size" in config else 501
 N0 = config["N0"] if "N0" in config else 1
 MIN_TIME = config["min_time"] if "min_time" in config else 1
 MAX_TIME = config["max_time"] if "max_time" in config else int(2*demography.events[-1].time)
@@ -44,7 +45,7 @@ INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/{INFER_METHOD}")
 SIM_TAG = f".V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
 INFER_TAG = SIM_TAG + f".m{INFER_METHOD}"
 
-RATES_TAG = f".WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
+RATES_TAG = f".min_WS{MIN_WINDOW_SIZE}.max_WS{MAX_WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
 EMBEDDINGS_TAG = RATES_TAG + f".N0{N0}"
 
 # PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
@@ -76,8 +77,8 @@ INFER_FINISHED_FILE      = f"finished_infer{INFER_TAG}.txt"
 
 PCA_PLOT_FILE            = f"pca.png"
 RATES_TRUE_PLOT_FILE     = f"rates_true.png"
-RATES_SIM_PLOT_FILE      = f"rates_sim.{SIM_TAG + RATES_TAG}.png"
-RATES_INFER_PLOT_FILE    = f"rates_infer.{INFER_TAG + RATES_TAG}.png"
+RATES_SIM_PLOT_FILE      = f"rates_sim{SIM_TAG + RATES_TAG}.png"
+RATES_INFER_PLOT_FILE    = f"rates_infer{INFER_TAG + RATES_TAG}.png"
 
 EMB_TRUE_PLOT_FILE       = f"embeddings_true.N0{N0}.html"
 EMB_SIM_PLOT_FILE        = f"embeddings_sim{SIM_TAG + EMBEDDINGS_TAG}.html"
@@ -344,7 +345,8 @@ rule compute_rates_sim:
     params:
         outdir=DATA_OUTPUT_PATH,
         output_name=RATES_SIM_FILE,
-        window_size=WINDOW_SIZE
+        min_window_size = MIN_WINDOW_SIZE,
+        max_window_size = MAX_WINDOW_SIZE
     shell:
         """
         mkdir -p {params.outdir}
@@ -352,7 +354,8 @@ rule compute_rates_sim:
             --pdf_path {input.pdf_sim} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --window_size {params.window_size} 
+            --minimum_window_size {params.min_window_size} \
+            --maximum_window_size {params.max_window_size} 
         """
 
 rule compute_pdf_infer:
@@ -395,15 +398,17 @@ rule compute_rates_infer:
     params:
         outdir=DATA_OUTPUT_PATH,
         output_name=RATES_INFER_FILE,
-        window_size=WINDOW_SIZE
+        min_window_size = MIN_WINDOW_SIZE,
+        max_window_size = MAX_WINDOW_SIZE
     shell:
         """
         mkdir -p {params.outdir}
         python {input.script} \
-            --pdf_path {input.pdf_infer} \
+            --pdf_path {input.pdf_sim} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --window_size {params.window_size} \
+            --minimum_window_size {params.min_window_size} \
+            --maximum_window_size {params.max_window_size} 
         """
 
 # 2. Plot
