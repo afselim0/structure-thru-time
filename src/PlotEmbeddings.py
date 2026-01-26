@@ -443,17 +443,30 @@ def _print_volume_summary(pop: str, counts: list[int], empty: int, n_slices: int
     worst = np.argsort(arr)[:5]
     print(f"    emptiest bins: " + ", ".join([f"{i}:{arr[i]}" for i in worst]))
 
-def surface_from_volume(vol:np.ndarray,xs:np.ndarray,ys:np.ndarray,ts:np.ndarray,sigma:float):
+def surface_from_volume(vol: np.ndarray, xs: np.ndarray, ys: np.ndarray, ts: np.ndarray,
+                        sigma_xy: float, sigma_t: float = 0.0):
+    # NOTE: vol has shape (T, Y, X) in your build_volume()
     blurred = gaussian_filter(
-    vol.astype(float),
-    sigma=(0, sigma, sigma)  # no smoothing across time
+        vol.astype(float),
+        sigma=(sigma_t, sigma_xy, sigma_xy)  # time, y, x
     )
-    lo,hi=blurred.min(),blurred.max()
-    if hi<=lo: print("Empty volume; skipping iso-surface (%.3f–%.3f)",lo,hi); return None
-    level = np.quantile(blurred[blurred > 0], 0.5)
-    if not(lo<level<hi): level=lo+0.5*(hi-lo)#; print("Adjusted iso level → %.3f (%.3f–%.3f)",level,lo,hi)
-    try: verts,faces,_,_=marching_cubes(blurred,level=level)
-    except RuntimeError as e: print("No surface found: %s; skipping",e); return None
-    nx,ny,nz=len(xs)-1,len(ys)-1,len(ts)-1
-    vx=xs[0]+verts[:,2]/nx*(xs[-1]-xs[0]); vy=ys[0]+verts[:,1]/ny*(ys[-1]-ys[0]); vz=ts[0]+verts[:,0]/nz*(ts[-1]-ts[0])
-    return np.stack([vx,vy,vz],axis=1),faces
+    lo, hi = blurred.min(), blurred.max()
+    if hi <= lo:
+        print(f"Empty volume; skipping iso-surface ({lo:.3f}–{hi:.3f})")
+        return None
+
+    level = 0.5
+    if not (lo < level < hi):
+        level = lo + 0.5 * (hi - lo)
+
+    try:
+        verts, faces, _, _ = marching_cubes(blurred, level=level)
+    except RuntimeError as e:
+        print(f"No surface found: {e}; skipping")
+        return None
+
+    nx, ny, nz = len(xs) - 1, len(ys) - 1, len(ts) - 1
+    vx = xs[0] + verts[:, 2] / nx * (xs[-1] - xs[0])
+    vy = ys[0] + verts[:, 1] / ny * (ys[-1] - ys[0])
+    vz = ts[0] + verts[:, 0] / nz * (ts[-1] - ts[0])
+    return np.stack([vx, vy, vz], axis=1), faces
