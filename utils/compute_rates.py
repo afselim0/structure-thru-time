@@ -11,11 +11,12 @@ def main():
     parser.add_argument("--pdf_path", required=True, help="Path to tree sequence directory")
     parser.add_argument("--output_path", required=True, help="Output directory for pdf data")
     parser.add_argument("--output_name", required=True, help="Output filename for pdf parquet file")
-    parser.add_argument("--window_size", type=float, required=True, help="window size for rate calculation")
+    parser.add_argument("--minimum_window_size", type=float, required=True, help="minimum window size for rate calculation")
+    parser.add_argument("--maximum_window_size", type=float, required=True, help="maximum window size for rate calculation")
     args = parser.parse_args()
     
     pdf_df = pd.read_parquet(args.pdf_path)
-    rates_df = compute_coal_rates(pdf_df, args.window_size)
+    rates_df = compute_coal_rates(pdf_df, args.minimum_window_size, args.maximum_window_size)
     rates_df.to_parquet(f"{args.output_path}/{args.output_name}")
 if __name__ == "__main__":
     main()
