@@ -9,11 +9,12 @@ from pathlib import Path
 try:
     import imageio_ffmpeg  # noqa: F401
 except ImportError:
-    pass  # rely on system ffmpeg if present
+    pass
+
 
 def make_mp4(
     parquet_path: str,
-    out_mp4: str = '',
+    out_mp4: str = "",
     fps: int = 20,
     bounce: bool = True,
     point_size: float = 10.0,
@@ -24,15 +25,14 @@ def make_mp4(
     colors_path: str | None = None,
     labels_path: str | None = None,
 ):
-    
+    parquet_path = Path(parquet_path)
+
     if out_mp4:
         out_mp4 = Path(out_mp4)
     else:
-        out_mp4 = f"{parquet_path.removesuffix('.parquet')}.mp4"
-        out_mp4 = Path(out_mp4)
-        
-    parquet_path = Path(parquet_path)
-   
+        out_mp4 = parquet_path.with_suffix(".mp4")
+
+    print("make_mp4: reading parquet", parquet_path, flush=True)
 
     df = pd.read_parquet(parquet_path)
 
@@ -41,82 +41,125 @@ def make_mp4(
     y_col = "X2"
     id_col = "sample_id"
 
-    # Time filter early
+    # ---- Time filter early
     df = df[(df[time_col] >= min_time) & (df[time_col] <= max_time)].copy()
     if df.empty:
-        raise ValueError(f"No rows left after filtering {min_time} <= {time_col} <= {max_time}.")
+        raise ValueError("No rows left after time filtering")
 
+    # ---- Unique times (sorted)
+    times = np.sort(df[time_col].unique())
+    T = len(times)
+
+    # ---- Stable sample order: union of all samples ever seen
+    sample_order = np.array(sorted(df[id_col].unique()))
+    N = len(sample_order)
+
+    # ---- Map times and samples to integer indices
+    t_codes = pd.Categorical(
+        df[time_col], categories=times, ordered=True
+    ).codes
+    s_codes = pd.Index(sample_order).get_indexer(df[id_col].to_numpy())
+
+    # ---- Pack coordinates: (T, N, 2), NaN = not yet present
+    xy = np.full((T, N, 2), np.nan, dtype=np.float32)
+    xy[t_codes, s_codes, 0] = df[x_col].to_numpy(dtype=np.float32)
+    xy[t_codes, s_codes, 1] = df[y_col].to_numpy(dtype=np.float32)
+
+    # ---- Colors (constant over time)
     sample_colors = None
     if colors_path and labels_path:
         labels_df = pd.read_csv(labels_path)
         colors_df = pd.read_csv(colors_path)
 
-        active_samples = df[id_col].unique()
-        labels_df = labels_df[labels_df[id_col].isin(active_samples)].copy()
+        if labels_df[id_col].duplicated().any():
+            raise ValueError("Duplicate sample_id in labels file")
+        if colors_df["population"].duplicated().any():
+            raise ValueError("Duplicate population in colors file")
 
-        # merge labels->colors on population
         merged = labels_df.merge(colors_df, on="population", how="left")
-
         if merged["color"].isna().any():
-            missing_pops = merged.loc[merged["color"].isna(), "population"].unique()
-            raise ValueError(f"Missing colors for populations: {missing_pops}")
+            missing = merged.loc[merged["color"].isna(), "population"].unique()
+            raise ValueError(f"Missing colors for populations: {missing}")
 
-        # create mapping: sample_id -> color
         color_map = dict(zip(merged[id_col], merged["color"]))
+        sample_colors = np.array(
+            [color_map.get(sid, "#808080") for sid in sample_order],
+            dtype=object,
+        )
+        
+    sample_labels = None
+    if labels_path is not None:
+        labels_df = pd.read_csv(labels_path)
 
-        # We'll use a consistent sample order for ALL frames
-        sample_order = np.array(sorted(df[id_col].unique()))
-        sample_colors = np.array([color_map.get(sid, "#808080") for sid in sample_order], dtype=object)
-    else:
-        # still enforce consistent order even if no colors
-        sample_order = np.array(sorted(df[id_col].unique()))
+        # Map sample_id -> 3-letter population code
+        pop_map = dict(
+            zip(labels_df[id_col], labels_df["population"].str[:3].str.upper())
+        )
 
-    # Sort once so groupby preserves sample_order within each time (we'll still reindex to be safe)
-    df.sort_values([time_col, id_col], inplace=True)
+        sample_labels = np.array(
+            [pop_map.get(sid, "") for sid in sample_order],
+            dtype=object,
+        )
 
-    # Unique times
-    times = np.sort(df[time_col].unique())
-    T = len(times)
+    # ---- Axis limits with padding
+    xmin, xmax = np.nanmin(xy[:, :, 0]), np.nanmax(xy[:, :, 0])
+    ymin, ymax = np.nanmin(xy[:, :, 1]), np.nanmax(xy[:, :, 1])
+    dx = xmax - xmin
+    dy = ymax - ymin
+    pad = 0.03
 
-    # Precompute xy arrays, ordered by sample_order, per time
-    # (This keeps colors aligned to points.)
-    xy_by_time = {}
-    for t, g in df.groupby(time_col, sort=True):
-        # reindex to sample_order so rows align to sample_colors
-        g2 = g.set_index(id_col).reindex(sample_order)
-        xy_by_time[t] = g2[[x_col, y_col]].to_numpy()
-
-    # Axis limits
-    xmin, xmax = df[x_col].min(), df[x_col].max()
-    ymin, ymax = df[y_col].min(), df[y_col].max()
-
-    # Bounce order
+    # ---- Bounce order
     idxs = list(range(T))
     if bounce and T > 1:
         idxs = idxs + idxs[-2:0:-1]
 
-    # Figure
+    # ---- Figure
     fig, ax = plt.subplots(figsize=(5, 5), dpi=dpi)
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
+    ax.set_xlim(xmin - pad * dx, xmax + pad * dx)
+    ax.set_ylim(ymin - pad * dy, ymax + pad * dy)
     ax.set_aspect("equal", adjustable="box")
-    title = ax.set_title("")
 
-    # Initialize scatter with correct number of points
-    init_xy = xy_by_time[times[0]]
+    title = ax.set_title("")
+   
+    time_text = ax.text(
+        0.02, 0.98, "",
+        transform=ax.transAxes,
+        ha="left", va="top",
+    )
+    time_text.set_animated(True)
+
     scat = ax.scatter(
-        init_xy[:, 0],
-        init_xy[:, 1],
+        xy[0, :, 0],
+        xy[0, :, 1],
         s=point_size,
         alpha=alpha,
         rasterized=True,
+        animated=True,
     )
+    title.set_animated(True)
 
     if sample_colors is not None:
         scat.set_color(sample_colors)
+        
+        texts = []
+    if sample_labels is not None:
+        for i in range(N):
+            txt = ax.text(
+                np.nan, np.nan, sample_labels[i],
+                ha="center", va="bottom",
+                color=sample_colors[i],
+                fontsize=7,
+            )
+            txt.set_animated(True)
+            txt.set_visible(False)  # hidden until sample appears
+            texts.append(txt)
 
     fig.tight_layout()
-    
+
+    # ---- Draw once, cache background for blitting
+    fig.canvas.draw()
+    background = fig.canvas.copy_from_bbox(ax.bbox)
+
     print("Writing to:", out_mp4)
 
     with imageio.get_writer(
@@ -128,25 +171,42 @@ def make_mp4(
         macro_block_size=None,
     ) as writer:
         for ti in idxs:
-            t = times[ti]
-            scat.set_offsets(xy_by_time[t])
-            title.set_text(f"t = {t}")
+            fig.canvas.restore_region(background)
 
-            fig.canvas.draw()
+            coords = xy[ti]
+            scat.set_offsets(coords)
+            ax.draw_artist(scat)
+            
+            # Update labels
+            if sample_labels is not None:
+                for i, txt in enumerate(texts):
+                    x, y = coords[i]
+                    if np.isnan(x) or np.isnan(y):
+                        txt.set_visible(False)
+                    else:
+                        txt.set_position((x, y))
+                        txt.set_visible(True)
+                        ax.draw_artist(txt)
+            
+            time_text.set_text(f"t = {times[ti]}")
+            ax.draw_artist(time_text)
+
+            fig.canvas.blit(ax.bbox)
+
             buf = np.asarray(fig.canvas.buffer_rgba())
-            frame = buf[:, :, :3].copy()
-
-            writer.append_data(frame)
+            writer.append_data(buf[:, :, :3])
 
     plt.close(fig)
-    print(f"Wrote {out_mp4} with {len(idxs)} frames (times {times.min()}..{times.max()}).")
+    print(f"Wrote {out_mp4} with {len(idxs)} frames.")
 
-    output_basename = out_mp4.name.removesuffix(".html")
+    output_basename = out_mp4.stem
+    # ---- Tiny HTML wrapper
     html = f"""
     <!DOCTYPE html>
     <html>
     <body style="margin:0">
-        <video src="{out_mp4.name}" autoplay loop muted playsinline></video>
+      <video src="{out_mp4.name}" autoplay loop muted playsinline
+             style="width:100vw;height:100vh;object-fit:contain;"></video>
     </body>
     </html>
     """
