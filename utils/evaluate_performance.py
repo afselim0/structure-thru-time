@@ -8,6 +8,8 @@ sys.path.append("../src")
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings, compute_f
 from plot_rates import plot_rates
 import argparse
+import matplotlib.pyplot as plt
+import os
 
 def reconstruct_rates(embeddings, N0):
     embeddings_pairs = embeddings.merge(embeddings, on="time", suffixes=("_1", "_2"))
@@ -64,23 +66,42 @@ def main():
     pop_labels = pop_labels[pop_labels['sample_id'].isin(active_samples)]
     populations = pop_labels['population'].unique()
     pop_colors = pop_colors[pop_colors['population'].isin(populations)]
+    
+    out_png = f"{args.plot_output_path}/{args.plot_output_name}"
+    os.makedirs(args.plot_output_path, exist_ok=True)
+    
     if len(pop_colors) < 10:
         fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
         fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
+     
+        # Draft of an extra plot that would plot True vs Reconstructed Rate
+        tvsrplot = false
+        if tvsrplot:         
+            fig,ax = plt.subplots(figsize = (6,4))
+            ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
+            ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
+            ax.set_xscale("log")
+            ax.set_xlabel("Rate index")          # or whatever x represents
+            ax.set_ylabel("Rate value")          # adjust as needed
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
+            
         
     
-    fig,ax = plt.subplots(figsize = (6,4))
-    ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
-    ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
-    ax.set_xscale("log")
-    ax.set_xlabel("Rate index")          # or whatever x represents
-    ax.set_ylabel("Rate value")          # adjust as needed
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
-    
-    
-    
+    else:
+    # Make a small placeholder file so Snakemake sees the expected output, othrewise cluster job will fail
+        fig = plt.figure(figsize=(6, 2))
+        plt.text(
+            0.01, 0.5,
+            f"Performance plot skipped: {len(pop_colors)} populations (threshold < 10).",
+            va="center"
+        )
+        plt.axis("off")
+        fig.savefig(out_png, dpi=150, bbox_inches="tight")
+
+        plt.close(fig)
+
 if __name__ == "__main__":
     main()
 # %%
