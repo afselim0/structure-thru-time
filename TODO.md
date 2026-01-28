@@ -53,7 +53,8 @@ Minor:
 
 
 To Discuss:
-- 1/26 Give thought to the natural boundary case observation of most recent window with no coalescence between any one. What does that suggest about initialization / benefits of sharing information across windows etc. 
+- 1/27 Some confusion with wohns_pop_labels and colors? 
+- 1/26 Give thought to the natural boundary case observation of most recent window with no coalescence between any one.  That point will just be pushed away from all others.  What does that suggest about initialization / benefits of sharing information across windows etc. 
 - 1/26 Next paper or a small last section - use embedding to re-estimate rates and show an improvement over the raw rates
 - 1/26 Revisit Procrustes analysis per time step option
 - 1/26 Show multiple solutions for same data (HT Amy G)
