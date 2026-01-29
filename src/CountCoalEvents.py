@@ -54,6 +54,11 @@ class CountCoalEvents:
                 raise ValueError(f"Number of .trees files ({len(self.ts_files)}) is not divisible by num_posterior_samples ({num_posterior_samples})")
             self.contig_lengths = np.array([tskit.load(os.path.join(ts_dir, contig_id + "_0.trees")).sequence_length for contig_id in tqdm(self.contig_ids,total=self.num_contigs)]).astype(np.uint64)
 
+        tot_contig_length = np.sum(self.contig_lengths)
+        if tot_contig_length < 2**32:
+            self.datatype = np.uint32
+        else:
+            self.datatype = np.uint64
         # processing sample data
         ts = tskit.load(os.path.join(ts_dir, self.ts_files[0]))
         self.sample_sets = [[sample_id.astype(np.int32)] for sample_id in ts.samples()]
@@ -103,7 +108,7 @@ class CountCoalEvents:
         s = self.samples_selected[contig_id]
         active_samples = s[s].index.values
         if len(active_samples) == 0:
-            return np.zeros((self.num_pairs, self.num_timepoints), dtype=np.uint32)
+            return np.zeros((self.num_pairs, self.num_timepoints), dtype=self.datatype)
         
         if len(active_samples) < ts.num_samples:
             ts = ts.simplify(samples=active_samples)
@@ -119,8 +124,8 @@ class CountCoalEvents:
         pair_idx = np.array(pair_idxs)
         
         # Counting coal events
-        coal_segments_tot = np.zeros((self.num_pairs, self.num_timepoints), dtype=np.uint32)
-        coal_segments = ts.pair_coalescence_counts(sample_sets=[[i] for i in range(len(active_samples))],indexes=pairs,span_normalise=False,time_windows=np.linspace(0,self.max_time,self.num_timepoints+1)).astype(np.uint32)
+        coal_segments_tot = np.zeros((self.num_pairs, self.num_timepoints), dtype=self.datatype)
+        coal_segments = ts.pair_coalescence_counts(sample_sets=[[i] for i in range(len(active_samples))],indexes=pairs,span_normalise=False,time_windows=np.linspace(0,self.max_time,self.num_timepoints+1)).astype(self.datatype)
         coal_segments_tot[pair_idx, :] = coal_segments
 
         return coal_segments_tot
@@ -165,12 +170,6 @@ class CountCoalEvents:
                 return
             
             chunks = np.array_split(self.ts_files, num_threads)
-
-            # Joblib parallelization
-            # Parallel(n_jobs=num_threads)(
-            #     delayed(process_chunk)(ts_files_chunk, chunk_id)
-            #     for chunk_id, ts_files_chunk in enumerate(chunks)
-            # )
             
             # Pathos parallelization
             def _process_chunk_wrapper(args):
@@ -194,33 +193,14 @@ class CountCoalEvents:
         time_bins_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
         pdf_df = pd.DataFrame(coal_segments_total,columns=time_bins_edges[:-1],index = self.pairs_MultiIndex)
         pairs_selected = pd.DataFrame(
-            np.logical_and(CCE.samples_selected.values[:,None,:], CCE.samples_selected.values[None,:,:])
-            .reshape(CCE.num_samples**2,CCE.num_contigs),
-            index=pd.MultiIndex.from_product([CCE.sample_ids, CCE.sample_ids], names=["sample_1", "sample_2"]),
-            columns=CCE.contig_ids
+            np.logical_and(self.samples_selected.values[:,None,:], self.samples_selected.values[None,:,:])
+            .reshape(self.num_samples**2,self.num_contigs),
+            index=pd.MultiIndex.from_product([self.sample_ids, self.sample_ids], names=["sample_1", "sample_2"]),
+            columns=self.contig_ids
         )
         mask = (pairs_selected.index.get_level_values("sample_1") < pairs_selected.index.get_level_values("sample_2"))
         pairs_selected = pairs_selected[mask]
 
-        total_segments_per_pair = (pairs_selected*self.contig_lengths).values.sum(axis=1).astype(np.uint32)
+        total_segments_per_pair = (pairs_selected*self.contig_lengths).values.sum(axis=1).astype(self.datatype)
         pdf_df = pdf_df / (total_segments_per_pair.reshape(-1,1)*self.num_posterior_samples)
         return pdf_df
-
-#%%
-pop_labels = pd.read_csv("../data/metadata/Wohns_pop_labels.csv")
-chosen_pops = ["CEU","YRI"]
-pop_labels = pop_labels[pop_labels["population"].isin(chosen_pops)]
-sample_ids = []
-n_samples_per_pop = 50
-for pop in chosen_pops:
-    sample_ids.extend(pop_labels[pop_labels["population"]==pop]["sample_id"].values[:n_samples_per_pop])
-
-ts_dir = "../data/trees/wohns_chopped"
-CCE = CountCoalEvents(ts_dir=ts_dir,
-                      max_time=4000,
-                      num_timepoints=4000,
-                      sample_ids=sample_ids)
-                    #   num_posterior_samples=60)
-# %%
-x = CCE.compute_coal_time_pdf(num_threads=8,data_output="test/")
-# %%
