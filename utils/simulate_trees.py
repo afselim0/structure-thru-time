@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 
-def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, num_replicates, recomb_rate=1e-8, mutation_rate=1e-8, parallel=True):
+def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, recomb_rate=1.2e-8, mutation_rate=1.2e-8):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
     populations = np.unique(pop_labels['population'])
@@ -27,33 +27,17 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ploidy=2,
             random_seed=42+i
         )
-        ts = msprime.sim_mutations(
-            ts,
-            rate=mutation_rate,
-            random_seed=42+i
-        )
         return i, ts
     
-    
     start_time = time()
-    if parallel:
-        with Pool(os.cpu_count()) as pool:
-            for i, ts in tqdm(pool.imap(simulate_replicate, range(num_contigs*num_replicates)), total=num_contigs*num_replicates):
-                rep = i // num_contigs
-                contig = i % num_contigs
-                file_name = f"contig_{contig}" if num_replicates == 1 else f"contig_{contig}_{rep}"
-                ts.dump(f"{output_dir}/{file_name}.trees")
-                with open(f"{output_dir}/{file_name}.vcf", "w") as f:
-                    ts.write_vcf(f, contig_id=str(contig),allow_position_zero=True)
-    else:
-        for i in tqdm(range(num_contigs*num_replicates)):
-            _, ts = simulate_replicate(i)
-            rep = i // num_contigs
-            contig = i % num_contigs
-            file_name = f"contig_{contig}" if num_replicates == 1 else f"contig_{contig}_{rep}"
+
+    with Pool(os.cpu_count()) as pool:
+        for i, ts in tqdm(pool.imap(simulate_replicate, range(num_contigs)), total=num_contigs):
+            file_name = f"contig_{i}"
             ts.dump(f"{output_dir}/{file_name}.trees")
+            ts = msprime.sim_mutations(ts,rate=mutation_rate,random_seed=42+i)
             with open(f"{output_dir}/{file_name}.vcf", "w") as f:
-                ts.write_vcf(f, contig_id=str(contig),allow_position_zero=True)
+                ts.write_vcf(f, contig_id=str(i),allow_position_zero=True)
 
     end_time = time()
     time_taken = end_time - start_time
@@ -68,6 +52,7 @@ def main():
     parser.add_argument("--num_contigs", required=True, help="number of contigs to simulate")
     parser.add_argument("--num_replicates", required=True, help="number of replicates per contig")
     parser.add_argument("--contig_length", required=True, help="length of each contig")
+    parser.add_argument("--sim_params", required=True, help="simulation_parameters")
    
     
     args = parser.parse_args()
@@ -77,9 +62,9 @@ def main():
     num_contigs = int(args.num_contigs)
     num_replicates = int(args.num_replicates)
     contig_length = int(args.contig_length)
-    
-    time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length, num_replicates)
-    with open(f"{output_path}/finished_sim.txt", "w") as f:
+    sim_params = args.sim_params
+    time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length)
+    with open(f"{output_path}/{sim_params}", "w") as f:
         f.write(f"Simulation took {time_taken/60:.2f} minutes")
 
 if __name__ == "__main__":

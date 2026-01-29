@@ -1,13 +1,27 @@
 #!/bin/bash
+# snakemake --config \
+#     trees_dir=../../data/trees/wohns_chopped \
+#     pops=YRI,CEU,CHB,JPT \
+#     n_samples=20 \
+#     dataset=Wohns \
+#     min_time=1 \
+#     N0=1000 \
+#     n_timepoints=2000 \
+#     max_window_size=1500 \
+#     num_threads=8 \
+#     fraction=0.5 \
+#     --cores all \
+
 snakemake --config \
     trees_dir=../../data/trees/wohns_chopped \
-    output_dir=wohns/test \
-    pops=YRI,CEU \
-    max_time=10000 \
-    n_samples=5 \
-    pop_colors=./wohns_pop_colors.csv \
-    species=humans \
-    fraction=1 \
-    min_time=500 \
-    --cores all
-    
+    n_samples=2 \
+    dataset=Wohns \
+    min_time=1 \
+    N0=10000 \
+    max_time=4000 \
+    min_window_size=100 \
+    max_window_size=1500 \
+    n_timepoints=4000 \
+    output_dir=Wohns/all_1 \
+    num_threads=8 \
+    --cores all \

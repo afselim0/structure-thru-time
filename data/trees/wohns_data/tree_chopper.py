@@ -5,24 +5,29 @@ import os
 import numpy as np
 from tqdm import tqdm
 #%%
-def chop_ts(ts,contig_length):
-    first_tree_span = ts.first().span
+def chop_ts(ts,contig_length,remove_first = True):
+    if remove_first:
+        first_tree_span = ts.first().span
+    else:
+        first_tree_span = 0
     total_span = ts.sequence_length
     breakpoints = np.arange(first_tree_span,total_span,contig_length)
     for i in tqdm(range(len(breakpoints)-1)):
         start = breakpoints[i]
         end = breakpoints[i+1]
         chopped_ts = ts.keep_intervals([(start, end)],simplify=True).trim()
-        yield chopped_ts
+        yield chopped_ts,start,end
 
 #%%
-chopped_trees_path = "../wohns_chopped"
-
-ts_files = glob.glob("../wohns/*.trees")
-contig_length = 5e6
+ts_files = glob.glob("../DeManuel/chr21/*.trees")
+chopped_trees_path = "../DeManuel/chr21_chopped"
+contig_length = 1e6
 for ts_file in ts_files:
     ts = tskit.load(ts_file)
-    for i, chopped_ts in enumerate(chop_ts(ts,contig_length)):
-        out_file = f"{os.path.splitext(ts_file)[0]}_contig_{i}.trees"
+    replicate_id = os.path.basename(ts_file).removesuffix(".trees").split("_")[1]
+    for i, (chopped_ts, start, end) in enumerate(chop_ts(ts,contig_length)):
+        out_file = f"chr21_{int(start)}_{int(end)}_{replicate_id}.trees"
         chopped_ts.dump(os.path.join(chopped_trees_path,out_file))
+# %%
+ts = tskit.load("../DeManuel/chr21/chr21_0.trees")
 # %%

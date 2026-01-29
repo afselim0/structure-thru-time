@@ -12,13 +12,14 @@ dependencies:
   - matplotlib
   - seaborn
   - plotly
-  - tskit
+  - tskit=0.6.4
   - msprime
   - stdpopsim
   - demes
   - numba
   - tqdm
   - pathos
+  - scikit-image
   - fastparquet=2024.11.0
   - pyarrow=20.0.0
   - pip
@@ -26,8 +27,9 @@ dependencies:
     - demesdraw
     - hsluv
     - kaleido
-    - snakemake==9.14.5
+    - snakemake=9.14.5
     - tsinfer
     - tsdate
     - pulp==3.3.0
     - tsunzip
+    - bio2zarr

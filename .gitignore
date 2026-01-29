@@ -1,18 +1,18 @@
-TODO.md
+
 # log files
 *.pyc
 *.DS_Store
 job_logs/
+*.ipynb
 
 ## Output files
 *.parquet
 *.html
 *.png
-*.csv
 *.pdf
 *.txt
 *.log
-
+*.mp4
 ## Inferred Trees
 
 ## Tests
@@ -31,10 +31,10 @@ local_data/
 *.vcf
 *.zip
 
-*.snakemake
+*.snakemake*
 finished_sim.txt
 finished_infer.txt
 
-results/simulations/scripts/run_test.sh
-results/simulations/scripts/test_script.py
+results/simulations/outputs/
 *(jnovembre@uchicago.edu)*
+/sandbox

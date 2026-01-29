@@ -1,4 +1,4 @@
-#%%
+#!/usr/bin/env python3
 import pandas as pd
 import argparse
 import os
@@ -7,7 +7,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-def plot_rates(rates_df, pop_colors, pop_labels):
+
+# ______________________________Plotting Params______________________________
+INDIVIDUAL_LINE_WIDTH = 0.5
+INDIVIDUAL_LINE_ALPHA = 0.2
+MEAN_LINE_WIDTH = 1
+MEAN_LINE_ALPHA = 0.7
+N0 = 5000
+# ___________________________________________________________________________
+def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
     setup_plotting_style()
     populations = pop_labels['population'].unique()
 
@@ -15,14 +23,15 @@ def plot_rates(rates_df, pop_colors, pop_labels):
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
     times = rates_df.columns.astype(int)
 
-    fig, ax = plt.subplots(1,len(populations), figsize=(3*len(populations),3),sharex=True,sharey=True)
-    fig.supylabel("Coalescence Rate")
+    fig, ax = plt.subplots(1,len(populations), figsize=(4*len(populations),3),sharex=True,sharey=True)
+    fig.supylabel(ylabel)
     for i in range(len(populations)):
         if n_populations == 1:  
             ax = [ax]
         ax[i].set_xlabel("Time")
         ax[i].set_title(f"{populations[i]}")
         ax[i].set_xscale("log")
+        ax[i].set_ylim(top=1/N0)
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
@@ -42,9 +51,9 @@ def plot_rates(rates_df, pop_colors, pop_labels):
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
             mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
-            ax[i].plot(times, mean_rates, color=color, lw = 1, alpha=0.7)
+            ax[i].plot(times, mean_rates, color=color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
             for pair in sample_pairs:
-                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=0.2, alpha=0.01)
+                ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
 
     legend_handles = [Line2D(
             [0], [0],
@@ -54,6 +63,8 @@ def plot_rates(rates_df, pop_colors, pop_labels):
             label=pop)
         for pop, color in pop_colors_dict.items()]
     ax[-1].legend(handles=legend_handles, title="Population", bbox_to_anchor=(1.05, 1), loc='upper left')
+    fig.tight_layout(rect=[0.01, 0, 1, 1])
+
     return fig
 
 
@@ -86,4 +97,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-# %%
