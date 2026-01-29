@@ -8,7 +8,7 @@ pops = config["pops"] if "pops" in config else None
 n_samples = config["n_samples"] if "n_samples" in config else -1
 max_time = config["max_time"] if "max_time" in config else 10000
 n_timepoints = config["n_timepoints"] if "n_timepoints" in config else 500
-fraction_pairs = config["fraction"] if "fraction" in config else 1
+fraction_samples = config["fraction"] if "fraction" in config else 1
 num_posterior_samples = config["num_posterior_samples"] if "num_posterior_samples" in config else 1
 num_threads = config["num_threads"] if "num_threads" in config else 1
 # if "generation_time" in config:
@@ -94,7 +94,7 @@ rule compute_pdf:
         n_timepoints = n_timepoints,
         n_samples = n_samples,
         num_posterior_samples = num_posterior_samples,
-        fraction_pairs = fraction_pairs,
+        fraction_samples = fraction_samples,
         pops = pops,
         pop_labels = pop_labels,
         num_threads = num_threads
@@ -113,7 +113,7 @@ rule compute_pdf:
             --pops {params.pops} \
             --num_posterior_samples {params.num_posterior_samples} \
             --n_samples_per_pop {params.n_samples} \
-            --fraction_pairs {params.fraction_pairs} \
+            --fraction_samples {params.fraction_samples} \
             --pop_labels {params.pop_labels} \
             --num_threads {params.num_threads}
         """
