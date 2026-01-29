@@ -13,6 +13,7 @@ job_logs/
 *.txt
 *.log
 *.mp4
+*trees*
 
 pop_colors.csv
 pop_labels.csv

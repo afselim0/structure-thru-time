@@ -60,18 +60,21 @@ if __name__ == "__main__":
     main()
 
 # %%
-vcf_path = "../results/simulations/outputs/zigzag/trees/sim"
+vcf_path = "../results/simulations/split/trees/sim"
 vcf_files = glob.glob(os.path.join(vcf_path, "*.vcf"))
+path_to_singer_master = "../singer-0.1.8-beta-linux-x86_64/singer_master"
+path_to_singer_tskit_conversion = "../singer-0.1.8-beta-linux-x86_64/convert_to_tskit"
 
 def infer_tsinfer(vcf_file_path, output_path, mu=1.2e-8):
     vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
     contig_id = os.path.basename(vcf_path_prefix)
-    vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {vcf_path_prefix}.icf --force"
-    icf_to_vcz_command = f"vcf2zarr encode {vcf_path_prefix}.icf {vcf_path_prefix}.vcz --force"
+    output_prefix = os.path.join(output_path, contig_id)
+    vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {output_prefix}.icf --force"
+    icf_to_vcz_command = f"vcf2zarr encode {output_prefix}.icf {output_prefix}.vcz --force"
     subprocess.run(vcf_to_icf_command, shell=True)
     subprocess.run(icf_to_vcz_command, shell=True)
 
-    vcz_path = os.path.join(vcf_path_prefix + ".vcz")
+    vcz_path = os.path.join(output_prefix + ".vcz")
     vcf_zarr = zarr.load(vcz_path)
     vdata = tsinfer.VariantData(vcz_path, ancestral_state=vcf_zarr["variant_allele"][:, 0])
     inferred_ts = tsinfer.infer(vdata)
@@ -90,3 +93,7 @@ def infer_singer(vcf_file_path, output_path, path_to_singer_master, path_to_sing
     subprocess.run(singer_infer_command, shell=True)
     subprocess.run(convert_to_tskit_command, shell=True)
     return
+# %%
+output_path = "../results/simulations/split/trees/tsinfer"
+vcf_file_path = vcf_files[0]
+# %%
