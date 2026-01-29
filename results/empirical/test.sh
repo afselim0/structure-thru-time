@@ -7,8 +7,9 @@ snakemake --config \
     min_time=1 \
     N0=1000 \
     n_timepoints=2000 \
-    max_window_size=1000 \
+    max_window_size=1500 \
     fraction=0.1 \
+    num_threads=8 \
     --cores all \
 
 # snakemake --config \

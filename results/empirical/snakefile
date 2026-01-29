@@ -41,7 +41,7 @@ else:
 output_dir = config["output_dir"] if "output_dir" in config else f"{dataset}/{pops.replace(" ","_")}_npp.{n_samples}"
 
 # Tags
-COUNTING_TAG        = f".max_t{max_time}.num_t{n_timepoints}.fp{fraction_pairs}"
+COUNTING_TAG        = f".max_t{max_time}.num_t{n_timepoints}.fp{fraction_samples}"
 RATES_TAG           = COUNTING_TAG + f".min_WS{min_window_size}.max_WS{max_window_size}"
 EMBEDDINGS_TAG      = RATES_TAG + f".N0{N0}"
 EMBEDDINGS_PLOT_TAG = EMBEDDINGS_TAG + f".min_t{min_time}"
