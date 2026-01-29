@@ -32,3 +32,4 @@ dependencies:
     - tsdate
     - pulp==3.3.0
     - tsunzip
+    - bio2zarr

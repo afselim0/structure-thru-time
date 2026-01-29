@@ -1,15 +1,11 @@
-# simulations
-
-## outputs / workflow engineering
-
-- Polish the rate inference - because of newly appreciated issues with recent times [Ahmed]
-
+# outputs / workflow engineering
 - Finalize performance evaluation
 
 - Wohns et al and Chimp et al
     - PAUSED same large chrom, chimps and humans, singer relate  [Chimp takes too long to run]
         - choose a syntenic hom chrom
-    - ONGOING Getting it to run and match the signal observed in previous runs
+    - ONGOING Getting it to run and match the signal observed in previous 
+    runs
       - Goal:  Focused on chr 21
       - 4-pop HPRC (Please post output files to project/jnovembre)
          - GO Double SINGER params and re-run chr 21 as needed [ Haoyang]
@@ -30,12 +26,17 @@
           - Try a run that subsets chr 21 more aggressively but max's out n [ Haoyang ]
              - Chop post-singer chr 21 into chunks and running stt with the goal of running larger sampler set [ Haoyang ]  
          - Run the "all" and the "combs" rule 
- 
 
     - Revised set of preliminary figures 
     - AT For manuscript - template figure in the latex 
     - AT In the working directories - several figure outputs;     
 
+    - Master snakefile for running both simulations and empirical results
+    - Parent directories in /project/jnovembre to keep track of results
+    - Text and colors in embedding files to capture residuals
+    - Add procrusted and penalty
+    - add max distance
+    
 
 - Adding option for Singer vs tsinfer/tsdate, and relate
     - add to simulation pipeline
@@ -44,12 +45,12 @@
 - Turn attention to the local admixture problem 
 
 Minor:
-- DONE In sim snakemake - Update True embedding outputs to mark choices of N0 and other specific relevant params 
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
 - Set up syncronization so that overleaf has access to fig outputs directory(ies)
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
 - Outputs to log files... 
+- Static figures cannot be saved on cluster
 
 
 To Discuss:
@@ -93,3 +94,5 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
      - How well per lineage per moment in time (and perhaps use that as color in plot!)
 - DONE the population combos script developed for chimps should be brought in as a general utility script
 - DONE Getting outputs similar to sim structure so same util scripts can run on it 
+- DONE In sim snakemake - Update True embedding outputs to mark choices of N0 and other specific relevant params 
+- DONE Polish the rate inference - because of newly appreciated issues with recent times
