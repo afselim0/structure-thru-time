@@ -50,7 +50,7 @@ def read_mutation(tables, mutation_file):
 
 def read_ARG(node_file, branch_file, mutation_file):
     tables = read_ts(node_file, branch_file)
-    read_mutation(tables, mutation_file)
+    # read_mutation(tables, mutation_file)
     ts = tables.tree_sequence()
     return ts
 
