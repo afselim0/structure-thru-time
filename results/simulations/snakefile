@@ -19,6 +19,7 @@ N_PER_POP = config["n_per_pop"] if "n_per_pop" in config else 10
 INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 
 ## STT Parameters
+NUM_THREADS = config["num_threads"] if "num_threads" in config else 1
 FRACTION_PAIRS = config["fraction_pairs"] if "fraction_pairs" in config else 1
 MIN_WINDOW_SIZE = config["min_window_size"] if "min_window_size" in config else 51
 MAX_WINDOW_SIZE = config["max_window_size"] if "max_window_size" in config else 501
@@ -320,7 +321,8 @@ rule compute_pdf_sim:
         n_timepoints=N_TIMEPOINTS,
         num_posterior_samples=NUM_REPLICATES,
         fraction_pairs=FRACTION_PAIRS,
-        pop_labels=POP_LABELS
+        pop_labels=POP_LABELS,
+        num_threads=NUM_THREADS
     shell:
         """
         mkdir -p {params.outdir}
@@ -332,7 +334,8 @@ rule compute_pdf_sim:
             --n_timepoints {params.n_timepoints} \
             --num_posterior_samples {params.num_posterior_samples} \
             --fraction_pairs {params.fraction_pairs} \
-            --pop_labels {params.pop_labels}
+            --pop_labels {params.pop_labels} \
+            --num_threads {params.num_threads}
         """
 
 rule compute_rates_sim:
@@ -373,7 +376,8 @@ rule compute_pdf_infer:
         n_timepoints=N_TIMEPOINTS,
         num_posterior_samples=NUM_REPLICATES,
         fraction_pairs=FRACTION_PAIRS,
-        pop_labels=POP_LABELS
+        pop_labels=POP_LABELS,
+        num_threads=NUM_THREADS
     shell:
         """
         mkdir -p {params.outdir}
@@ -385,7 +389,8 @@ rule compute_pdf_infer:
             --n_timepoints {params.n_timepoints} \
             --num_posterior_samples {params.num_posterior_samples} \
             --fraction_pairs {params.fraction_pairs} \
-            --pop_labels {params.pop_labels}
+            --pop_labels {params.pop_labels} \
+            --num_threads {params.num_threads}
         """
 
 rule compute_rates_infer:
