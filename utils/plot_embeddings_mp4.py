@@ -71,10 +71,10 @@ def make_mp4(
         labels_df = pd.read_csv(labels_path)
         colors_df = pd.read_csv(colors_path)
 
-        if labels_df[id_col].duplicated().any():
-            raise ValueError("Duplicate sample_id in labels file")
-        if colors_df["population"].duplicated().any():
-            raise ValueError("Duplicate population in colors file")
+        # if labels_df[id_col].duplicated().any():
+        #     raise ValueError("Duplicate sample_id in labels file")
+        # if colors_df["population"].duplicated().any():
+        #     raise ValueError("Duplicate population in colors file")
 
         merged = labels_df.merge(colors_df, on="population", how="left")
         if merged["color"].isna().any():

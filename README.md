@@ -34,10 +34,10 @@ The following are parameters that can be passed to `--config` and that affect do
 | **num_posterior_samples**| Number of posterior samples (if `singer` was used for inference)             | ALL            |
 | **pops**                 | Subset of populations to draw samples from (default: all)                    | ALL            |
 | **n_samples**            | Number of samples per population (default: all)                              | ALL            |
-| **max_time**             | Maximum time used for computing PDFs, rates, and embeddings                  | PDF            |
-| **n_timepoints**         | Number of equally spaced time points from `t = 0` to `max_time`              | PDF            |
-| **fraction_samples**     | Fraction of samples used per contig (default: 1.0)                           | PDF            |
-| **num_threads**          | Number of parallel threads used for PDF computation                          | PDF            |
+| **max_time**             | Maximum time used for computing PDFs, rates, and embeddings                  | Coalescent PDF |
+| **n_timepoints**         | Number of equally spaced time points from `t = 0` to `max_time`              | Coalescent PDF |
+| **fraction_samples**     | Fraction of samples used per contig (default: 1.0)                           | Coalescent PDF |
+| **num_threads**          | Number of parallel threads used for PDF computation                          | Coalescent PDF |
 | **min_window_size**      | Minimum window size for local regression when computing rates                | Rates          |
 | **max_window_size**      | Maximum window size for local regression when computing rates (linear growth)| Rates          |
 | **N0**                   | Controls latent space resolution                                             | Embeddings     |

@@ -75,7 +75,7 @@ def main():
         fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
      
         # Draft of an extra plot that would plot True vs Reconstructed Rate
-        tvsrplot = false
+        tvsrplot = False
         if tvsrplot:         
             fig,ax = plt.subplots(figsize = (6,4))
             ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
@@ -104,21 +104,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# %%
-debug = False
-if debug:
-    embeddings = pd.read_parquet(args.embeddings)
-    rates = pd.read_parquet(args.rates)
-
-    LSE = LatentSpaceEmbeddings(rates)
-    N0 = LSE.N0 if args.N0 is None else args.N0
-    reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
-    # t_idx = int(4000/4)
-    # plt.scatter(rates.iloc[:,t_idx], reconstructed_rates.iloc[:,t_idx])
-    # plt.title(f"Time {rates.columns[t_idx]}")
-    # plt.plot([0,np.max(rates.iloc[:,t_idx])], [0,np.max(rates.iloc[:,t_idx])], color="red", linestyle="--")
-    plt.plot(rates.iloc[10,:],alpha=0.5, label="True Rates")
-    plt.plot(reconstructed_rates.iloc[10,:],alpha=0.5, label="Reconstructed Rates")
-    plt.xscale("log")
-   
-# %%

@@ -10,6 +10,7 @@ job_logs/
 *.html
 *.png
 *.pdf
+*.mp4
 
 ## Inferred Trees
 
