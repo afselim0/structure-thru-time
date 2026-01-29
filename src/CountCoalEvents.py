@@ -1,4 +1,3 @@
-#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
@@ -170,7 +169,7 @@ class CountCoalEvents:
                 return
             
             chunks = np.array_split(self.ts_files, num_threads)
-            
+
             # Pathos parallelization
             def _process_chunk_wrapper(args):
                 return process_chunk(*args)
