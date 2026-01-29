@@ -9,6 +9,7 @@ import plotly.io as pio
 
 from scipy.spatial import ConvexHull
 from scipy.ndimage import gaussian_filter
+from scipy.ndimage import label
 from skimage.measure import marching_cubes
 from matplotlib.path import Path as MplPath
 
@@ -199,7 +200,7 @@ class PlotEmbeddings:
                 )
             )
 
-    def add_convex_hull(self, *, verbose: bool = False, debug_dir: str | None = None):
+    def add_convex_hull(self, *, n_time_bins=None, time_bin_mode="log", verbose=False, debug_dir=None):
         for population in self.populations:
             color = self.colors_dict.get(population, "#808080")
 
@@ -207,11 +208,20 @@ class PlotEmbeddings:
                 self.embeddings_df,
                 population,
                 grid_res_xy,
-                verbose=verbose,
-                debug_dir=debug_dir,
+                n_time_bins=n_time_bins,        # NEW
+                time_bin_mode=time_bin_mode,    # NEW
+                verbose=verbose,                # if you want
+                debug_dir=debug_dir,            # if you want
             )
 
-            surf = surface_from_volume(vol, xs, ys, ts, gauss_sigma)
+            surf = surface_from_volume(
+                vol, xs, ys, ts,
+                sigma_xy=gauss_sigma,
+                sigma_t=0.0,  # we’ll make this a knob next
+                keep_largest_component=True,
+                min_component_voxels=50,
+                verbose=verbose,
+            )
             if surf is not None:
                 verts, faces = surf
                 i, j, k = faces.T
@@ -319,113 +329,139 @@ def build_volume(
     pop: str,
     grid_res: int,
     *,
-    verbose: bool = False,
-    debug_top_k: int = 5,
+    n_time_bins: int | None = None,
+    time_bin_mode: str = "log",   # "log" or "linear"
+    time_min: float | None = None,
+    time_max: float | None = None,
     debug_dir: str | None = None,
+    verbose: bool = False,
 ):
     """
-    Build a boolean volume vol[t, y, x] for one population by:
-      1) slicing points at each time
-      2) computing a 2D convex hull polygon (with central trimming)
-      3) rasterising the polygon on an XY grid
+    Build a boolean volume vol[t, y, x] for one population by rasterizing
+    per-time (or per-time-bin) convex-hull polygons on an (X1,X2) grid.
 
-    Diagnostics (verbose):
-      - per-slice: n_points, n_keep, n_hull_verts, occ_frac
-      - summary: empty slices, points/bin stats, emptiest bins
-
-    Optional:
-      - debug_dir: if set, writes CSVs for the emptiest bins (raw points).
+    If n_time_bins is None: uses each unique time as its own slice (original behavior).
+    If n_time_bins is set: bins time (log or linear) and uses BIN CENTERS as ts.
     """
-    sub = df[df.population == pop]
-    if sub.empty:
-        if verbose:
-            print(f"[{pop}] No rows for population; returning empty volume")
-        xs = np.linspace(0, 1, grid_res)
-        ys = np.linspace(0, 1, grid_res)
-        ts = np.array([0.0])
-        vol = np.zeros((len(ts), grid_res, grid_res), dtype=bool)
-        return vol, xs, ys, ts
 
+    sub = df[df.population == pop].copy()
+    if sub.empty:
+        vol = np.zeros((0, grid_res, grid_res), dtype=bool)
+        return vol, np.array([]), np.array([]), np.array([])
+
+    # ---- XY grid (same as before) ----
     xs_all, ys_all = sub["X1"], sub["X2"]
-    pad_x = 0.05 * (xs_all.max() - xs_all.min()) if xs_all.max() > xs_all.min() else 1.0
-    pad_y = 0.05 * (ys_all.max() - ys_all.min()) if ys_all.max() > ys_all.min() else 1.0
+    pad_x = 0.05 * (xs_all.max() - xs_all.min() if xs_all.max() > xs_all.min() else 1.0)
+    pad_y = 0.05 * (ys_all.max() - ys_all.min() if ys_all.max() > ys_all.min() else 1.0)
+
     xs = np.linspace(xs_all.min() - pad_x, xs_all.max() + pad_x, grid_res)
     ys = np.linspace(ys_all.min() - pad_y, ys_all.max() + pad_y, grid_res)
 
-    times = np.sort(sub.time.unique())
-    ts = times
+    # ---- time binning ----
+    times = sub["time"].to_numpy()
+    # marching cubes + log axes dislike nonpositive time; clip/guard here
+    tmin_data = float(np.nanmin(times))
+    tmax_data = float(np.nanmax(times))
+
+    tmin = float(time_min) if time_min is not None else tmin_data
+    tmax = float(time_max) if time_max is not None else tmax_data
+
+    # ensure strictly positive for log binning
+    if time_bin_mode == "log":
+        if tmin <= 0:
+            # shift to smallest positive observed time if available, else 1.0
+            pos = times[times > 0]
+            tmin = float(np.min(pos)) if pos.size else 1.0
+        if tmax <= tmin:
+            tmax = tmin * 10.0
+
+    if n_time_bins is None:
+        # Original behavior: one slice per unique time
+        unique_times = np.sort(sub.time.unique())
+        ts = unique_times
+        # map each unique time to itself
+        bin_ids = None
+        edges = None
+    else:
+        # Binned behavior
+        if n_time_bins < 2:
+            n_time_bins = 2
+
+        if time_bin_mode == "log":
+            edges = np.logspace(np.log10(tmin), np.log10(tmax), n_time_bins + 1)
+        elif time_bin_mode == "linear":
+            edges = np.linspace(tmin, tmax, n_time_bins + 1)
+        else:
+            raise ValueError(f"time_bin_mode must be 'log' or 'linear', got {time_bin_mode!r}")
+
+        # Bin centers:
+        # - if bins are in log-time, the "center" on a log axis should be the geometric mean
+        # - if bins are linear, arithmetic midpoint is fine
+        if time_bin_mode == "log":
+            ts = np.sqrt(edges[:-1] * edges[1:])  # geometric mean
+        else:
+            ts = 0.5 * (edges[:-1] + edges[1:])   # arithmetic mean
+
+        # assign each row to a bin
+        # bins are [edges[i], edges[i+1]) except last includes right edge
+        bin_ids = np.searchsorted(edges, sub["time"].to_numpy(), side="right") - 1
+        bin_ids = np.clip(bin_ids, 0, n_time_bins - 1)
+
+    # ---- build volume ----
     vol = np.zeros((len(ts), grid_res, grid_res), dtype=bool)
 
-    # ---- diagnostics accumulators ----
-    slice_stats = []  # dicts per slice
-    points_per_slice = []
+    # optional debug output
+    debug_path = None
+    if debug_dir is not None:
+        debug_path = Path(debug_dir) / pop
+        debug_path.mkdir(parents=True, exist_ok=True)
+
     empty_slices = 0
+    points_per_slice = []
 
-    for i, t in enumerate(times):
-        pts = sub[sub.time == t][["X1", "X2"]].values
-        n_pts = len(pts)
-        points_per_slice.append(n_pts)
+    if n_time_bins is None:
+        # loop over exact times
+        for i, t in enumerate(ts):
+            pts = sub[sub.time == t][["X1", "X2"]].values
+            points_per_slice.append(len(pts))
+            poly = slice_convex_hull(pts)
+            if len(poly) < 3:
+                empty_slices += 1
+                continue
+            vol[i] = rasterise_polygon(poly, xs, ys)
 
-        poly, poly_stats = slice_convex_hull(pts, return_stats=True)
-        mask = rasterise_polygon(poly, xs, ys)
-        vol[i] = mask
+            if verbose:
+                occ = float(vol[i].mean())
+                print(f"[{pop}] slice {i:03d}/{len(ts)-1} t={t:g} n={len(pts):5d} verts={len(poly):4d} occ={occ:.6f}")
 
-        occ = float(mask.mean())  # fraction of grid occupied
-        is_empty = (n_pts < 3) or (mask.sum() == 0)
-        if is_empty:
-            empty_slices += 1
+    else:
+        # loop over bins
+        for i in range(len(ts)):
+            pts = sub.loc[bin_ids == i, ["X1", "X2"]].values
+            points_per_slice.append(len(pts))
+            poly = slice_convex_hull(pts)
+            if len(poly) < 3:
+                empty_slices += 1
+                continue
+            vol[i] = rasterise_polygon(poly, xs, ys)
 
-        stat = {
-            "idx": i,
-            "time": float(t),
-            "n_points": int(n_pts),
-            "n_keep": int(poly_stats.get("n_keep", 0)),
-            "n_hull_verts": int(poly_stats.get("n_hull_verts", 0)),
-            "occ_frac": occ,
-            "mask_sum": int(mask.sum()),
-        }
-        slice_stats.append(stat)
+            if verbose:
+                occ = float(vol[i].mean())
+                # print bin edges too for debugging
+                lo = edges[i]
+                hi = edges[i + 1]
+                print(
+                    f"[{pop}] bin {i:03d}/{len(ts)-1} "
+                    f"t~{ts[i]:g} [{lo:g},{hi:g}) n={len(pts):5d} verts={len(poly):4d} occ={occ:.6f}"
+                )
 
-        if verbose:
-            # concise per-slice line (easy to scan)
-            print(
-                f"[{pop}] slice {i:03d}/{len(times)-1:03d} "
-                f"t={float(t):.6g} n={n_pts:5d} keep={stat['n_keep']:5d} "
-                f"verts={stat['n_hull_verts']:4d} occ={occ:.6f} "
-                f"{'EMPTY' if is_empty else ''}"
-            )
-
-    # ---- summary diagnostics ----
     if verbose:
-        arr = np.asarray(points_per_slice, dtype=int)
-        empties = [s for s in slice_stats if s["n_points"] == 0]
-        empties_sorted = sorted(empties, key=lambda d: d["idx"])[:debug_top_k]
-
-        # points/bin min/median/max
-        pmin = int(arr.min()) if len(arr) else 0
-        pmed = int(np.median(arr)) if len(arr) else 0
-        pmax = int(arr.max()) if len(arr) else 0
-
-        # "emptiest" bins: smallest n_points, then smallest occ_frac
-        emptiest = sorted(slice_stats, key=lambda d: (d["n_points"], d["occ_frac"]))[:debug_top_k]
-        emptiest_str = ", ".join([f"{d['idx']}:{d['n_points']}" for d in emptiest])
-
-        empty_frac = (empty_slices / len(times)) * 100.0 if len(times) else 0.0
-        print(
-            f"[{pop}] slices={len(times)}, empty={empty_slices} (empty_frac={empty_frac:.2f}%) "
-            f"; points/bin min={pmin}, med={pmed}, max={pmax}"
-        )
-        print(f"    emptiest bins: {emptiest_str}")
-
-        # Optional: dump CSVs for worst slices for later 2D inspection
-        if debug_dir is not None:
-            debug_path = Path(debug_dir)
-            debug_path.mkdir(parents=True, exist_ok=True)
-            for d in emptiest:
-                t = d["time"]
-                pts = sub[sub.time == t][["X1", "X2"]].copy()
-                out_csv = debug_path / f"{pop}_slice_{d['idx']:03d}_t_{t:.6g}.csv"
-                pts.to_csv(out_csv, index=False)
+        pts = np.array(points_per_slice) if points_per_slice else np.array([])
+        if pts.size:
+            print(
+                f"[{pop}] slices={len(ts)}, empty={empty_slices} (empty_frac={empty_slices/len(ts):.2%}) ; "
+                f"points/bin min={pts.min()}, med={int(np.median(pts))}, max={pts.max()}"
+            )
 
     return vol, xs, ys, ts
 
@@ -443,30 +479,101 @@ def _print_volume_summary(pop: str, counts: list[int], empty: int, n_slices: int
     worst = np.argsort(arr)[:5]
     print(f"    emptiest bins: " + ", ".join([f"{i}:{arr[i]}" for i in worst]))
 
-def surface_from_volume(vol: np.ndarray, xs: np.ndarray, ys: np.ndarray, ts: np.ndarray,
-                        sigma_xy: float, sigma_t: float = 0.0):
-    # NOTE: vol has shape (T, Y, X) in your build_volume()
+
+
+def surface_from_volume(
+    vol: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    ts: np.ndarray,
+    sigma_xy: float,
+    sigma_t: float = 0.0,
+    *,
+    keep_largest_component: bool = True,
+    min_component_voxels: int = 50,
+    verbose: bool = False,
+):
+    """
+    vol has shape (T, Y, X) as built by build_volume().
+    We blur, choose an isosurface level, optionally keep only the largest
+    connected component in voxel space, then run marching_cubes.
+    """
+
+    # Smooth (time, y, x)
     blurred = gaussian_filter(
         vol.astype(float),
-        sigma=(sigma_t, sigma_xy, sigma_xy)  # time, y, x
+        sigma=(sigma_t, sigma_xy, sigma_xy)
     )
-    lo, hi = blurred.min(), blurred.max()
+
+    lo, hi = float(blurred.min()), float(blurred.max())
     if hi <= lo:
-        print(f"Empty volume; skipping iso-surface ({lo:.3f}–{hi:.3f})")
+        if verbose:
+            print(f"Empty volume; skipping iso-surface ({lo:.3f}–{hi:.3f})")
         return None
 
+    # Isosurface level
     level = 0.5
     if not (lo < level < hi):
         level = lo + 0.5 * (hi - lo)
+        if verbose:
+            print(f"Adjusted iso level -> {level:.4f} (range {lo:.4f}–{hi:.4f})")
 
+    field = blurred
+
+    # --- Connected component filtering in voxel space ---
+    # Threshold at the same level we’ll use for marching cubes.
+    if keep_largest_component:
+        mask = field >= level
+        if mask.any():
+            cc, ncc = label(mask)  # 6-connectivity in 3D by default
+            if ncc > 1:
+                counts = np.bincount(cc.ravel())
+                counts[0] = 0  # background
+
+                # pick the largest component
+                keep_id = int(np.argmax(counts))
+                keep_size = int(counts[keep_id])
+
+                if keep_size < min_component_voxels:
+                    # too tiny to be meaningful
+                    if verbose:
+                        print(f"All components tiny (largest={keep_size}); skipping")
+                    return None
+
+                keep_mask = (cc == keep_id)
+
+                if verbose:
+                    total_on = int(mask.sum())
+                    frac = keep_size / max(total_on, 1)
+                    print(f"CC filter: {ncc} components; keeping {keep_id} size={keep_size} "
+                          f"({frac:.2%} of thresholded voxels)")
+
+                # Zero out everything outside the main component so marching cubes ignores islands
+                field = field.copy()
+                field[~keep_mask] = lo
+        else:
+            if verbose:
+                print("Threshold mask empty; skipping")
+            return None
+
+    # --- Marching cubes ---
     try:
-        verts, faces, _, _ = marching_cubes(blurred, level=level)
+        verts, faces, _, _ = marching_cubes(field, level=level)
     except RuntimeError as e:
-        print(f"No surface found: {e}; skipping")
+        if verbose:
+            print(f"No surface found: {e}; skipping")
         return None
 
-    nx, ny, nz = len(xs) - 1, len(ys) - 1, len(ts) - 1
+    # Map voxel coords -> real coords
+    nx, ny = len(xs) - 1, len(ys) - 1
+
     vx = xs[0] + verts[:, 2] / nx * (xs[-1] - xs[0])
     vy = ys[0] + verts[:, 1] / ny * (ys[-1] - ys[0])
-    vz = ts[0] + verts[:, 0] / nz * (ts[-1] - ts[0])
+
+    # IMPORTANT: marching_cubes returns verts[:,0] in *index space* (0..T-1),
+    # but ts can be non-uniform (log bins). Use interpolation instead of assuming
+    # linear spacing between ts[0] and ts[-1].
+    t_idx = np.arange(len(ts), dtype=float)
+    vz = np.interp(verts[:, 0], t_idx, ts.astype(float))
+
     return np.stack([vx, vy, vz], axis=1), faces

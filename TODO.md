@@ -53,6 +53,22 @@ Minor:
 
 
 To Discuss:
+- 1/27 Some confusion with wohns_pop_labels and colors? 
+- 1/26 Give thought to the natural boundary case observation of most recent window with no coalescence between any one.  That point will just be pushed away from all others.  What does that suggest about initialization / benefits of sharing information across windows etc. 
+- 1/26 Next paper or a small last section - use embedding to re-estimate rates and show an improvement over the raw rates
+- 1/26 Revisit Procrustes analysis per time step option
+- 1/26 Show multiple solutions for same data (HT Amy G)
+- 1/26 2-D plots wuold help (also for showing admixture) (HT Amy G)
+- 1/26 What about coal rate variation across loci / additional source so variation? (HT Amy G) my idea - Could add a locus-specific parameter to distance function for background selection?  And an extra noise layer? 
+- 1/26 Behavior of N0 reported by Ahmed suggest maybe we could revisit the use of N0 - maybe need two parameters - to effect two extremes differernetly (bottleneck - high lambda vs divergence low lambda)
+- 1/26 Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
+- 1/26 I think we need plotting / animations for time slices through the embeddings - as complement for colorblind - use abbreviations per individual (e.g numbers or two letter)
+- 1/26 We should do a forensic analysis of why the other chimp analysis is so different -- is it change in distance functino? Other tunables? 
+- 1/26 What conidtions allowed us to the Wohns with 900 individuals and what specific changes are holding us back now?  
+- 1/26 Need to profile memory usage and if we can get control of it 
+- 1/26 Future direction: admixture is pernicious too in that it pulls source populations closer together than they should be; Can we downweight attraction to samples who themselves have highby cross locus variance in weights - so if sample has high variance - it's attracted to others, but others are not attracted to it; might work in an alternate distance formulation; Would be easier in a logistic link 
+- 1/26 Fixed L derivation so that we have likelihoods given an assumed effective sample size of $L$
+- 1/24 How to deal with issue that when lambda = 0 between any pair exact spacing will depend on BFGS tolerance - we should make this more explicit perhaps; e.g. lambda = 1/(N0+d_ij)-1/Nmax ; where Nmax is say N_0*10^5 for default 
 - 1/18 Results are coming in squished on the 2nd dimension?  
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 Where are the empirical outputs... let's be sure to keep example runs
