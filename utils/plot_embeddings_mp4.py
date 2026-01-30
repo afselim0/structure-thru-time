@@ -28,7 +28,7 @@ def make_mp4(
     parquet_path = Path(parquet_path)
 
     if out_mp4:
-        out_mp4 = Path(out_mp4)
+        out_mp4 = Path(f'{out_mp4}.mp4')
     else:
         out_mp4 = parquet_path.with_suffix(".mp4")
 
