@@ -207,6 +207,5 @@ class CountCoalEvents:
 
         total_segments_per_pair = (pairs_selected*self.contig_lengths).values.sum(axis=1).astype(self.datatype)
         pdf_df = pdf_df / (total_segments_per_pair.reshape(-1,1)*self.num_posterior_samples)
-        pdf_df.columns = pdf_df.columns.astype(np.uint32)
         return pdf_df
 # %%
