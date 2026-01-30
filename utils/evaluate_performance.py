@@ -49,6 +49,9 @@ def main():
 
     embeddings = pd.read_parquet(args.embeddings)
     rates = pd.read_parquet(args.rates)
+
+    embeddings.columns = embeddings.columns.astype(float)
+    rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
 
@@ -57,6 +60,7 @@ def main():
     reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
     error = performance_across_pairs(rates, reconstructed_rates)
     print(f"{args.data_output_path}/{args.data_output_name}")
+    error.columns = error.columns.astype(str)
     error.to_parquet(f"{args.data_output_path}/{args.data_output_name}")
 
 
@@ -73,6 +77,22 @@ def main():
     if len(pop_colors) < 10:
         fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
         fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
+     
+        # Draft of an extra plot that would plot True vs Reconstructed Rate
+        tvsrplot = False
+        if tvsrplot:         
+            fig,ax = plt.subplots(figsize = (6,4))
+            ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
+            ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
+            ax.set_xscale("log")
+            ax.set_xlabel("Rate index")          # or whatever x represents
+            ax.set_ylabel("Rate value")          # adjust as needed
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
+            
+        
+    
     else:
     # Make a small placeholder file so Snakemake sees the expected output, othrewise cluster job will fail
         fig = plt.figure(figsize=(6, 2))
@@ -88,21 +108,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# %%
-import matplotlib.pyplot as plt
-debug = False
-if debug:
-    rates = pd.read_parquet("../results/simulations/outputs/zigzag/data/rates_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.parquet")
-    embeddings = pd.read_parquet("../results/simulations/outputs/zigzag/data/embeddings_sim.V1.NPP10.NC100.FP1.WS100.T1_68266_1000.N01.parquet")
-    N0 = 1
-
-    reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
-    # t_idx = int(4000/4)
-    # plt.scatter(rates.iloc[:,t_idx], reconstructed_rates.iloc[:,t_idx])
-    # plt.title(f"Time {rates.columns[t_idx]}")
-    # plt.plot([0,np.max(rates.iloc[:,t_idx])], [0,np.max(rates.iloc[:,t_idx])], color="red", linestyle="--")
-    plt.plot(rates.iloc[10,:],alpha=0.5, label="True Rates")
-    plt.plot(reconstructed_rates.iloc[10,:],alpha=0.5, label="Reconstructed Rates")
-    plt.xscale("log")
-
-# %%

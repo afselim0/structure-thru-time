@@ -6,7 +6,7 @@ snakemake --config \
     max_time=100000 \
     n_timepoints=20000 \
     num_posterior_samples=100 \
-    window_size=1000 \
+    minimum_window_size=50 \
+    maximum_window_size=1500 \
     N0=1000 \
-    n_samples=10 \
     --cores all

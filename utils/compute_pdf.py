@@ -16,10 +16,11 @@ def main():
     parser.add_argument("--max_time", type=int, required=True, help="Maximum time for rate calculation")
     parser.add_argument("--n_timepoints", type=int, required=True, help="Number of timepoints for rate calculation")
     parser.add_argument("--num_posterior_samples", type=int, default=1, help="Number of posterior samples to use")
-    parser.add_argument("--fraction_pairs", type=float, default=1, help="Fraction of pairs to sample for coalescence counting")
+    parser.add_argument("--fraction_samples", type=float, default=1, help="Fraction of samples to use for coalescence counting")
     parser.add_argument("--pops", nargs='+',default=None, help="Population labels to compute rates for")
     parser.add_argument("--n_samples_per_pop", type=int, default= -1, help="Number of samples to draw per population")
     parser.add_argument("--pop_labels", type=str, help="Path to population labels file")
+    parser.add_argument("--num_threads", type=int, default=1, help="Number of threads to use for computation")
     
     args = parser.parse_args()
     input_path = args.input_path
@@ -27,7 +28,8 @@ def main():
     max_time = args.max_time
     n_timepoints = args.n_timepoints
     num_posterior_samples = args.num_posterior_samples
-    fraction_pairs = args.fraction_pairs
+    num_threads = args.num_threads
+    fraction_samples = args.fraction_samples
     chosen_pops = args.pops
     n_samples_per_pop = args.n_samples_per_pop
     pop_labels_path = args.pop_labels
@@ -60,9 +62,10 @@ def main():
 
     data_dir = os.path.join(output_path, "pdf_data")
     os.makedirs(data_dir, exist_ok=True)
-
-    CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_pairs=fraction_pairs, sample_ids=chosen_samples)
-    pdf_df = CCE.compute_coal_time_pdf(num_threads=12, data_output=data_dir)
+    
+    CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_samples=fraction_samples, sample_ids=chosen_samples)
+    pdf_df = CCE.compute_coal_time_pdf(num_threads=num_threads, data_output=data_dir)
+    pdf_df.columns = pdf_df.columns.astype(str)
     pdf_df.to_parquet(f"{output_path}/{args.output_name}")
 
 if __name__ == "__main__":

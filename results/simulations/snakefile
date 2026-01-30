@@ -19,7 +19,8 @@ N_PER_POP = config["n_per_pop"] if "n_per_pop" in config else 10
 INFER_METHOD = config["infer_method"] if "infer_method" in config else "tsinfer"
 
 ## STT Parameters
-FRACTION_PAIRS = config["fraction_pairs"] if "fraction_pairs" in config else 1
+NUM_THREADS = config["num_threads"] if "num_threads" in config else 1
+FRACTION_SAMPLES = config["fraction_samples"] if "fraction_samples" in config else 1
 MIN_WINDOW_SIZE = config["min_window_size"] if "min_window_size" in config else 51
 MAX_WINDOW_SIZE = config["max_window_size"] if "max_window_size" in config else 501
 N0 = config["N0"] if "N0" in config else 1
@@ -42,18 +43,18 @@ SIM_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/sim")
 INFER_TREE_OUTPUT_PATH = os.path.join(OUTPUT_PATH,f"trees/{INFER_METHOD}")
 
 # Tags
-SIM_TAG = f".V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
+SIM_TAG = f".V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}"
 INFER_TAG = SIM_TAG + f".m{INFER_METHOD}"
 
 RATES_TAG = f".min_WS{MIN_WINDOW_SIZE}.max_WS{MAX_WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
 EMBEDDINGS_TAG = RATES_TAG + f".N0{N0}"
 
-# PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}"
-# PDF_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.m{INFER_METHOD}"
-# RATES_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
-# RATES_INFER_TAG =f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}.m{INFER_METHOD}"
-# EMBEDDINGS_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}"
-# EMBEDDINGS_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_PAIRS}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
+# PDF_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}"
+# PDF_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}.m{INFER_METHOD}"
+# RATES_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}"
+# RATES_INFER_TAG =f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}.WS{WINDOW_SIZE}.T{MIN_TIME}_{MAX_TIME}_{N_TIMEPOINTS}.m{INFER_METHOD}"
+# EMBEDDINGS_SIM_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}.WS{WINDOW_SIZE}.N0{N0}"
+# EMBEDDINGS_INFER_TAG = f"V{VERSION}.NPP{N_PER_POP}.NC{NUM_CONTIGS}.FP{FRACTION_SAMPLES}.WS{WINDOW_SIZE}.N0{N0}.m{INFER_METHOD}"
 
 
 # File Names
@@ -319,8 +320,9 @@ rule compute_pdf_sim:
         max_time=MAX_TIME,
         n_timepoints=N_TIMEPOINTS,
         num_posterior_samples=NUM_REPLICATES,
-        fraction_pairs=FRACTION_PAIRS,
-        pop_labels=POP_LABELS
+        fraction_samples=FRACTION_SAMPLES,
+        pop_labels=POP_LABELS,
+        num_threads=NUM_THREADS
     shell:
         """
         mkdir -p {params.outdir}
@@ -331,8 +333,9 @@ rule compute_pdf_sim:
             --max_time {params.max_time} \
             --n_timepoints {params.n_timepoints} \
             --num_posterior_samples {params.num_posterior_samples} \
-            --fraction_pairs {params.fraction_pairs} \
-            --pop_labels {params.pop_labels}
+            --fraction_samples {params.fraction_samples} \
+            --pop_labels {params.pop_labels} \
+            --num_threads {params.num_threads}
         """
 
 rule compute_rates_sim:
@@ -372,8 +375,9 @@ rule compute_pdf_infer:
         max_time=MAX_TIME,
         n_timepoints=N_TIMEPOINTS,
         num_posterior_samples=NUM_REPLICATES,
-        fraction_pairs=FRACTION_PAIRS,
-        pop_labels=POP_LABELS
+        fraction_samples=FRACTION_SAMPLES,
+        pop_labels=POP_LABELS,
+        num_threads=NUM_THREADS
     shell:
         """
         mkdir -p {params.outdir}
@@ -384,8 +388,9 @@ rule compute_pdf_infer:
             --max_time {params.max_time} \
             --n_timepoints {params.n_timepoints} \
             --num_posterior_samples {params.num_posterior_samples} \
-            --fraction_pairs {params.fraction_pairs} \
-            --pop_labels {params.pop_labels}
+            --fraction_samples {params.fraction_samples} \
+            --pop_labels {params.pop_labels} \
+            --num_threads {params.num_threads}
         """
 
 rule compute_rates_infer:

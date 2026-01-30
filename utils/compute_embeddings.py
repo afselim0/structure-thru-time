@@ -17,6 +17,7 @@ def main():
     args = parser.parse_args()
     input = args.input
     rates_df = pd.read_parquet(input)
+    rates_df.columns = rates_df.columns.astype(float)
     rates = rates_df.values
     rates_df += np.min(rates[rates!=0])/100
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2)
@@ -27,6 +28,7 @@ def main():
     X_init = np.random.rand(LSE.num_samples, 2)
     _ = LSE.compute_embeddings_through_time(X_init=X_init)
     embeddings_df = LSE.get_embeddings_df()
+    embeddings_df.columns = embeddings_df.columns.astype(str)
     embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
 
 

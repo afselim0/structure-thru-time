@@ -10,6 +10,15 @@ job_logs/
 *.html
 *.png
 *.pdf
+*.txt
+*.log
+*.mp4
+*trees*
+
+*trees*
+
+pop_colors.csv
+pop_labels.csv
 
 ## Inferred Trees
 
@@ -18,7 +27,6 @@ tests/
 *old*
 misc/
 local_data/
-test.sh
 
 ## Tree inference
 *.hap
