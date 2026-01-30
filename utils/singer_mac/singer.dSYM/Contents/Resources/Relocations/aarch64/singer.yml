@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '../../releases/mac/singer'
+relocations:     []
+...

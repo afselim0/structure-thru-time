@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
@@ -156,8 +157,12 @@ class CountCoalEvents:
         Returns:
             pd.DataFrame: A dataframe where each row corresponds to a sample pair, and each column corresponds to a time bin. The values represent the estimated PDF of coalescent events within the respective time bin for the sample pair.
         """
+        if num_threads > len(self.ts_files):
+            num_threads = len(self.ts_files)
+
         if num_threads == 1:
             coal_segments_total = self.count_coal_segments_contigs(self.ts_files)
+
         else:
             assert data_output is not None, "data_output directory must be specified when using multiple threads."
             os.makedirs(data_output, exist_ok=True)
@@ -203,3 +208,4 @@ class CountCoalEvents:
         total_segments_per_pair = (pairs_selected*self.contig_lengths).values.sum(axis=1).astype(self.datatype)
         pdf_df = pdf_df / (total_segments_per_pair.reshape(-1,1)*self.num_posterior_samples)
         return pdf_df
+# %%

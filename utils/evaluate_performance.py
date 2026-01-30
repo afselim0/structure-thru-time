@@ -49,6 +49,9 @@ def main():
 
     embeddings = pd.read_parquet(args.embeddings)
     rates = pd.read_parquet(args.rates)
+
+    embeddings.columns = embeddings.columns.astype(float)
+    rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
 
@@ -57,6 +60,7 @@ def main():
     reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
     error = performance_across_pairs(rates, reconstructed_rates)
     print(f"{args.data_output_path}/{args.data_output_name}")
+    error.columns = error.columns.astype(str)
     error.to_parquet(f"{args.data_output_path}/{args.data_output_name}")
 
 
