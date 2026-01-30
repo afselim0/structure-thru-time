@@ -76,6 +76,7 @@ def main():
     pop_rates_df = compute_true_rates(demes_file_path, max_time, delta_t=delta_t)
     pop_labels = pd.read_csv(labels_path)
     expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels)
+    expanded_rates_df.columns = expanded_rates_df.columns.astype(str)
     expanded_rates_df.to_parquet(f"{output_path}/rates_true.parquet")
 
 if __name__ == "__main__":

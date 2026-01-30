@@ -65,6 +65,7 @@ def main():
     
     CCE = CountCoalEvents(ts_dir=input_path, num_posterior_samples=num_posterior_samples,max_time=max_time, num_timepoints=n_timepoints,fraction_samples=fraction_samples, sample_ids=chosen_samples)
     pdf_df = CCE.compute_coal_time_pdf(num_threads=num_threads, data_output=data_dir)
+    pdf_df.columns = pdf_df.columns.astype(str)
     pdf_df.to_parquet(f"{output_path}/{args.output_name}")
 
 if __name__ == "__main__":
