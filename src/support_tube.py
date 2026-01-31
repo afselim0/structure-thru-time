@@ -105,6 +105,49 @@ def _make_ball(radius: int) -> np.ndarray:
     zz, yy, xx = np.ogrid[-r : r + 1, -r : r + 1, -r : r + 1]
     return (xx * xx + yy * yy + zz * zz) <= (r * r)
 
+def _fill_u_gaps_copy_nearest(masks: np.ndarray) -> np.ndarray:
+    """
+    Fill gaps along the u-axis so the support is temporally connected.
+
+    Strategy 1 (copy-nearest):
+      - Leading/trailing empty region: copy nearest non-empty slice outward.
+      - Internal gaps between two non-empty slices: copy nearest endpoint into the gap
+        (ties split at midpoint). Uses OR assignment so we never erase support.
+
+    masks: bool array (U, Y, X)
+    returns: new bool array (U, Y, X)
+    """
+    m = masks.copy()
+    U = m.shape[0]
+    has = m.reshape(U, -1).any(axis=1)
+
+    idx = np.where(has)[0]
+    if idx.size == 0:
+        return m  # nothing to fill
+
+    # ---- fill leading / trailing empties
+    first = int(idx[0])
+    last = int(idx[-1])
+
+    for u in range(0, first):
+        m[u] |= m[first]
+    for u in range(last + 1, U):
+        m[u] |= m[last]
+
+    # ---- fill internal gaps between consecutive non-empty slices
+    for a, b in zip(idx[:-1], idx[1:]):
+        a = int(a); b = int(b)
+        if b <= a + 1:
+            continue
+        mid = (a + b) // 2
+        for u in range(a + 1, b):
+            if u <= mid:
+                m[u] |= m[a]
+            else:
+                m[u] |= m[b]
+
+    return m
+
 
 # ------------------------ Phase A / Phase B -------------------------------
 
@@ -132,6 +175,7 @@ def build_support_volume(
     sigma_xy: float,
     sigma_u: float,
     min_points_per_slice: int,
+    fill_u_gaps: bool = True,
     time_eps: float,
     # NEW: allow caller to enforce global XY edges
     x_edges: Optional[np.ndarray] = None,
@@ -255,6 +299,10 @@ def build_support_volume(
 
         masks[ui] = (Hs >= tau_local)
 
+    # Optional: fill gaps along u (A1 + Bug B) on the boolean mask
+    if bool(fill_u_gaps):
+        masks = _fill_u_gaps_copy_nearest(masks)
+
     # Phase B: smooth along u only
     vol = masks.astype(float)
     if float(sigma_u) > 0:
@@ -335,27 +383,6 @@ def compute_support_tube_mesh(
 
     field = vol.astype(float)
 
-    # --- after field = vol.astype(float) and optional extra smoothing ---
-    field = field.copy()
-
-    # Find slices with any support mass
-    mass_u = field.reshape(field.shape[0], -1).sum(axis=1)
-    nonzero = np.where(mass_u > 0)[0]
-    if nonzero.size >= 1:
-        u0, u1 = int(nonzero[0]), int(nonzero[-1])
-        k = 1  # extrusion radius; make it a parameter if you want
-
-        for du in range(1, k+1):
-            if u0 - du >= 0:
-                field[u0 - du] = np.maximum(field[u0 - du], field[u0])
-            if u0 + du < field.shape[0]:
-                field[u0 + du] = np.maximum(field[u0 + du], field[u0])
-
-            if u1 - du >= 0:
-                field[u1 - du] = np.maximum(field[u1 - du], field[u1])
-            if u1 + du < field.shape[0]:
-                field[u1 + du] = np.maximum(field[u1 + du], field[u1])
-
     # Optional additional smoothing (separate from sigma_u/sigma_xy used in mask construction)
     if float(u_smooth_sigma) > 0 or float(xy_smooth_sigma) > 0:
         field = gaussian_filter(
@@ -375,7 +402,7 @@ def compute_support_tube_mesh(
                 st = _make_disk(int(close_r_xy))
                 for ui in range(mask.shape[0]):
                     mask[ui] = binary_closing(mask[ui], structure=st)
-                    
+
     if int(close_r_u) > 0 and int(close_r_xy) == 0:
         r = int(close_r_u)
         structure = np.ones((2*r+1, 1, 1), dtype=bool)
