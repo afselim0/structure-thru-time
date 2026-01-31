@@ -61,10 +61,11 @@ if __name__ == "__main__":
     main()
 
 # %%
-path_to_singer_master = "../singer-0.1.8-beta-linux-x86_64/singer_master"
-path_to_singer_tskit_conversion = "../singer-0.1.8-beta-linux-x86_64/convert_to_tskit"
-vcf_to_haps_path = "../relate_v1.2.4_x86_64_dynamic/bin/RelateFileFormats"
-relate_infer_path = "../../../../../relate_v1.2.4_x86_64_dynamic/bin/Relate"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
+
+singer_path = os.path.join(script_dir, "singer_mac")
+relate_path = os.path.join(script_dir, "relate_mac")
 
 def find_Ne(sim_ts_dir):
     ts_files = glob.glob(os.path.join(sim_ts_dir, "*.trees"))
@@ -96,8 +97,8 @@ def infer_singer(vcf_file_path, output_path, Ne, mu=1.2e-8, r=1.2e-8, contig_len
     vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
     contig_id = os.path.basename(vcf_path_prefix)
     output_prefix = os.path.join(output_path, contig_id)
-    singer_infer_command = f"{path_to_singer_master} -vcf {vcf_path_prefix} -output {output_prefix} -m {mu} -Ne {Ne} -start 0 -end {contig_length} -n {num_posterior_samples} -thin {thinning_interval}"
-    convert_to_tskit_command = f"{path_to_singer_tskit_conversion} -input {output_prefix} -output {output_prefix} -start 0 -end {num_posterior_samples} -step 1"
+    singer_infer_command = f"{singer_path}/singer_master -vcf {vcf_path_prefix} -output {output_prefix} -m {mu} -Ne {Ne} -start 0 -end {contig_length} -n {num_posterior_samples} -thin {thinning_interval}"
+    convert_to_tskit_command = f"{singer_path}/convert_to_tskit -input {output_prefix} -output {output_prefix} -start 0 -end {num_posterior_samples} -step 1"
 
     subprocess.run(singer_infer_command, shell=True)
     subprocess.run(convert_to_tskit_command, shell=True)
@@ -109,25 +110,39 @@ def infer_relate(vcf_file_path, output_path, Ne, mu=1.2e-8, r=1.2e-8, contig_len
     output_prefix = os.path.join(output_path, contig_id)
 
     with open(f"{output_prefix}.map", "w") as f:
-        f.write(f"{contig_id}\t{0.0}\t{0}\n")
-        f.write(f"{contig_id}\t{100*r*contig_length}\t{contig_length}")
+        f.write(f"Position.bp.\tRate.cM.Mb.\tMap.cM.\n")
+        f.write(f"0\t{100*r*contig_length}\t{0}\n")
+        f.write(f"{contig_length}\t{0}\t{100*r*contig_length}")
     
-    vcf_to_haps_command = f"{vcf_to_haps_path} --mode ConvertFromVcf --input {vcf_path_prefix} --haps {output_prefix}.haps --sample {output_prefix}.sample"
-    relate_infer_command = f"{relate_infer_path} --mode All -m {mu} --effectiveN {int(2*Ne)} --haps {contig_id}.haps --sample {contig_id}.sample --map {contig_id}.map --output {contig_id}"
-
+    vcf_to_haps_command = f"{relate_path}/RelateFileFormats --mode ConvertFromVcf --input {vcf_path_prefix} --haps {output_prefix}.haps --sample {output_prefix}.sample"
     subprocess.run(vcf_to_haps_command, shell=True)
-    subprocess.run(relate_infer_command,cwd=output_path,shell=True,check=True)
 
+    os.chdir(output_path)
+    relative_relate_path = os.path.relpath(relate_path, start=os.getcwd())
+    relate_infer_command = f"{relative_relate_path}/Relate --mode All -m {mu} --effectiveN {int(2*Ne)} --haps {contig_id}.haps --sample {contig_id}.sample --map {contig_id}.map --output {contig_id}"
+    convert_to_tskit_command = f"{relative_relate_path}/RelateFileFormats --mode ConvertToTreeSequence --input {contig_id} --output {contig_id}"
+    subprocess.run(relate_infer_command, shell=True)
+    subprocess.run(convert_to_tskit_command, shell=True)
+    os.chdir(script_dir)
     return
 #%%
-vcf_path = "../results/simulations/split/trees/sim"
+vcf_path = "../results/simulations/outputs/zigzag/trees/sim"
 vcf_files = glob.glob(os.path.join(vcf_path, "*.vcf"))
 vcf_file_path = vcf_files[0]
-output_path = "../results/simulations/split/trees/relate"
-# %%
-infer_relate(vcf_file_path, output_path, Ne=Ne)
-# %%
+
+singer_out_path = "../results/simulations/outputs/zigzag/trees/singer"
+relate_out_path = "../results/simulations/outputs/zigzag/trees/relate"
+tsinfer_out_path = "../results/simulations/outputs/zigzag/trees/tsinfer"
+
+os.makedirs(singer_out_path, exist_ok=True)
+os.makedirs(relate_out_path, exist_ok=True)
+os.makedirs(tsinfer_out_path, exist_ok=True)
+
+Ne = find_Ne(vcf_path)
 mu=1.2e-8
 r=1.2e-8
-contig_length=3e6
+contig_length=1e6
 # %%
+# infer_tsinfer(vcf_file_path, tsinfer_out_path, Ne, mu=mu, r=r)
+# infer_singer(vcf_file_path, singer_out_path, Ne, mu=mu, r=r, contig_length=contig_length, num_posterior_samples=3, thinning_interval=20)
+# infer_relate(vcf_file_path, relate_out_path, Ne, mu=mu, r=r, contig_length=contig_length)
