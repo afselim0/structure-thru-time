@@ -395,6 +395,8 @@ class PlotEmbeddings:
         name_suffix: str = "tube",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
+        x_edges: Optional[np.ndarray] = None,
+        y_edges: Optional[np.ndarray] = None,
     ) -> None:
         """
         Add a 3D support tube (Mesh3d) for each population.
@@ -439,6 +441,8 @@ class PlotEmbeddings:
                 ycol=self.ycol,
                 tcol=self.tcol,
                 popcol=self.popcol,
+                x_edges=x_edges, 
+                y_edges=y_edges,
                 grid_res_xy=int(grid_res_xy),
                 grid_res_u=int(grid_res_u),
                 mass_frac=float(mass_frac),
@@ -507,6 +511,8 @@ class PlotEmbeddings:
         name_suffix: str = "rings",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
+        x_edges: Optional[np.ndarray] = None,
+        y_edges: Optional[np.ndarray] = None,
     ) -> None:
         """
         Add mask-derived ring hull outlines for each population.
@@ -549,6 +555,8 @@ class PlotEmbeddings:
                 ycol=self.ycol,
                 tcol=self.tcol,
                 popcol=self.popcol,
+                x_edges=x_edges, 
+                y_edges=y_edges,
                 grid_res_xy=int(grid_res_xy),
                 grid_res_u=int(grid_res_u),
                 mass_frac=float(mass_frac),
