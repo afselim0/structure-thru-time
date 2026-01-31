@@ -21,11 +21,6 @@ Mapping:
 - u = log10(max(time, time_eps))
 - For plotting: z = 10**u (so z is in original time units, suitable for log z-axis)
 
-Dependencies:
-- numpy
-- scipy.ndimage (gaussian_filter, binary_closing)
-- skimage.measure (marching_cubes, find_contours)
-
 """
 
 from __future__ import annotations
@@ -138,6 +133,9 @@ def build_support_volume(
     sigma_u: float,
     min_points_per_slice: int,
     time_eps: float,
+    # NEW: allow caller to enforce global XY edges
+    x_edges: Optional[np.ndarray] = None,
+    y_edges: Optional[np.ndarray] = None,
     xy_pad_frac: float = 0.05,
     verbose: bool = False,
 ) -> Optional[SupportVolume]:
@@ -149,6 +147,9 @@ def build_support_volume(
     Phase B:
       Smooth masks along u with sigma_u (gaussian on axis 0).
       Output vol float in [0,1].
+
+    If x_edges/y_edges are provided, they are used verbatim (global source of truth).
+    Otherwise, edges are computed from this population's points with xy_pad_frac.
     """
     sub = df[df[popcol].astype(str) == str(pop)]
     if sub.empty:
@@ -158,25 +159,45 @@ def build_support_volume(
     y = sub[ycol].to_numpy(dtype=float)
     t = sub[tcol].to_numpy(dtype=float)
 
-    x = _finite(x)
-    y = _finite(y)
-    t = _finite(t)
+    # Filter to finite triplets (avoid misalignment from filtering independently)
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(t)
+    x = x[m]
+    y = y[m]
+    t = t[m]
 
-    if x.size == 0 or y.size == 0 or t.size == 0:
+    if x.size == 0:
         return None
 
-    # ---- XY bounds + padding
-    x_min, x_max = float(np.min(x)), float(np.max(x))
-    y_min, y_max = float(np.min(y)), float(np.max(y))
+    grid_res_xy = int(grid_res_xy)
+    grid_res_u = int(grid_res_u)
 
-    x_pad = xy_pad_frac * (x_max - x_min if x_max > x_min else 1.0)
-    y_pad = xy_pad_frac * (y_max - y_min if y_max > y_min else 1.0)
+    # ---- XY edges
+    if x_edges is None or y_edges is None:
+        # compute from this population (legacy / fallback)
+        x_min, x_max = float(np.min(x)), float(np.max(x))
+        y_min, y_max = float(np.min(y)), float(np.max(y))
 
-    x_min -= x_pad; x_max += x_pad
-    y_min -= y_pad; y_max += y_pad
+        x_pad = xy_pad_frac * (x_max - x_min if x_max > x_min else 1.0)
+        y_pad = xy_pad_frac * (y_max - y_min if y_max > y_min else 1.0)
 
-    x_edges = np.linspace(x_min, x_max, int(grid_res_xy) + 1)
-    y_edges = np.linspace(y_min, y_max, int(grid_res_xy) + 1)
+        x_min -= x_pad; x_max += x_pad
+        y_min -= y_pad; y_max += y_pad
+
+        x_edges = np.linspace(x_min, x_max, grid_res_xy + 1)
+        y_edges = np.linspace(y_min, y_max, grid_res_xy + 1)
+    else:
+        # caller enforced global edges
+        x_edges = np.asarray(x_edges, dtype=float)
+        y_edges = np.asarray(y_edges, dtype=float)
+        if x_edges.ndim != 1 or y_edges.ndim != 1:
+            raise ValueError("x_edges and y_edges must be 1D arrays")
+        if x_edges.size != grid_res_xy + 1 or y_edges.size != grid_res_xy + 1:
+            raise ValueError(
+                f"x_edges/y_edges must have length grid_res_xy+1 ({grid_res_xy+1}); "
+                f"got {x_edges.size}, {y_edges.size}"
+            )
+        if not (np.all(np.diff(x_edges) > 0) and np.all(np.diff(y_edges) > 0)):
+            raise ValueError("x_edges/y_edges must be strictly increasing")
 
     xs = 0.5 * (x_edges[:-1] + x_edges[1:])
     ys = 0.5 * (y_edges[:-1] + y_edges[1:])
@@ -189,15 +210,15 @@ def build_support_volume(
     if not np.isfinite(u_min) or not np.isfinite(u_max) or u_max <= u_min:
         return None
 
-    u_edges = np.linspace(u_min, u_max, int(grid_res_u) + 1)
+    u_edges = np.linspace(u_min, u_max, grid_res_u + 1)
     us = 0.5 * (u_edges[:-1] + u_edges[1:])
 
     # assign points to u bins
     u_bin = np.searchsorted(u_edges, u, side="right") - 1
-    u_bin = np.clip(u_bin, 0, int(grid_res_u) - 1)
+    u_bin = np.clip(u_bin, 0, grid_res_u - 1)
 
-    counts_u = np.bincount(u_bin, minlength=int(grid_res_u))
-    masks = np.zeros((int(grid_res_u), int(grid_res_xy), int(grid_res_xy)), dtype=bool)
+    counts_u = np.bincount(u_bin, minlength=grid_res_u)
+    masks = np.zeros((grid_res_u, grid_res_xy, grid_res_xy), dtype=bool)
 
     if verbose:
         empty = int((counts_u < int(min_points_per_slice)).sum())
@@ -209,7 +230,7 @@ def build_support_volume(
         )
 
     # Phase A: per-slice mask
-    for ui in range(int(grid_res_u)):
+    for ui in range(grid_res_u):
         if counts_u[ui] < int(min_points_per_slice):
             continue
 
@@ -228,11 +249,11 @@ def build_support_volume(
         else:
             Hs = H
 
-        tau = _mass_fraction_threshold(Hs, float(mass_frac))
-        if not np.isfinite(tau):
+        tau_local = _mass_fraction_threshold(Hs, float(mass_frac))
+        if not np.isfinite(tau_local):
             continue
 
-        masks[ui] = (Hs >= tau)
+        masks[ui] = (Hs >= tau_local)
 
     # Phase B: smooth along u only
     vol = masks.astype(float)
@@ -262,6 +283,9 @@ def compute_support_tube_mesh(
     sigma_u: float,
     min_points_per_slice: int,
     time_eps: float,
+    # NEW: pass-through global XY edges
+    x_edges: Optional[np.ndarray] = None,
+    y_edges: Optional[np.ndarray] = None,
     tau: float = 0.5,
     u_smooth_sigma: float = 0.0,
     xy_smooth_sigma: float = 0.0,
@@ -283,6 +307,7 @@ def compute_support_tube_mesh(
       5) marching_cubes on mask.astype(float) at level=0.5
       6) map voxel coords -> xs/ys/us -> Z=10**u
     """
+
     sv = build_support_volume(
         df=df,
         pop=pop,
@@ -297,6 +322,8 @@ def compute_support_tube_mesh(
         sigma_u=sigma_u,
         min_points_per_slice=min_points_per_slice,
         time_eps=time_eps,
+        x_edges=x_edges,
+        y_edges=y_edges,
         verbose=verbose,
     )
     if sv is None:
@@ -316,17 +343,13 @@ def compute_support_tube_mesh(
             mode="nearest",
         )
 
-    # Threshold to boolean
     mask = field >= float(tau)
 
-    # Optional morphological closing
     if int(close_r_u) > 0 or int(close_r_xy) > 0:
         if int(close_r_u) > 0 and int(close_r_xy) > 0:
-            # full 3D closing with ball
             r = int(max(close_r_u, close_r_xy))
             mask = binary_closing(mask, structure=_make_ball(r))
         else:
-            # per-slice 2D closing in XY (common useful case)
             if int(close_r_xy) > 0:
                 st = _make_disk(int(close_r_xy))
                 for ui in range(mask.shape[0]):
@@ -337,7 +360,6 @@ def compute_support_tube_mesh(
             print(f"[{pop}] compute_support_tube_mesh: empty mask after threshold/closing")
         return None
 
-    # Marching cubes expects scalar volume
     scalar = mask.astype(np.float32)
 
     try:
@@ -347,16 +369,13 @@ def compute_support_tube_mesh(
             print(f"[{pop}] marching_cubes failed: {e}")
         return None
 
-    # verts columns correspond to (u_index, y_index, x_index) in scalar[U,Y,X]
     u_idx = verts[:, 0]
     y_idx = verts[:, 1]
     x_idx = verts[:, 2]
 
-    # map to real coords using centers (linear interp)
     X = _interp_centers(x_idx, sv.xs)
     Y = _interp_centers(y_idx, sv.ys)
     U = _interp_centers(u_idx, sv.us)
-
     Z = 10.0 ** U
 
     return {
@@ -382,6 +401,9 @@ def compute_support_tube_rings(
     sigma_u: float,
     min_points_per_slice: int,
     time_eps: float,
+    # NEW: pass-through global XY edges
+    x_edges: Optional[np.ndarray] = None,
+    y_edges: Optional[np.ndarray] = None,
     nbins_old: int = 24,
     recent_bin_width: int = 1,
     override_window: int = 12,
@@ -406,6 +428,7 @@ def compute_support_tube_rings(
         - kind: "old" | "recent"
         - hovertemplate: optional string
     """
+    
     sv = build_support_volume(
         df=df,
         pop=pop,
@@ -420,6 +443,8 @@ def compute_support_tube_rings(
         sigma_u=sigma_u,
         min_points_per_slice=min_points_per_slice,
         time_eps=time_eps,
+        x_edges=x_edges,
+        y_edges=y_edges,
         verbose=verbose,
     )
     if sv is None:
@@ -430,43 +455,31 @@ def compute_support_tube_rings(
     if U < 2:
         return []
 
-    # Threshold into boolean masks for old and recent (recent can be more inclusive/strict)
     mask_old = vol >= float(tau)
     mask_recent = vol >= float(tau_recent)
 
-    # Helper: turn 2D mask into a contour polyline in real coords
     def mask2d_to_poly(mask2d: np.ndarray) -> Optional[np.ndarray]:
         if mask2d is None or not mask2d.any():
             return None
-
-        # contours expects 2D float image; extract boundary at 0.5
         contours = find_contours(mask2d.astype(float), 0.5)
         c = _largest_contour(contours)
         if c is None:
             return None
         if c.shape[0] < int(min_boundary_points):
             return None
-
-        # c is (n_points, 2) in (row=y_idx, col=x_idx)
         y_idx = c[:, 0]
         x_idx = c[:, 1]
         xs = _interp_centers(x_idx, sv.xs)
         ys = _interp_centers(y_idx, sv.ys)
-
         poly = np.stack([xs, ys], axis=1)
-
-        # close the loop
         if poly.shape[0] > 0:
             poly = np.vstack([poly, poly[0:1]])
-
         return poly
 
-    # Decide if recent override is used
     w = int(max(1, override_window))
     w = min(w, U)
     recent_start = U - w
 
-    # validity: does each slice have a sufficiently long contour?
     valid_recent = 0
     for ui in range(recent_start, U):
         poly = mask2d_to_poly(mask_recent[ui])
@@ -484,14 +497,12 @@ def compute_support_tube_rings(
 
     rings: List[Dict[str, np.ndarray]] = []
 
-    # --------- OLD bins (everything before recent_start if recent is enabled) ----------
     old_end = recent_start if use_recent else U
     old_end = max(old_end, 0)
 
     if old_end >= 2 and int(nbins_old) > 0:
         nb = int(max(1, nbins_old))
         edges = np.linspace(0, old_end, nb + 1).astype(int)
-        # ensure unique edges
         edges[0] = 0
         edges[-1] = old_end
         edges = np.unique(edges)
@@ -502,17 +513,12 @@ def compute_support_tube_rings(
             a, b = int(edges[bi]), int(edges[bi + 1])
             if b <= a:
                 continue
-
-            # OR masks across the bin
             m = np.any(mask_old[a:b], axis=0)
             poly = mask2d_to_poly(m)
             if poly is None:
                 continue
-
-            # z at bin center (in u)
             u_center = float(np.mean(sv.us[a:b]))
             z = float(10.0 ** u_center)
-
             rings.append(
                 dict(
                     x=poly[:, 0],
@@ -523,21 +529,17 @@ def compute_support_tube_rings(
                 )
             )
 
-    # --------- RECENT bins (finer in last window) ----------
     if use_recent and w >= 1:
         bw = int(max(1, recent_bin_width))
         start = recent_start
-
         for a in range(start, U, bw):
             b = min(U, a + bw)
             m = np.any(mask_recent[a:b], axis=0)
             poly = mask2d_to_poly(m)
             if poly is None:
                 continue
-
             u_center = float(np.mean(sv.us[a:b]))
             z = float(10.0 ** u_center)
-
             rings.append(
                 dict(
                     x=poly[:, 0],
