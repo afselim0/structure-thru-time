@@ -158,6 +158,11 @@ class PlotEmbeddings:
         self.times = df[self.tcol].unique()
         self.fig: Optional[go.Figure] = None
 
+        # plotting-time configuration (set by init_plot)
+        self.time_scale: Optional[str] = None
+        self.tplot_col: str = f"{self.tcol}__plot"  # derived column for plotting (e.g. log-safe)
+        self.time_eps_plot: float = 1.0  # default; can be overridden in init_plot
+
         # stored ranges for downstream geometry layers if useful
         self._plot_ranges: Optional[PlotRanges] = None
 
@@ -167,6 +172,7 @@ class PlotEmbeddings:
         self,
         *,
         time_scale: str = "log",
+        time_eps_plot: float = 1.0,
         axis_background: str = "whitesmoke",
         pad_frac: float = 0.05,
         aspectratio: Tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -181,6 +187,21 @@ class PlotEmbeddings:
 
         df = self.embeddings_df
         self.fig = go.Figure()
+
+        # Store plotting-time configuration
+        self.time_scale = time_scale
+        self.time_eps_plot = float(time_eps_plot)
+
+        # Derive a plotting-safe time column used by all layers
+        t_raw = df[self.tcol].to_numpy(dtype=float)
+        if time_scale == "log":
+            t_plot = np.maximum(t_raw, self.time_eps_plot)
+        else:
+            t_plot = t_raw
+
+        # Save back to df (keeps raw time intact)
+        df[self.tplot_col] = t_plot
+        self.embeddings_df = df
 
         # Axis labels
         x_label = self.xcol
@@ -215,11 +236,10 @@ class PlotEmbeddings:
         x_range = (common_min, common_max)
         y_range = (common_min, common_max)
 
-        # Z ticks (decades) for log scale; for linear, still use nice decade ticks if possible
-        t = df[self.tcol].to_numpy(dtype=float)
-        min_time = _safe_positive_min(t, fallback=1.0)
+        # Z ticks based on plotting-time (so log scale and layers agree)
+        t = df[self.tplot_col].to_numpy(dtype=float)
+        min_time = _safe_positive_min(t, fallback=self.time_eps_plot if time_scale == "log" else 1.0)
         max_time = float(np.nanmax(t[np.isfinite(t)])) if np.isfinite(t).any() else 10.0
-        max_time = max(max_time, min_time * 1.01)
 
         z_min_decade = int(np.floor(np.log10(min_time)))
         z_max_decade = int(np.ceil(np.log10(max_time)))
@@ -319,8 +339,7 @@ class PlotEmbeddings:
                 go.Scatter3d(
                     x=sample_data[self.xcol],
                     y=sample_data[self.ycol],
-                    z=sample_data[self.tcol],
-                    mode="lines",
+                    z=sample_data[self.tplot_col] if self.time_scale == "log" else sample_data[self.tcol],                    mode="lines",
                     line=dict(color=color, width=float(line_width)),
                     opacity=float(alpha),
                     name=f"{population} - {sample}",
@@ -336,8 +355,10 @@ class PlotEmbeddings:
 
         df = self.embeddings_df
 
+        tkey = self.tplot_col if (self.time_scale == "log") else self.tcol
+
         median_df = (
-            df.groupby([self.popcol, self.tcol], as_index=False)
+            df.groupby([self.popcol, tkey], as_index=False)
             .agg(
                 **{
                     self.xcol: (self.xcol, "median"),
@@ -345,7 +366,7 @@ class PlotEmbeddings:
                     "color": ("color", "first"),
                 }
             )
-            .sort_values([self.popcol, self.tcol])
+            .sort_values([self.popcol, tkey])
         )
 
         for population in self.populations:
@@ -359,7 +380,7 @@ class PlotEmbeddings:
                 go.Scatter3d(
                     x=pop_data[self.xcol],
                     y=pop_data[self.ycol],
-                    z=pop_data[self.tcol],
+                    z=pop_data[tkey],
                     mode="lines",
                     line=dict(color=color, width=float(line_width)),
                     name=f"{pop} Median",

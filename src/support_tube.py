@@ -335,6 +335,27 @@ def compute_support_tube_mesh(
 
     field = vol.astype(float)
 
+    # --- after field = vol.astype(float) and optional extra smoothing ---
+    field = field.copy()
+
+    # Find slices with any support mass
+    mass_u = field.reshape(field.shape[0], -1).sum(axis=1)
+    nonzero = np.where(mass_u > 0)[0]
+    if nonzero.size >= 1:
+        u0, u1 = int(nonzero[0]), int(nonzero[-1])
+        k = 1  # extrusion radius; make it a parameter if you want
+
+        for du in range(1, k+1):
+            if u0 - du >= 0:
+                field[u0 - du] = np.maximum(field[u0 - du], field[u0])
+            if u0 + du < field.shape[0]:
+                field[u0 + du] = np.maximum(field[u0 + du], field[u0])
+
+            if u1 - du >= 0:
+                field[u1 - du] = np.maximum(field[u1 - du], field[u1])
+            if u1 + du < field.shape[0]:
+                field[u1 + du] = np.maximum(field[u1 + du], field[u1])
+
     # Optional additional smoothing (separate from sigma_u/sigma_xy used in mask construction)
     if float(u_smooth_sigma) > 0 or float(xy_smooth_sigma) > 0:
         field = gaussian_filter(
@@ -354,6 +375,11 @@ def compute_support_tube_mesh(
                 st = _make_disk(int(close_r_xy))
                 for ui in range(mask.shape[0]):
                     mask[ui] = binary_closing(mask[ui], structure=st)
+                    
+    if int(close_r_u) > 0 and int(close_r_xy) == 0:
+        r = int(close_r_u)
+        structure = np.ones((2*r+1, 1, 1), dtype=bool)
+        mask = binary_closing(mask, structure=structure)                
 
     if not mask.any():
         if verbose:
@@ -428,7 +454,7 @@ def compute_support_tube_rings(
         - kind: "old" | "recent"
         - hovertemplate: optional string
     """
-    
+
     sv = build_support_volume(
         df=df,
         pop=pop,
