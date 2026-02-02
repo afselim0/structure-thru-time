@@ -1,0 +1,384 @@
+def read_config(parameter, default, params = config):
+    return parameter if parameter in params else default
+# ______________________Input Parameters______________________
+# Simulation Parameters
+demes_file_path = read_config("demes_file_path", default = None)
+num_contigs = read_config("num_contigs", default = 500)
+contig_length = read_config("contig_length", default = 1e6)
+n_sim_per_pop = read_config("n_sim_per_pop", default = 20)
+mutation_rate = read_config("mutation_rate", default = 1.2e-8)
+recombination_rate = read_config("recombination_rate", default = 1.2e-8)
+
+# Inference Parameters
+infer_method = read_config("infer_method", default = "tsinfer")
+num_posterior_samples = read_config("num_replicates", default = 50)
+thinning_interval = read_config("thinning_interval", default = 60)
+burnin = read_config("burnin", default = 4000)
+
+# Rate Inference Parameters
+fraction_samples = read_config("fraction_samples", default = 1.0)
+min_window_size = read_config("min_window_size", default = 50)
+max_window_size = read_config("max_window_size", default = 500)
+max_time = read_config("max_time", default = 10000)
+num_timepoints = read_config("num_timepoints", default = 1000)
+
+# STT Parameters 
+N0 = read_config("N0", default = 1)
+min_time = read_config("min_time", default = 1)
+
+# Empirical dataset parameters
+pops = read_config("pops", "all").replace(","," ")
+n_samples_per_pop = read_config("n_samples_per_pop", -1)
+pop_colors = read_config("pop_colors", None)
+pop_labels = read_config("pop_labels", None)
+
+# General Parameters
+ts_dir = read_config("ts_dir", default = None)
+output_path = read_config("output_path", default = None)
+num_threads = read_config("num_threads", default = 1)
+version = read_config("version", default = 1)
+
+# Ensure parameters are provided
+assert (demes_file_path is not None) or (ts_dir is not None), "Provide either path to demography to be simulated, or tree sequences to be analyzed"
+assert output_path is not None, "Please specify output path"
+# ______________________File Names____________________________
+
+
+
+
+combs_data_dir = os.path.join(output_path,"combs/data")
+combs_plot_dir = os.path.join(output_path,"combs/data")
+# ______________________Target Groups_________________________
+sim_targets = [
+    pop_labels,pop_colors,pca_plot
+    rates_true,rates_true_plot, 
+    sim_finished
+    ]
+
+rate_targets = [
+    pdf_data,
+    rates_data, rates_plot
+    ]
+
+STT_targets = [
+    embeddings_data,
+    embeddings_plot,
+    performance_data,
+    performance_plot
+    ]
+# ______________________General Rules__________________________
+rule sim:
+    input: sim_targets
+
+rule infer:
+    input: infer_finished
+
+rule rates:
+    input: rate_targets
+
+rule STT: 
+    input: STT_targets
+
+rule STT_combs:
+    input: 
+        directory(combs_data_dir),
+        directory(combs_plot_dir)
+# ___________________________________________________________________________________________________________________________________________________
+# ______________________sim Rules____________________________
+rule preprocess_data:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        script="../../utils/preprocess_demography.py"
+    output:
+        POP_COLORS,
+        POP_LABELS
+    params:
+        outdir=DATA_OUTPUT_PATH,
+        n_per_pop=N_PER_POP
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --output_path {params.outdir} \
+            --n {params.n_per_pop}
+        """
+rule plot_demography:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        pop_colors=POP_COLORS,
+        script="../../utils/plot_demography.py"
+    output:
+        DEMOGRAPHY_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH,
+        max_time=MAX_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --colors {input.pop_colors} \
+            --output_path {params.outdir} \
+            --max_time {params.max_time}
+        """
+
+rule run_pca:
+    input:
+        pop_colors = POP_COLORS,
+        pop_labels = POP_LABELS,
+        demes_file_path=DEME_FILE_PATH,
+        script = "../../utils/run_pca.py"
+    output:
+        PCA_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH,
+        n_per_pop=N_PER_POP
+    shell:
+        """
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --n {params.n_per_pop}
+        """
+rule compute_rates_true:
+    input:
+        demes_file_path=DEME_FILE_PATH,
+        pop_labels = POP_LABELS,
+        script="../../utils/compute_rates_true.py"
+    output:
+        RATES_TRUE
+    params:
+        outdir=DATA_OUTPUT_PATH,
+        max_time=MAX_TIME
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --demes_file_path {input.demes_file_path} \
+            --output_path {params.outdir} \
+            --max_time {params.max_time} \
+            --labels {input.pop_labels}
+        """
+rule plot_rates_true:
+    input:
+        rates=RATES_TRUE,
+        pop_colors=POP_COLORS,
+        pop_labels=POP_LABELS,
+        script="../../utils/plot_rates.py"
+    output:
+        RATES_TRUE_PLOT
+    params:
+        outdir=PLOT_OUTPUT_PATH,
+        output_name=RATES_TRUE_PLOT_FILE
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+# ______________________infer Rules__________________________
+rule infer_trees:
+    input:
+        sim_finished=SIM_FINISHED,
+        script="../../utils/infer_trees.py"
+    output:
+        INFER_FINISHED
+    params:
+        sim_tree_dir=SIM_TREE_OUTPUT_PATH,
+        outdir=INFER_TREE_OUTPUT_PATH,
+        output_name = INFER_FINISHED_FILE
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --sim_tree_path {params.sim_tree_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+# ______________________rates Rules__________________________
+rule compute_pdf:
+    input:
+        main_script = CountCoalEvents_SCRIPT,
+        script = "../../utils/compute_pdf.py"
+    params:
+        trees_dir = trees_dir,
+        outdir = data_output_path,
+        output_name = os.path.basename(pdf_data),
+        max_time = max_time,
+        n_timepoints = n_timepoints,
+        n_samples = n_samples,
+        num_posterior_samples = num_posterior_samples,
+        fraction_samples = fraction_samples,
+        pops = pops,
+        pop_labels = pop_labels,
+        num_threads = num_threads
+
+    output:
+        pdf_data
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input_path {params.trees_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --max_time {params.max_time} \
+            --n_timepoints {params.n_timepoints} \
+            --pops {params.pops} \
+            --num_posterior_samples {params.num_posterior_samples} \
+            --n_samples_per_pop {params.n_samples} \
+            --fraction_samples {params.fraction_samples} \
+            --pop_labels {params.pop_labels} \
+            --num_threads {params.num_threads}
+        """
+
+rule compute_rates:
+    input:
+        pdf_data=pdf_data,
+        script="../../utils/compute_rates.py",
+        main_script=COMPUTE_RATES_SCRIPT
+    output:
+        rates_data
+    params:
+        outdir=data_output_path,
+        output_name=os.path.basename(rates_data),
+        min_window_size=min_window_size,
+        max_window_size=max_window_size
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --pdf_path {input.pdf_data} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --minimum_window_size {params.min_window_size} \
+            --maximum_window_size {params.max_window_size}
+        """
+
+rule plot_rates:
+    input:
+        rates=rates_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="../../utils/plot_rates.py"
+    output:
+        rates_plot
+    params:
+        outdir=plot_output_path,
+        output_name=os.path.basename(rates_plot),
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+# ______________________STT Rules____________________________
+rule compute_embeddings:
+    input:
+        rates=rates_data,
+        script="../../utils/compute_embeddings.py",
+        main_script=COMPUTE_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_data
+    params:
+        N0 = N0,
+        outdir=data_output_path,
+        output_name=os.path.basename(embeddings_data)
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --N0 {params.N0}
+        """
+rule plot_embeddings:
+    input:
+        embeddings=embeddings_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="../../utils/plot_embeddings.py",
+        main_script=PLOT_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_3d_plot
+    params:
+        outdir=plot_output_path,
+        output_name=os.path.basename(embeddings_3d_plot),
+        min_time=min_time,
+        # generation_time=generation_time
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
+        """
+rule evaluate_performance:
+    input:
+        embeddings=embeddings_data,
+        rates=rates_data,
+        pop_colors=pop_colors,
+        pop_labels=pop_labels,
+        script="../../utils/evaluate_performance.py"
+    output:
+        performance_data,
+        performance_plot
+    params:
+        N0=N0,
+        data_output_path=data_output_path,
+        plot_output_path=plot_output_path,
+        data_output_name=os.path.basename(performance_data),
+        plot_output_name=os.path.basename(performance_plot)
+    shell:
+        """
+        python {input.script} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
+            --N0 {params.N0} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
+        """
+rule population_combinations:
+    input:
+        pop_labels=pop_labels,
+        pop_colors=pop_colors,
+        rates=rates_data,
+        script="../../utils/run_pop_combs.py"
+    params:
+        data_dir=combs_data_dir,
+        plots_dir=combs_plots_dir,
+        N0=N0,
+        # generation_time=generation_time
+    output:
+        directory(combs_data_dir),
+        directory(combs_plots_dir)
+    shell:
+        """
+        python {input.script} \
+            --data_dir {params.data_dir} \
+            --plots_dir {params.plots_dir} \
+            --pop_labels {input.pop_labels} \
+            --pop_colors {input.pop_colors} \
+            --rates_file {input.rates} \
+            --N0 {params.N0}
+        """

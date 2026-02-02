@@ -50,12 +50,14 @@ def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8):
     shutil.rmtree(f"{output_prefix}.vcz")
     return
 
-def infer_singer(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, contig_length=1e6, num_posterior_samples = 50, thinning_interval=100):
+def infer_singer(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, contig_length=1e6, num_posterior_samples = 50, thinning_interval=100, burnin=1000):
     vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
     contig_id = os.path.basename(vcf_path_prefix)
     output_prefix = os.path.join(output_path, contig_id)
-    singer_infer_command = f"{singer_path}/singer_master -vcf {vcf_path_prefix} -output {output_prefix} -m {mu} -Ne {Ne} -start 0 -end {contig_length} -n {num_posterior_samples} -thin {thinning_interval}"
-    convert_to_tskit_command = f"{singer_path}/convert_to_tskit -input {output_prefix} -output {output_prefix} -start 0 -end {num_posterior_samples} -step 1"
+    num_burnin_samples = int(burnin/thinning_interval)
+    tot_posterior_samples = num_burnin_samples + num_posterior_samples
+    singer_infer_command = f"{singer_path}/singer_master -vcf {vcf_path_prefix} -output {output_prefix} -m {mu} -Ne {Ne} -start 0 -end {contig_length} -n {tot_posterior_samples} -thin {thinning_interval}"
+    convert_to_tskit_command = f"{singer_path}/convert_to_tskit -input {output_prefix} -output {output_prefix} -start {num_burnin_samples} -end {tot_posterior_samples} -step 1"
 
     with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
         subprocess.run(singer_infer_command, shell=True, stdout = f, stderr = f)
@@ -68,11 +70,10 @@ def infer_singer(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, contig_
     os.remove(f"{output_prefix}_start_muts_0.txt")
     os.remove(f"{output_prefix}_start_recombs_0.txt")
     for i in range(num_posterior_samples):
-        if os.path.exists(f"{output_prefix}_{i}.trees"):
-            os.remove(f"{output_prefix}_branches_{i}.txt")
-            os.remove(f"{output_prefix}_nodes_{i}.txt")
-            os.remove(f"{output_prefix}_muts_{i}.txt")
-            os.remove(f"{output_prefix}_recombs_{i}.txt")
+        os.remove(f"{output_prefix}_branches_{i}.txt")
+        os.remove(f"{output_prefix}_nodes_{i}.txt")
+        os.remove(f"{output_prefix}_muts_{i}.txt")
+        os.remove(f"{output_prefix}_recombs_{i}.txt")
     return
 
 def infer_relate(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, r=1.2e-8, contig_length=1e6):
@@ -140,12 +141,12 @@ def main():
     parser.add_argument("--method", required=True, help="Method used for inference")
     parser.add_argument("--contig_length", type=int, default=1e6, help="length of contigs")
     parser.add_argument("--num_posterior_samples", type=int, default=100, help="Number of posterior samples for singer")
-    parser.add_argument("--thinning_interval", type=int, default=20, help="Thinning interval for singer")
+    parser.add_argument("--thinning_interval", type=int, default=60, help="Thinning interval for singer")
+    parser.add_argument("--burnin", type=int, default=1000, help="Burn-in period for singer")
     parser.add_argument("--mu", type=float, default=1.2e-8, help="Mutation rate")
     parser.add_argument("--r", type=float, default=1.2e-8, help="Recombination rate")
     parser.add_argument("--output_name", required=True, help="Name of the output file to save inference time")
     parser.add_argument("--num_threads", type=int, default=10, help="Number of threads to use for inference")
-
     args = parser.parse_args()
     vcf_dir = args.vcf_dir
     output_path = args.output_path
@@ -159,7 +160,7 @@ def main():
     num_threads = args.num_threads
     Ne = find_Ne(vcf_dir)
 
-    time_taken = infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, num_threads = num_threads)
+    time_taken = infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin, num_threads)
     with open(f"{output_path}/{output_name}", "w") as f:
         f.write(f"inference took {time_taken/60:.2f} minutes")
 
