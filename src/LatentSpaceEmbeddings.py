@@ -29,11 +29,18 @@ from tqdm import tqdm
 #     loss = compute_loss(R,D_prime)
 #     grad = compute_gradient(X,R,D_prime,valid_mask)
 #     return loss, grad.ravel()
+ 
+inverse_distance=False
 
 def compute_f(D, N0):
     D_sq = D**2
-    f = 1/(D_sq + N0)
-    f_prime = -2*D/(D_sq + N0)**2
+
+    if inverse_distance:
+        f = 1/(D_sq + N0)
+        f_prime = -2*D/(D_sq + N0)**2
+    else:
+        f = (1/N0)*np.exp(-D_sq)
+        f_prime = -2*D*f
     return f,f_prime
 
 def compute_M(f,f_prime,D,R,valid_mask):
@@ -65,6 +72,7 @@ def compute_embeddings(X_init, R, N0, d=2, max_iter=10000, tol=1e-9):
     # Optimize using L-BFGS-B
     result = minimize(compute_loss_gradient, X_init.ravel(), args=(R, N0), method='L-BFGS-B',
                       jac=True, options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
+    print(f"BFGS solved with message: {result.message}, nit={result.nit},nfev={result.nfev},fun={result.fun}\n")
     X_opt = result.x.reshape(X_init.shape)
     return X_opt, result.fun
 
