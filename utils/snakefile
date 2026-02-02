@@ -1,6 +1,15 @@
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
 def read_config(parameter, default, params = config):
     return parameter if parameter in params else default
 # ______________________Input Parameters______________________
+# General Parameters
+ts_dir = read_config("ts_dir", default = None)
+output_path = read_config("output_path", default = None)
+num_threads = read_config("num_threads", default = 1)
+version = read_config("version", default = 1)
+
 # Simulation Parameters
 demes_file_path = read_config("demes_file_path", default = None)
 num_contigs = read_config("num_contigs", default = 500)
@@ -8,6 +17,8 @@ contig_length = read_config("contig_length", default = 1e6)
 n_sim_per_pop = read_config("n_sim_per_pop", default = 20)
 mutation_rate = read_config("mutation_rate", default = 1.2e-8)
 recombination_rate = read_config("recombination_rate", default = 1.2e-8)
+
+SIM_TAG = f".nC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 
 # Inference Parameters
 infer_method = read_config("infer_method", default = "tsinfer")
@@ -22,29 +33,52 @@ max_window_size = read_config("max_window_size", default = 500)
 max_time = read_config("max_time", default = 10000)
 num_timepoints = read_config("num_timepoints", default = 1000)
 
+PDF_TAG = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{num_timepoints}"
+RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG 
+
 # STT Parameters 
 N0 = read_config("N0", default = 1)
 min_time = read_config("min_time", default = 1)
+STT_TAG = f".N0{N0}" + RATES_TAG
 
 # Empirical dataset parameters
 pops = read_config("pops", "all").replace(","," ")
 n_samples_per_pop = read_config("n_samples_per_pop", -1)
-pop_colors = read_config("pop_colors", None)
-pop_labels = read_config("pop_labels", None)
+pop_colors = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
+pop_labels = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
 
-# General Parameters
-ts_dir = read_config("ts_dir", default = None)
-output_path = read_config("output_path", default = None)
-num_threads = read_config("num_threads", default = 1)
-version = read_config("version", default = 1)
 
 # Ensure parameters are provided
 assert (demes_file_path is not None) or (ts_dir is not None), "Provide either path to demography to be simulated, or tree sequences to be analyzed"
 assert output_path is not None, "Please specify output path"
+
+# Main scripts
+CountCoalEvents_SCRIPT = "../src/CountCoalEvents.py"
+COMPUTE_RATES_SCRIPT = "../src/compute_coal_rates.py"
+COMPUTE_EMBEDDINGS_SCRIPT = "../src/LatentSpaceEmbeddings.py"
+PLOT_EMBEDDINGS_SCRIPT = "../src/PlotEmbeddings.py"
 # ______________________File Names____________________________
+# Base Output directories
+data_output_path = os.path.join(output_path,"data")
+plot_output_path = os.path.join(output_path,"plots")
+sim_output_path = os.path.join(output_path,f"trees/sim")
+infer_output_path = os.path.join(output_path,f"trees/{infer_method}")
 
+# Target file names
+pca_plot = os.path.join(plot_output_path,"pca.png")
+rates_true = os.path.join(data_output_path,"rates_true.parquet")
+rates_true_plot = os.path.join(plot_output_path,"rates_true.png")
+sim_finished = os.path.join(sim_output_path,f"simulated{SIM_TAG}.txt")
+infer_finished = os.path.join(sim_output_path,f"inferred{SIM_TAG}.txt")
 
+pdf_data = os.path.join(data_output_path,f"coal_pdf{PDF_TAG}.parquet")
+rates_data = os.path.join(data_output_path,f"coal_pdf{RATES_TAG}.parquet")
+rates_plot = os.path.join(data_output_path,f"coal_pdf{RATES_TAG}.png")
 
+embeddings_data = os.path.join(data_output_path,f"embeddings{STT_TAG}.parquet")
+embeddings_plot = os.path.join(data_output_path,f"embeddings{STT_TAG}.html")
+performance_data = os.path.join(data_output_path,f"performance{STT_TAG}.parquet")
+performance_plot = os.path.join(data_output_path,f"performance{STT_TAG}.png")
 
 combs_data_dir = os.path.join(output_path,"combs/data")
 combs_plot_dir = os.path.join(output_path,"combs/data")
