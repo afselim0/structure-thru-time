@@ -4,7 +4,6 @@ import pandas as pd
 import demes
 import msprime
 import numpy as np
-from tqdm import tqdm
 
 
 def compute_true_rates(demes_file_path, max_time, delta_t = 10):
@@ -20,7 +19,7 @@ def compute_true_rates(demes_file_path, max_time, delta_t = 10):
             pop1 = populations[i]
             pop2 = populations[j]
             pop_pairs.append((pop1,pop2))
-    for pair in tqdm(pop_pairs):
+    for pair in pop_pairs:
             pop1 = pair[0]
             pop2 = pair[1]
             if pop1 == pop2:

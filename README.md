@@ -12,7 +12,7 @@ The main input to **sturcture-thru-time** a directory with a list of [tree seque
 To run STT:
 ```
 results/empirical/snakemake --config \
-    trees_dir= PATH/TO/TREES \
+    trees_dir=PATH/TO/TREES \
     output_dir=PATH/TO/OUTPUT/DIR
     {param}={param_value} \
     ...
