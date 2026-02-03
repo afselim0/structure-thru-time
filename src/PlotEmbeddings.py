@@ -416,6 +416,8 @@ class PlotEmbeddings:
         name_suffix: str = "tube",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
+        mask_method: str = "mass_frac_grid",
+        trim_center: str = "median",
         x_edges: Optional[np.ndarray] = None,
         y_edges: Optional[np.ndarray] = None,
     ) -> None:
@@ -477,6 +479,8 @@ class PlotEmbeddings:
                 close_r_u=int(close_r_u),
                 close_r_xy=int(close_r_xy),
                 verbose=bool(verbose),
+                mask_method=str(mask_method),
+                trim_center=str(trim_center),
             )
 
             if mesh is None:
@@ -532,6 +536,8 @@ class PlotEmbeddings:
         name_suffix: str = "rings",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
+        mask_method: str = "mass_frac_grid",
+        trim_center: str = "median",
         x_edges: Optional[np.ndarray] = None,
         y_edges: Optional[np.ndarray] = None,
     ) -> None:
@@ -593,6 +599,8 @@ class PlotEmbeddings:
                 tau_recent=float(tau_recent_val),
                 min_boundary_points=int(min_boundary_points),
                 verbose=bool(verbose),
+                mask_method=str(mask_method),
+                trim_center=str(trim_center),
             )
 
             if not rings:
