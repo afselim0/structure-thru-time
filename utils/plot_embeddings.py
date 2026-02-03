@@ -31,12 +31,25 @@ def main():
     labels_df = labels_df[labels_df['sample_id'].isin(active_samples)]
     populations = labels_df['population'].unique()
     colors_df = colors_df[colors_df['population'].isin(populations)]
+    # If ancient samples are detected (samples where the embedding is NaN), print who they are
+    ancient_samples = embeddings_df[embeddings_df.isna().any(axis=1)]
+    if not ancient_samples.empty:
+        print("Ancient samples detected:")
+        # print unique sample ids
+        print(ancient_samples.index.get_level_values(0).unique())
+    else:
+        print("No ancient samples detected.")
 
     output_basename = output_name.removesuffix(".html")
     print("Building plots...")
 
     embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
-    plotter = PlotEmbeddings(embeddings_df,labels_df,colors_df,generation_time=generation_time)
+    plotter = PlotEmbeddings(
+        embeddings_df=embeddings_df,
+        labels_df=labels_df,
+        colors_df=colors_df,
+        generation_time=generation_time,
+    )
     plotter.init_plot(time_scale="log")
     plotter.add_sample_trajectories()
     plotter.add_population_medians()

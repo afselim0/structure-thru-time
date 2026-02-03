@@ -11,6 +11,7 @@ n_timepoints = config["n_timepoints"] if "n_timepoints" in config else 500
 fraction_samples = config["fraction"] if "fraction" in config else 1
 num_posterior_samples = config["num_posterior_samples"] if "num_posterior_samples" in config else 1
 num_threads = config["num_threads"] if "num_threads" in config else 1
+sample_times_file = config["sample_times_file"] if "sample_times_file" in config else None
 # if "generation_time" in config:
 #     generation_time = config["generation_time"]
 # else:
@@ -165,15 +166,19 @@ rule plot_rates:
 
 rule compute_embeddings:
     input:
-        rates=rates_data,
-        script="../../utils/compute_embeddings.py",
-        main_script=COMPUTE_EMBEDDINGS_SCRIPT
+        rates = rates_data,
+        script = "../../utils/compute_embeddings.py",
+        sample_times = lambda wc: [sample_times_file] if sample_times_file else []
     output:
         embeddings_data
     params:
         N0 = N0,
-        outdir=data_output_path,
-        output_name=os.path.basename(embeddings_data)
+        outdir = data_output_path,
+        output_name = os.path.basename(embeddings_data),
+        sample_times_arg = (
+            f"--sample_times {sample_times_file}"
+            if sample_times_file else ""
+        )
     shell:
         """
         mkdir -p {params.outdir}
@@ -181,7 +186,8 @@ rule compute_embeddings:
             --input {input.rates} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --N0 {params.N0}
+            --N0 {params.N0} \
+            {params.sample_times_arg}
         """
 
 rule plot_embeddings:

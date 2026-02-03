@@ -50,8 +50,17 @@ def main():
     embeddings = pd.read_parquet(args.embeddings)
     rates = pd.read_parquet(args.rates)
 
-    embeddings.columns = embeddings.columns.astype(float)
-    rates.columns = rates.columns.astype(float)
+    def coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
+        # Attempt numeric conversion of column labels; keep non-numeric labels unchanged
+        cols = df.columns.astype(str)
+        num = pd.to_numeric(cols, errors="coerce")
+        new_cols = [float(n) if pd.notna(n) else c for c, n in zip(cols, num)]
+        df = df.copy()
+        df.columns = new_cols
+        return df
+
+    embeddings = coerce_numeric_columns(embeddings)
+    rates = coerce_numeric_columns(rates)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
 

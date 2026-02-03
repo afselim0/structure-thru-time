@@ -92,9 +92,12 @@ class LatentSpaceEmbeddings:
         self.R = R
     
         if sample_times is None:
-            self.sample_times = np.array([0]*self.num_samples)
+            self.sample_times = np.zeros(self.num_samples, dtype=float)
         else:
             self.sample_times = sample_times
+            print(f"Number of sample times provided: {len(self.sample_times)}")
+            print(f"Number of samples: {self.num_samples}")
+
 
         self.embeddings = None
 
@@ -136,8 +139,23 @@ class LatentSpaceEmbeddings:
         R = R[extant_samples,:,]
         R = R[:,extant_samples,]
         X = X_init[extant_samples, :]
-        X,loss = compute_embeddings(X_init, R, self.N0)
+        X,loss = compute_embeddings(X, R, self.N0)
         return X, loss
+    
+    def compute_embeddings(self, X_init, time_idx):
+        R = self.R[:, :, time_idx]
+
+        extant = np.where(self.sampled_by_time[:, time_idx])[0]
+        R_sub = R[np.ix_(extant, extant)]
+
+        X0 = X_init[extant, :]
+        X_sub, loss = compute_embeddings(X0, R_sub, self.N0)
+
+        # Re-expand to full size
+        X_full = np.full_like(X_init, np.nan, dtype=float)
+        X_full[extant, :] = X_sub
+
+        return X_full, loss
 
     def compute_embeddings_through_time(self,X_init = None):
         embeddings = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
