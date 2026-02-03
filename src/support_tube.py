@@ -2,31 +2,45 @@
 """
 src/support_tube.py
 
-Support-tube geometry builder for PlotEmbeddings.
+Canonical support-tube geometry builder for PlotEmbeddings.
 
-Implements:
-- Phase A: per-u slice (u=log10(time)) mass-fraction support mask
-- Phase B: time/u smoothing + optional morphological closing
-- Geometry:
-    - compute_support_tube_mesh() -> Mesh3d vertices + faces
-    - compute_support_tube_rings() -> Scatter3d ring polylines for time-binned outlines
+Canonical mask method
+---------------------
+We use ONE method for the paper/pipeline:
+
+  trimmed_convex_hull:
+    - per u-slice, trim outliers by radius around a robust center (median/mean)
+    - compute convex hull of the retained points
+    - rasterize hull to a binary mask on a global XY grid
+
+Phase A / Phase B
+-----------------
+Phase A:
+  - build per-slice binary masks (U, Y, X) using trimmed convex hull
+
+Phase B:
+  - optionally fill gaps along U (copy-nearest strategy)
+  - optionally smooth along U (float volume in [0,1])
+
+Geometry:
+  - compute_support_tube_mesh() -> vertices + faces for Mesh3d
+  - compute_support_tube_rings() -> polylines (Scatter3d) from mask contours
 
 Conventions
 -----------
 Grid arrays:
-- XY grid is (Y, X) with y as rows, x as cols (matches np.histogram2d usage)
+- XY mask is (Y, X) with y as rows, x as cols (matches np.histogram2d layout).
 - Volume is (U, Y, X) where U indexes log10(time) bins.
 
 Mapping:
 - u = log10(max(time, time_eps))
-- For plotting: z = 10**u (so z is in original time units, suitable for log z-axis)
-
+- for plotting: z = 10**u (suitable for a log z-axis)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, binary_closing
@@ -35,43 +49,11 @@ from skimage.measure import marching_cubes, find_contours
 from matplotlib.path import Path
 
 
-# ---------------------------- utilities -----------------------------------
-
-
-def _finite(x: np.ndarray) -> np.ndarray:
-    x = np.asarray(x, dtype=float)
-    return x[np.isfinite(x)]
-
-
-def _mass_fraction_threshold(density_2d: np.ndarray, mass_frac: float) -> float:
-    """
-    Return threshold tau such that pixels with value >= tau contain `mass_frac`
-    of total mass (sum of density).
-    """
-    mass_frac = float(mass_frac)
-    if not (0.0 < mass_frac <= 1.0):
-        raise ValueError(f"mass_frac must be in (0,1], got {mass_frac}")
-
-    d = np.asarray(density_2d, dtype=float).ravel()
-    total = float(d.sum())
-    if total <= 0:
-        return np.inf  # yields empty mask
-
-    order = np.argsort(d)[::-1]
-    vals = d[order]
-    csum = np.cumsum(vals)
-
-    cutoff = mass_frac * total
-    idx = int(np.searchsorted(csum, cutoff, side="left"))
-    idx = int(np.clip(idx, 0, len(vals) - 1))
-    return float(vals[idx])
+# ---------------------------- small utilities -----------------------------
 
 
 def _interp_centers(idx: np.ndarray, centers: np.ndarray) -> np.ndarray:
-    """
-    idx: float array in [0, n-1]
-    centers: (n,) array
-    """
+    """idx: float array in [0, n-1], centers: (n,) array."""
     n = len(centers)
     if n == 0:
         return np.array([], dtype=float)
@@ -87,9 +69,7 @@ def _largest_contour(contours: List[np.ndarray]) -> Optional[np.ndarray]:
 
 
 def _make_disk(radius: int) -> np.ndarray:
-    """
-    Binary structuring element disk in 2D.
-    """
+    """Binary structuring element disk in 2D."""
     r = int(radius)
     if r <= 0:
         return np.ones((1, 1), dtype=bool)
@@ -98,156 +78,21 @@ def _make_disk(radius: int) -> np.ndarray:
 
 
 def _make_ball(radius: int) -> np.ndarray:
-    """
-    Binary structuring element ball in 3D (U,Y,X).
-    """
+    """Binary structuring element ball in 3D (U,Y,X)."""
     r = int(radius)
     if r <= 0:
         return np.ones((1, 1, 1), dtype=bool)
     zz, yy, xx = np.ogrid[-r : r + 1, -r : r + 1, -r : r + 1]
     return (xx * xx + yy * yy + zz * zz) <= (r * r)
 
-def _slice_mask_trimmed_convex_hull(
-    xsamp: np.ndarray,
-    ysamp: np.ndarray,
-    x_edges: np.ndarray,
-    y_edges: np.ndarray,
-    *,
-    keep_frac: float = 0.90,
-    center: str = "median",  # "median" or "mean"
-    min_points: int = 10,
-    degenerate_fallback: str = "disk",  # "disk" or "empty"
-) -> np.ndarray:
-    """
-    Build an interpretable 2D mask for a single time slice:
-
-      1) Choose a robust center (median or mean)
-      2) Keep the closest `keep_frac` points by Euclidean radius to that center
-      3) Compute convex hull of the retained points
-      4) Rasterize hull polygon into the XY grid defined by x_edges/y_edges
-
-    Returns
-    -------
-    mask : bool array shaped (Y, X) matching histogram2d layout (rows=y, cols=x)
-
-    Notes
-    -----
-    - This is explicitly "fraction of points", not "mass fraction over smoothed pixels".
-    - If too few points or hull is degenerate, fallback can return a small disk at the center.
-    """
-    xsamp = np.asarray(xsamp, dtype=float)
-    ysamp = np.asarray(ysamp, dtype=float)
-    x_edges = np.asarray(x_edges, dtype=float)
-    y_edges = np.asarray(y_edges, dtype=float)
-
-    grid_res_xy = x_edges.size - 1
-    if grid_res_xy <= 0 or (y_edges.size - 1) != grid_res_xy:
-        raise ValueError("x_edges and y_edges must be length grid_res_xy+1 and match each other.")
-
-    mask = np.zeros((grid_res_xy, grid_res_xy), dtype=bool)
-
-    # --- finite points only
-    m = np.isfinite(xsamp) & np.isfinite(ysamp)
-    xs = xsamp[m]
-    ys = ysamp[m]
-    n = xs.size
-
-    if n < 3:
-        return mask
-    if n < int(min_points):
-        # For very sparse slices, returning empty is often better than inventing structure.
-        # But you can change this to disk fallback if desired.
-        if degenerate_fallback == "disk":
-            # small disk at robust center
-            if center == "mean":
-                cx, cy = float(np.mean(xs)), float(np.mean(ys))
-            else:
-                cx, cy = float(np.median(xs)), float(np.median(ys))
-            xs_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
-            ys_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
-            xi = int(np.argmin(np.abs(xs_centers - cx)))
-            yi = int(np.argmin(np.abs(ys_centers - cy)))
-            r = 1
-            y0 = max(0, yi - r); y1 = min(grid_res_xy, yi + r + 1)
-            x0 = max(0, xi - r); x1 = min(grid_res_xy, xi + r + 1)
-            mask[y0:y1, x0:x1] = True
-            return mask
-        return mask
-
-    keep_frac = float(keep_frac)
-    if not (0.0 < keep_frac <= 1.0):
-        raise ValueError(f"keep_frac must be in (0,1], got {keep_frac}")
-
-    # --- choose center
-    center = str(center).lower().strip()
-    if center not in {"median", "mean"}:
-        raise ValueError("center must be 'median' or 'mean'")
-    if center == "mean":
-        cx, cy = float(np.mean(xs)), float(np.mean(ys))
-    else:
-        cx, cy = float(np.median(xs)), float(np.median(ys))
-
-    # --- radial trimming
-    dx = xs - cx
-    dy = ys - cy
-    r2 = dx * dx + dy * dy
-
-    k = int(np.ceil(keep_frac * n))
-    k = max(3, min(k, n))
-
-    # take k points with smallest radius
-    order = np.argsort(r2)
-    keep_idx = order[:k]
-    xr = xs[keep_idx]
-    yr = ys[keep_idx]
-
-    # --- convex hull on retained points
-    pts = np.column_stack([xr, yr])
-    try:
-        hull = ConvexHull(pts)
-        verts = pts[hull.vertices]  # ordered around hull
-    except Exception:
-        # Degenerate geometry (collinear, duplicates, etc.)
-        if degenerate_fallback == "disk":
-            xs_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
-            ys_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
-            xi = int(np.argmin(np.abs(xs_centers - cx)))
-            yi = int(np.argmin(np.abs(ys_centers - cy)))
-            r = 1
-            y0 = max(0, yi - r); y1 = min(grid_res_xy, yi + r + 1)
-            x0 = max(0, xi - r); x1 = min(grid_res_xy, xi + r + 1)
-            mask[y0:y1, x0:x1] = True
-            return mask
-        return mask
-
-    if verts.shape[0] < 3:
-        return mask
-
-    # --- rasterize hull polygon into grid cells by testing cell centers
-    xs_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
-    ys_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
-
-    # mesh of centers -> list of points (x,y)
-    XX, YY = np.meshgrid(xs_centers, ys_centers)  # shapes (Y,X)
-    centers = np.column_stack([XX.ravel(), YY.ravel()])
-
-    poly = Path(verts, closed=True)
-    inside = poly.contains_points(centers)
-    mask = inside.reshape((grid_res_xy, grid_res_xy))
-
-    return mask
 
 def _fill_u_gaps_copy_nearest(masks: np.ndarray) -> np.ndarray:
     """
     Fill gaps along the u-axis so the support is temporally connected.
 
-    Strategy 1 (copy-nearest):
+    Strategy:
       - Leading/trailing empty region: copy nearest non-empty slice outward.
-      - Internal gaps between two non-empty slices: copy nearest endpoint into the gap
-        (ties split at midpoint). Uses OR assignment so we never erase support.
-
-    masks: bool array (U, Y, X)
-    returns: new bool array (U, Y, X)
+      - Internal gaps: copy nearest endpoint into the gap (ties split at midpoint).
     """
     m = masks.copy()
     U = m.shape[0]
@@ -255,30 +100,141 @@ def _fill_u_gaps_copy_nearest(masks: np.ndarray) -> np.ndarray:
 
     idx = np.where(has)[0]
     if idx.size == 0:
-        return m  # nothing to fill
+        return m
 
-    # ---- fill leading / trailing empties
     first = int(idx[0])
     last = int(idx[-1])
 
+    # leading / trailing
     for u in range(0, first):
         m[u] |= m[first]
     for u in range(last + 1, U):
         m[u] |= m[last]
 
-    # ---- fill internal gaps between consecutive non-empty slices
+    # internal gaps
     for a, b in zip(idx[:-1], idx[1:]):
-        a = int(a); b = int(b)
+        a = int(a)
+        b = int(b)
         if b <= a + 1:
             continue
         mid = (a + b) // 2
         for u in range(a + 1, b):
-            if u <= mid:
-                m[u] |= m[a]
-            else:
-                m[u] |= m[b]
+            m[u] |= m[a] if (u <= mid) else m[b]
 
     return m
+
+
+# --------------------- canonical per-slice mask builder --------------------
+
+
+def _mask_xy_for_slice(
+    xsamp: np.ndarray,
+    ysamp: np.ndarray,
+    *,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    mass_frac: float,
+    trim_center: str,
+    min_points_per_slice: int,
+    reason_counts: Dict[str, int],
+) -> np.ndarray:
+    """
+    Canonical per-slice mask: trimmed convex hull rasterized on the XY grid.
+
+    Steps:
+      1) compute robust center (median/mean)
+      2) keep closest mass_frac points by radius
+      3) compute convex hull on retained points
+      4) rasterize polygon onto grid cell centers
+
+    Returns:
+      mask (Y, X) boolean array
+
+    Side effects:
+      updates reason_counts[...] for invalid slice causes
+    """
+    x_edges = np.asarray(x_edges, dtype=float)
+    y_edges = np.asarray(y_edges, dtype=float)
+
+    grid_res_x = x_edges.size - 1
+    grid_res_y = y_edges.size - 1
+    if grid_res_x <= 0 or grid_res_y <= 0 or grid_res_x != grid_res_y:
+        raise ValueError("x_edges and y_edges must be length grid_res_xy+1 and match each other.")
+
+    # empty by default
+    mask = np.zeros((grid_res_y, grid_res_x), dtype=bool)
+
+    xsamp = np.asarray(xsamp, dtype=float)
+    ysamp = np.asarray(ysamp, dtype=float)
+    m = np.isfinite(xsamp) & np.isfinite(ysamp)
+    xs = xsamp[m]
+    ys = ysamp[m]
+    n = int(xs.size)
+
+    if n < int(min_points_per_slice):
+        reason_counts["too_few_points"] = reason_counts.get("too_few_points", 0) + 1
+        return mask
+
+    mass_frac = float(mass_frac)
+    if not (0.0 < mass_frac <= 1.0):
+        raise ValueError(f"mass_frac must be in (0,1], got {mass_frac}")
+
+    trim_center = str(trim_center).lower().strip()
+    if trim_center not in {"median", "mean"}:
+        raise ValueError("trim_center must be 'median' or 'mean'")
+
+    # center
+    if trim_center == "mean":
+        cx, cy = float(np.mean(xs)), float(np.mean(ys))
+    else:
+        cx, cy = float(np.median(xs)), float(np.median(ys))
+
+    # radial trim
+    dx = xs - cx
+    dy = ys - cy
+    r2 = dx * dx + dy * dy
+
+    k = int(np.ceil(mass_frac * n))
+    k = max(3, min(k, n))
+
+    order = np.argsort(r2)
+    keep_idx = order[:k]
+    xr = xs[keep_idx]
+    yr = ys[keep_idx]
+
+    if xr.size < 3:
+        reason_counts["too_few_after_trim"] = reason_counts.get("too_few_after_trim", 0) + 1
+        return mask
+
+    pts = np.column_stack([xr, yr])
+
+    # convex hull
+    try:
+        hull = ConvexHull(pts)
+        verts = pts[hull.vertices]  # ordered
+    except Exception:
+        reason_counts["hull_failed"] = reason_counts.get("hull_failed", 0) + 1
+        return mask
+
+    if verts.shape[0] < 3:
+        reason_counts["degenerate_hull"] = reason_counts.get("degenerate_hull", 0) + 1
+        return mask
+
+    # rasterize to grid cell centers
+    xs_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+    ys_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+    XX, YY = np.meshgrid(xs_centers, ys_centers)  # (Y,X)
+    centers = np.column_stack([XX.ravel(), YY.ravel()])
+
+    poly = Path(verts, closed=True)
+    inside = poly.contains_points(centers)
+    mask = inside.reshape((grid_res_y, grid_res_x))
+
+    if not mask.any():
+        reason_counts["empty_raster"] = reason_counts.get("empty_raster", 0) + 1
+        return np.zeros((grid_res_y, grid_res_x), dtype=bool)
+
+    return mask
 
 
 # ------------------------ Phase A / Phase B -------------------------------
@@ -286,11 +242,16 @@ def _fill_u_gaps_copy_nearest(masks: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class SupportVolume:
-    vol: np.ndarray      # float (U,Y,X) in [0,1]
-    xs: np.ndarray       # (X,) bin centers
-    ys: np.ndarray       # (Y,) bin centers
-    us: np.ndarray       # (U,) u-centers (log10 time)
-    counts_u: np.ndarray # (U,) number of points per u-slice
+    vol: np.ndarray                 # float (U,Y,X) in [0,1]
+    xs: np.ndarray                  # (X,) bin centers
+    ys: np.ndarray                  # (Y,) bin centers
+    us: np.ndarray                  # (U,) u-centers (log10 time)
+    counts_u: np.ndarray            # (U,) number of points per u-slice
+
+    # diagnostics
+    valid_slices_mask: np.ndarray   # (U,) bool
+    n_invalid_slices: int
+    reason_counts: Dict[str, int]
 
 
 def build_support_volume(
@@ -301,34 +262,25 @@ def build_support_volume(
     ycol: str,
     tcol: str,
     popcol: str,
+    # Tier 1 / Tier 2 (public)
     grid_res_xy: int,
     grid_res_u: int,
-    mass_frac: float,
-    sigma_xy: float,
-    sigma_u: float,
-    min_points_per_slice: int,
+    mass_frac: float = 0.90,
+    sigma_u: float = 1.0,
+    min_points_per_slice: int = 5,
+    time_eps: float = 1.0,
     fill_u_gaps: bool = True,
-    time_eps: float,
-    # NEW: allow caller to enforce global XY edges
+    # global XY edges (single source of truth)
     x_edges: Optional[np.ndarray] = None,
     y_edges: Optional[np.ndarray] = None,
     xy_pad_frac: float = 0.05,
-    verbose: bool = False,
-    # NEW:
-    mask_method: str = "mass_frac_grid",
     trim_center: str = "median",
+    verbose: bool = False,
+    # Advanced (kept minimal; placeholder for future ideas)
+    # NOTE: "smooth distance field" is intentionally NOT implemented as a codepath yet.
 ) -> Optional[SupportVolume]:
     """
-    Phase A:
-      For each u slice, compute 2D histogram H(y,x), smooth with sigma_xy,
-      then threshold to mass-fraction mask.
-
-    Phase B:
-      Smooth masks along u with sigma_u (gaussian on axis 0).
-      Output vol float in [0,1].
-
-    If x_edges/y_edges are provided, they are used verbatim (global source of truth).
-    Otherwise, edges are computed from this population's points with xy_pad_frac.
+    Build support volume for one population using the canonical trimmed convex hull masks.
     """
     sub = df[df[popcol].astype(str) == str(pop)]
     if sub.empty:
@@ -338,12 +290,10 @@ def build_support_volume(
     y = sub[ycol].to_numpy(dtype=float)
     t = sub[tcol].to_numpy(dtype=float)
 
-    # Filter to finite triplets (avoid misalignment from filtering independently)
     m = np.isfinite(x) & np.isfinite(y) & np.isfinite(t)
     x = x[m]
     y = y[m]
     t = t[m]
-
     if x.size == 0:
         return None
 
@@ -352,20 +302,20 @@ def build_support_volume(
 
     # ---- XY edges
     if x_edges is None or y_edges is None:
-        # compute from this population (legacy / fallback)
         x_min, x_max = float(np.min(x)), float(np.max(x))
         y_min, y_max = float(np.min(y)), float(np.max(y))
 
-        x_pad = xy_pad_frac * (x_max - x_min if x_max > x_min else 1.0)
-        y_pad = xy_pad_frac * (y_max - y_min if y_max > y_min else 1.0)
+        x_pad = float(xy_pad_frac) * (x_max - x_min if x_max > x_min else 1.0)
+        y_pad = float(xy_pad_frac) * (y_max - y_min if y_max > y_min else 1.0)
 
-        x_min -= x_pad; x_max += x_pad
-        y_min -= y_pad; y_max += y_pad
+        x_min -= x_pad
+        x_max += x_pad
+        y_min -= y_pad
+        y_max += y_pad
 
         x_edges = np.linspace(x_min, x_max, grid_res_xy + 1)
         y_edges = np.linspace(y_min, y_max, grid_res_xy + 1)
     else:
-        # caller enforced global edges
         x_edges = np.asarray(x_edges, dtype=float)
         y_edges = np.asarray(y_edges, dtype=float)
         if x_edges.ndim != 1 or y_edges.ndim != 1:
@@ -399,78 +349,85 @@ def build_support_volume(
     counts_u = np.bincount(u_bin, minlength=grid_res_u)
     masks = np.zeros((grid_res_u, grid_res_xy, grid_res_xy), dtype=bool)
 
-    mask_method = str(mask_method).lower().strip()
-    if mask_method not in {"mass_frac_grid", "trimmed_convex_hull"}:
-        raise ValueError("mask_method must be 'mass_frac_grid' or 'trimmed_convex_hull'")
+    reason_counts: Dict[str, int] = {}
+    valid_slices = np.zeros((grid_res_u,), dtype=bool)
 
-    if verbose:
-        empty = int((counts_u < int(min_points_per_slice)).sum())
-        print(
-            f"[{pop}] build_support_volume: grid=(U={grid_res_u},Y=X={grid_res_xy}) "
-            f"u_range=[{u_min:.3f},{u_max:.3f}] "
-            f"sigma_xy={sigma_xy} sigma_u={sigma_u} mass_frac={mass_frac} "
-            f"slices(<{min_points_per_slice})={empty}/{grid_res_u}"
-        )
-
-    # Phase A: per-slice mask
+    # Phase A: per-slice masks
     for ui in range(grid_res_u):
         if counts_u[ui] < int(min_points_per_slice):
+            # count in reason_counts inside _mask_xy_for_slice for consistency,
+            # but we can do it here too; keep it centralized:
+            reason_counts["too_few_points"] = reason_counts.get("too_few_points", 0) + 1
             continue
 
         sel = (u_bin == ui)
         xsamp = x[sel]
         ysamp = y[sel]
 
-        if mask_method == "mass_frac_grid":
-            H, _, _ = np.histogram2d(
-                ysamp, xsamp,  # rows=y, cols=x
-                bins=(y_edges, x_edges),
-            )
-            H = H.astype(float)
+        mask2d = _mask_xy_for_slice(
+            xsamp,
+            ysamp,
+            x_edges=x_edges,
+            y_edges=y_edges,
+            mass_frac=float(mass_frac),
+            trim_center=str(trim_center),
+            min_points_per_slice=int(min_points_per_slice),
+            reason_counts=reason_counts,
+        )
 
-            if float(sigma_xy) > 0:
-                Hs = gaussian_filter(H, sigma=(float(sigma_xy), float(sigma_xy)), mode="nearest")
-            else:
-                Hs = H
+        if mask2d.any():
+            masks[ui] = mask2d
+            valid_slices[ui] = True
+        else:
+            # _mask_xy_for_slice already counted the likely cause; keep a generic fallback too
+            reason_counts["invalid_slice"] = reason_counts.get("invalid_slice", 0) + 1
 
-            tau_local = _mass_fraction_threshold(Hs, float(mass_frac))
-            if not np.isfinite(tau_local):
-                continue
-
-            masks[ui] = (Hs >= tau_local)
-
-        elif mask_method == "trimmed_convex_hull":
-            # Here mass_frac is interpreted as "keep_frac of points"
-            masks[ui] = _slice_mask_trimmed_convex_hull(
-                xsamp,
-                ysamp,
-                x_edges=x_edges,
-                y_edges=y_edges,
-                keep_frac=float(mass_frac),
-                center=str(trim_center),
-                min_points=int(min_points_per_slice),
-                degenerate_fallback="disk",
-            )
-
-    if verbose:
-        has_before = masks.reshape(masks.shape[0], -1).any(axis=1).sum()
-
-    # Optional: fill gaps along u (A1 + Bug B) on the boolean mask
+    # Optional: fill gaps along u on boolean masks
+    masks_pre_fill = masks
     if bool(fill_u_gaps):
         masks = _fill_u_gaps_copy_nearest(masks)
 
-    # Phase B: smooth along u only
+    # Update valid slices based on final boolean slices (after fill)
+    valid_slices_after = masks.reshape(grid_res_u, -1).any(axis=1)
+    n_invalid = int((~valid_slices_after).sum())
+
+    # Phase B: u-only smoothing => float field in [0,1]
     vol = masks.astype(float)
     if float(sigma_u) > 0:
         vol = gaussian_filter(vol, sigma=(float(sigma_u), 0.0, 0.0), mode="nearest")
-
     vol = np.clip(vol, 0.0, 1.0)
 
     if verbose:
-        has_after = masks.reshape(masks.shape[0], -1).any(axis=1).sum()
-        print(f"[{pop}] fill_u_gaps: nonempty_slices {has_before}->{has_after}")
+        # summarize slice counts
+        c = counts_u.astype(int)
+        cpos = c[c > 0]
+        cmin = int(cpos.min()) if cpos.size else 0
+        cmed = float(np.median(cpos)) if cpos.size else 0.0
+        cmax = int(cpos.max()) if cpos.size else 0
 
-    return SupportVolume(vol=vol, xs=xs, ys=ys, us=us, counts_u=counts_u)
+        v0 = int(masks_pre_fill.reshape(grid_res_u, -1).any(axis=1).sum())
+        v1 = int(valid_slices_after.sum())
+
+        # pretty print reasons
+        reason_str = ", ".join([f"{k}={v}" for k, v in sorted(reason_counts.items())]) if reason_counts else "none"
+
+        print(
+            f"[{pop}] support_volume: valid_slices {v0}->{v1}/{grid_res_u} | "
+            f"points_per_slice(min/med/max)={cmin}/{cmed:.1f}/{cmax} | "
+            f"mass_frac(keep)={mass_frac:.3f} trim_center={trim_center} | "
+            f"reasons: {reason_str}"
+        )
+
+    return SupportVolume(
+        vol=vol,
+        xs=xs,
+        ys=ys,
+        us=us,
+        counts_u=counts_u,
+        valid_slices_mask=valid_slices_after.astype(bool),
+        n_invalid_slices=n_invalid,
+        reason_counts=reason_counts,
+    )
 
 
 # ---------------------------- geometry ------------------------------------
@@ -484,40 +441,35 @@ def compute_support_tube_mesh(
     ycol: str,
     tcol: str,
     popcol: str,
+    # Tier 1 / Tier 2 (public)
     grid_res_xy: int,
     grid_res_u: int,
-    mass_frac: float,
-    sigma_xy: float,
-    sigma_u: float,
-    min_points_per_slice: int,
-    time_eps: float,
-    # NEW: pass-through global XY edges
+    mass_frac: float = 0.90,
+    sigma_u: float = 1.0,
+    min_points_per_slice: int = 5,
+    time_eps: float = 1.0,
     x_edges: Optional[np.ndarray] = None,
     y_edges: Optional[np.ndarray] = None,
-    tau: float = 0.5,
-    u_smooth_sigma: float = 0.0,
-    xy_smooth_sigma: float = 0.0,
-    close_r_u: int = 0,
-    close_r_xy: int = 0,
-    mask_method: str = "mass_frac_grid",
     trim_center: str = "median",
     verbose: bool = False,
+    # Advanced (kept minimal and grouped)
+    tau: float = 0.5,
+    post_smooth_u: float = 0.0,
+    post_smooth_xy: float = 0.0,
+    close_r_u: int = 0,
+    close_r_xy: int = 0,
 ) -> Optional[Dict[str, np.ndarray]]:
     """
-    Returns:
-      dict with keys:
-        - X, Y, Z: (N,) vertex coordinates in real space (Z is time)
-        - faces:   (F,3) int array of triangle indices
+    Compute Mesh3d geometry for the population support tube.
 
-    Strategy:
-      1) build_support_volume (vol in [0,1])
-      2) optionally smooth scalar field in (u,y,x)
-      3) threshold at tau into boolean mask
-      4) optional morphological closing (3D or per-slice)
-      5) marching_cubes on mask.astype(float) at level=0.5
+    Pipeline:
+      1) build_support_volume() => vol in [0,1]
+      2) optional post-smoothing in (u,y,x)
+      3) threshold at tau => boolean mask
+      4) optional morphological closing
+      5) marching cubes
       6) map voxel coords -> xs/ys/us -> Z=10**u
     """
-
     sv = build_support_volume(
         df=df,
         pop=pop,
@@ -525,19 +477,17 @@ def compute_support_tube_mesh(
         ycol=ycol,
         tcol=tcol,
         popcol=popcol,
-        grid_res_xy=grid_res_xy,
-        grid_res_u=grid_res_u,
-        mass_frac=mass_frac,
-        sigma_xy=sigma_xy,
-        sigma_u=sigma_u,
-        min_points_per_slice=min_points_per_slice,
+        grid_res_xy=int(grid_res_xy),
+        grid_res_u=int(grid_res_u),
+        mass_frac=float(mass_frac),
+        sigma_u=float(sigma_u),
+        min_points_per_slice=int(min_points_per_slice),
+        time_eps=float(time_eps),
         fill_u_gaps=True,
-        time_eps=time_eps,
         x_edges=x_edges,
         y_edges=y_edges,
-        verbose=verbose,
-        mask_method=mask_method,
-        trim_center=trim_center,
+        trim_center=str(trim_center),
+        verbose=bool(verbose),
     )
     if sv is None:
         return None
@@ -548,34 +498,33 @@ def compute_support_tube_mesh(
 
     field = vol.astype(float)
 
-    # Optional additional smoothing (separate from sigma_u/sigma_xy used in mask construction)
-    if float(u_smooth_sigma) > 0 or float(xy_smooth_sigma) > 0:
+    # Optional post-smoothing (single concept; keep minimal knobs)
+    if float(post_smooth_u) > 0 or float(post_smooth_xy) > 0:
         field = gaussian_filter(
             field,
-            sigma=(float(u_smooth_sigma), float(xy_smooth_sigma), float(xy_smooth_sigma)),
+            sigma=(float(post_smooth_u), float(post_smooth_xy), float(post_smooth_xy)),
             mode="nearest",
         )
 
     mask = field >= float(tau)
 
+    # Optional morphological closing
     if int(close_r_u) > 0 or int(close_r_xy) > 0:
         if int(close_r_u) > 0 and int(close_r_xy) > 0:
             r = int(max(close_r_u, close_r_xy))
             mask = binary_closing(mask, structure=_make_ball(r))
-        else:
-            if int(close_r_xy) > 0:
-                st = _make_disk(int(close_r_xy))
-                for ui in range(mask.shape[0]):
-                    mask[ui] = binary_closing(mask[ui], structure=st)
-
-    if int(close_r_u) > 0 and int(close_r_xy) == 0:
-        r = int(close_r_u)
-        structure = np.ones((2*r+1, 1, 1), dtype=bool)
-        mask = binary_closing(mask, structure=structure)                
+        elif int(close_r_xy) > 0:
+            st = _make_disk(int(close_r_xy))
+            for ui in range(mask.shape[0]):
+                mask[ui] = binary_closing(mask[ui], structure=st)
+        elif int(close_r_u) > 0:
+            r = int(close_r_u)
+            structure = np.ones((2 * r + 1, 1, 1), dtype=bool)
+            mask = binary_closing(mask, structure=structure)
 
     if not mask.any():
         if verbose:
-            print(f"[{pop}] compute_support_tube_mesh: empty mask after threshold/closing")
+            print(f"[{pop}] support_tube_mesh: empty after threshold/closing")
         return None
 
     scalar = mask.astype(np.float32)
@@ -612,43 +561,30 @@ def compute_support_tube_rings(
     ycol: str,
     tcol: str,
     popcol: str,
+    # Tier 1 / Tier 2 (public)
     grid_res_xy: int,
     grid_res_u: int,
-    mass_frac: float,
-    sigma_xy: float,
-    sigma_u: float,
-    min_points_per_slice: int,
-    time_eps: float,
-    # NEW: pass-through global XY edges
+    mass_frac: float = 0.90,
+    sigma_u: float = 1.0,
+    min_points_per_slice: int = 5,
+    time_eps: float = 1.0,
     x_edges: Optional[np.ndarray] = None,
     y_edges: Optional[np.ndarray] = None,
+    trim_center: str = "median",
+    # ring binning (public; these control only how rings are grouped)
     nbins_old: int = 24,
     recent_bin_width: int = 1,
     override_window: int = 12,
     override_valid_frac: float = 0.7,
-    tau: float = 0.5,
-    tau_recent: float = 0.5,
     min_boundary_points: int = 50,
     verbose: bool = False,
-    mask_method: str = "mass_frac_grid",
-    trim_center: str = "median",
+    # Advanced (grouped)
+    tau: float = 0.5,
+    tau_recent: float = 0.5,
 ) -> List[Dict[str, np.ndarray]]:
     """
-    Build ring outlines (polylines) from the support mask.
-
-    We first construct the support volume vol in [0,1], then:
-    - Old period: combine earlier u-slices into nbins_old bins (OR masks within bin)
-    - Recent period: last override_window u-slices are binned by recent_bin_width (finer),
-      but only applied if enough of those slices are "valid" (non-empty boundary) according
-      to override_valid_frac.
-
-    Returns:
-      list of dicts with keys:
-        - x, y, z: polyline arrays (z constant)
-        - kind: "old" | "recent"
-        - hovertemplate: optional string
+    Build ring outlines (polylines) from the support mask volume.
     """
-
     sv = build_support_volume(
         df=df,
         pop=pop,
@@ -656,18 +592,17 @@ def compute_support_tube_rings(
         ycol=ycol,
         tcol=tcol,
         popcol=popcol,
-        grid_res_xy=grid_res_xy,
-        grid_res_u=grid_res_u,
-        mass_frac=mass_frac,
-        sigma_xy=sigma_xy,
-        sigma_u=sigma_u,
-        min_points_per_slice=min_points_per_slice,
-        time_eps=time_eps,
+        grid_res_xy=int(grid_res_xy),
+        grid_res_u=int(grid_res_u),
+        mass_frac=float(mass_frac),
+        sigma_u=float(sigma_u),
+        min_points_per_slice=int(min_points_per_slice),
+        time_eps=float(time_eps),
+        fill_u_gaps=True,
         x_edges=x_edges,
         y_edges=y_edges,
-        verbose=verbose,
-        mask_method=mask_method,
-        trim_center=trim_center,
+        trim_center=str(trim_center),
+        verbose=bool(verbose),
     )
     if sv is None:
         return []
@@ -753,8 +688,7 @@ def compute_support_tube_rings(
 
     if use_recent and w >= 1:
         bw = int(max(1, recent_bin_width))
-        start = recent_start
-        for a in range(start, U, bw):
+        for a in range(recent_start, U, bw):
             b = min(U, a + bw)
             m = np.any(mask_recent[a:b], axis=0)
             poly = mask2d_to_poly(m)

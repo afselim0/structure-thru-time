@@ -2,28 +2,29 @@
 """
 PlotEmbeddings.py
 
-Plotting-only orchestration class for embedding trajectories and population-level
-support geometry.
+Plotting orchestration for embedding trajectories and population-level geometry.
 
-Design goals (current cleanup pass)
-----------------------------------
-- PlotEmbeddings owns: figure, embeddings df, population labels/colors, and core layers
-  (raw/sample trajectories, medians, legend).
-- No global mutable state / tunables. All knobs are explicit method args.
-- Support-tube geometry (mesh + rings) lives in src/support_tube.py and is imported
-  lazily inside methods to avoid heavy deps unless needed.
+PlotEmbeddings is responsible for:
+- Managing the Plotly figure and axis configuration
+- Holding the embeddings dataframe and associated population labels/colors
+- Rendering core visualization layers:
+    - sample trajectories
+    - population medians
+    - legends
+- Delegating support-geometry construction (e.g. support tubes, rings)
+  to src/support_tube.py
 
-NOTE
-----
-You said you moved old helper functions (volume builders, marching cubes surface extraction,
-etc.) into src/old_support_tube.py. This file no longer depends on them.
+Design principles
+-----------------
+- PlotEmbeddings contains no geometry logic.
+- All computational geometry is implemented in src/support_tube.py.
+- This module focuses strictly on plotting, layering, and orchestration.
+- Heavy dependencies (e.g. marching cubes) are imported lazily.
 
-Next steps (after this cleanup)
--------------------------------
-- Implement src/support_tube.py with:
-    - Phase A: per-u slice mass-fraction mask
-    - Phase B: u-smoothing + optional closing + mesh + ring extraction
-- Wire add_support_tube() / add_support_rings() to those functions.
+Intended usage
+--------------
+- Used by sandbox/convex_hull_sandbox.py for interactive parameter tuning
+- Used by pipeline entrypoints (e.g. Snakemake rules) with frozen parameters
 """
 
 from __future__ import annotations
@@ -43,6 +44,52 @@ sample_line_alpha = 0.5
 
 median_line_width = 5
 median_line_alpha = 1.0
+
+# ----------------------- support tube defaults ----------------------------
+
+# Keep defaults in ONE place so they’re easy to audit/change.
+# These are used as the default configuration for add_support_tube/add_support_rings.
+DEFAULT_TUBE_PARAMS: Dict[str, object] = dict(
+    # support volume / mask
+    grid_res_xy=256,
+    grid_res_u=256,
+    mass_frac=0.90,            # keep fraction of points per slice
+    sigma_u=1.0,               # u-axis smoothing of stacked masks (Phase B)
+    min_points_per_slice=5,
+    time_eps=1.0,
+    trim_center="median",
+    # mesh extraction
+    tau=0.5,
+    opacity=0.25,
+    # advanced mesh shaping (kept but hidden by default)
+    post_smooth_u=0.0,
+    post_smooth_xy=0.0,
+    close_r_u=0,
+    close_r_xy=0,
+)
+
+DEFAULT_RING_PARAMS: Dict[str, object] = dict(
+    # support volume / mask
+    grid_res_xy=256,
+    grid_res_u=256,
+    mass_frac=0.90,
+    sigma_u=1.0,
+    min_points_per_slice=5,
+    time_eps=1.0,
+    trim_center="median",
+    # ring binning
+    nbins_old=24,
+    recent_bin_width=1,
+    override_window=12,
+    override_valid_frac=0.7,
+    tau=0.5,
+    tau_recent=None,           # if None, use tau
+    min_boundary_points=50,
+    # plotting
+    line_width_recent=5.0,
+    line_width_old=4.0,
+    opacity=0.96,
+)
 
 # ------------------------- small helpers ----------------------------------
 
@@ -397,37 +444,32 @@ class PlotEmbeddings:
         self,
         *,
         pops: Optional[Sequence[str]] = None,
-        # support volume / mask parameters
-        grid_res_xy: int = 256,
-        grid_res_u: int = 256,
-        mass_frac: float = 0.90,
-        sigma_xy: float = 1.5,
-        sigma_u: float = 1.0,
-        min_points_per_slice: int = 5,
-        time_eps: float = 1.0,
-        # mesh parameters
-        tau: float = 0.5,
-        u_smooth_sigma: float = 0.0,
-        xy_smooth_sigma: float = 0.0,
-        close_r_u: int = 0,
-        close_r_xy: int = 0,
-        opacity: float = 0.25,
+        # Tier 1 / Tier 2 (obvious, commonly tuned)
+        grid_res_xy: int = int(DEFAULT_TUBE_PARAMS["grid_res_xy"]),
+        grid_res_u: int = int(DEFAULT_TUBE_PARAMS["grid_res_u"]),
+        mass_frac: float = float(DEFAULT_TUBE_PARAMS["mass_frac"]),
+        sigma_u: float = float(DEFAULT_TUBE_PARAMS["sigma_u"]),
+        min_points_per_slice: int = int(DEFAULT_TUBE_PARAMS["min_points_per_slice"]),
+        time_eps: float = float(DEFAULT_TUBE_PARAMS["time_eps"]),
+        tau: float = float(DEFAULT_TUBE_PARAMS["tau"]),
+        opacity: float = float(DEFAULT_TUBE_PARAMS["opacity"]),
         # plotting
         name_suffix: str = "tube",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
-        mask_method: str = "mass_frac_grid",
-        trim_center: str = "median",
+        # Advanced (kept but visually “out of the way”)
+        trim_center: str = str(DEFAULT_TUBE_PARAMS["trim_center"]),
+        post_smooth_u: float = float(DEFAULT_TUBE_PARAMS["post_smooth_u"]),
+        post_smooth_xy: float = float(DEFAULT_TUBE_PARAMS["post_smooth_xy"]),
+        close_r_u: int = int(DEFAULT_TUBE_PARAMS["close_r_u"]),
+        close_r_xy: int = int(DEFAULT_TUBE_PARAMS["close_r_xy"]),
         x_edges: Optional[np.ndarray] = None,
         y_edges: Optional[np.ndarray] = None,
     ) -> None:
         """
         Add a 3D support tube (Mesh3d) for each population.
 
-        This is a thin wrapper that delegates all geometry work to src/support_tube.py.
-
-        NOTE: support_tube.py does not exist yet in this step; this method is wired
-        for the next step. It will raise a clear error until implemented.
+        Thin wrapper: geometry lives in src/support_tube.py.
         """
         if self.fig is None:
             raise RuntimeError("Call init_plot() before adding layers.")
@@ -446,42 +488,75 @@ class PlotEmbeddings:
             from src import support_tube  # type: ignore
         except Exception as e:
             raise ImportError(
-                "add_support_tube() requires src/support_tube.py to exist and be importable. "
-                "Next step: implement support_tube.compute_mesh_traces(...)."
+                "add_support_tube() requires src/support_tube.py to exist and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"
 
+        # Choose plotting-time time column (matches your existing convention)
+        tcol_for_geom = self.tplot_col if (self.time_scale == "log") else self.tcol
+
         for pop in pops:
             color = self.colors_dict.get(pop, self.default_color)
 
-            # Expected API (to implement next):
-            # returns a dict with keys: X, Y, Z, faces (i,j,k)
             mesh = support_tube.compute_support_tube_mesh(
                 df=self.embeddings_df,
                 pop=pop,
                 xcol=self.xcol,
                 ycol=self.ycol,
-                tcol=self.tplot_col if (self.time_scale == "log") else self.tcol,
+                tcol=tcol_for_geom,
                 popcol=self.popcol,
-                x_edges=x_edges, 
+                x_edges=x_edges,
                 y_edges=y_edges,
                 grid_res_xy=int(grid_res_xy),
                 grid_res_u=int(grid_res_u),
                 mass_frac=float(mass_frac),
-                sigma_xy=float(sigma_xy),
                 sigma_u=float(sigma_u),
                 min_points_per_slice=int(min_points_per_slice),
                 time_eps=float(time_eps),
                 tau=float(tau),
-                u_smooth_sigma=float(u_smooth_sigma),
-                xy_smooth_sigma=float(xy_smooth_sigma),
+                post_smooth_u=float(post_smooth_u),
+                post_smooth_xy=float(post_smooth_xy),
                 close_r_u=int(close_r_u),
                 close_r_xy=int(close_r_xy),
-                verbose=bool(verbose),
-                mask_method=str(mask_method),
                 trim_center=str(trim_center),
+                verbose=bool(verbose),
             )
+
+            # Optional UX diagnostics (no geometry logic; asks support_tube for stats)
+            if bool(verbose) and hasattr(support_tube, "build_support_volume"):
+                try:
+                    sv = support_tube.build_support_volume(
+                        df=self.embeddings_df,
+                        pop=pop,
+                        xcol=self.xcol,
+                        ycol=self.ycol,
+                        tcol=tcol_for_geom,
+                        popcol=self.popcol,
+                        grid_res_xy=int(grid_res_xy),
+                        grid_res_u=int(grid_res_u),
+                        mass_frac=float(mass_frac),
+                        sigma_u=float(sigma_u),
+                        min_points_per_slice=int(min_points_per_slice),
+                        time_eps=float(time_eps),
+                        x_edges=x_edges,
+                        y_edges=y_edges,
+                        trim_center=str(trim_center),
+                        verbose=False,
+                    )
+                    if sv is not None:
+                        valid = int(np.sum(sv.valid_slices_mask))
+                        total = int(sv.valid_slices_mask.size)
+                        frac = valid / max(total, 1)
+                        if frac < 0.5:
+                            print(
+                                f"[{pop}] Warning: only {valid}/{total} slices have support "
+                                f"({frac:.1%}). Consider lowering grid_res_u, lowering "
+                                f"min_points_per_slice, or increasing sigma_u."
+                            )
+                except Exception:
+                    # Never let diagnostics break plotting
+                    pass
 
             if mesh is None:
                 if verbose:
@@ -513,38 +588,37 @@ class PlotEmbeddings:
         self,
         *,
         pops: Optional[Sequence[str]] = None,
-        # support volume / mask parameters
-        grid_res_xy: int = 256,
-        grid_res_u: int = 256,
-        mass_frac: float = 0.90,
-        sigma_xy: float = 1.5,
-        sigma_u: float = 1.0,
-        min_points_per_slice: int = 5,
-        time_eps: float = 1.0,
+        # Tier 1 / Tier 2 (obvious, commonly tuned)
+        grid_res_xy: int = int(DEFAULT_RING_PARAMS["grid_res_xy"]),
+        grid_res_u: int = int(DEFAULT_RING_PARAMS["grid_res_u"]),
+        mass_frac: float = float(DEFAULT_RING_PARAMS["mass_frac"]),
+        sigma_u: float = float(DEFAULT_RING_PARAMS["sigma_u"]),
+        min_points_per_slice: int = int(DEFAULT_RING_PARAMS["min_points_per_slice"]),
+        time_eps: float = float(DEFAULT_RING_PARAMS["time_eps"]),
         # ring binning parameters
-        nbins_old: int = 24,
-        recent_bin_width: int = 1,
-        override_window: int = 12,
-        override_valid_frac: float = 0.7,
-        tau: float = 0.5,
-        tau_recent: Optional[float] = None,
-        min_boundary_points: int = 50,
+        nbins_old: int = int(DEFAULT_RING_PARAMS["nbins_old"]),
+        recent_bin_width: int = int(DEFAULT_RING_PARAMS["recent_bin_width"]),
+        override_window: int = int(DEFAULT_RING_PARAMS["override_window"]),
+        override_valid_frac: float = float(DEFAULT_RING_PARAMS["override_valid_frac"]),
+        tau: float = float(DEFAULT_RING_PARAMS["tau"]),
+        tau_recent: Optional[float] = DEFAULT_RING_PARAMS["tau_recent"] if DEFAULT_RING_PARAMS["tau_recent"] is None else float(DEFAULT_RING_PARAMS["tau_recent"]),
+        min_boundary_points: int = int(DEFAULT_RING_PARAMS["min_boundary_points"]),
         # plotting
-        line_width_recent: float = 5.0,
-        line_width_old: float = 4.0,
-        opacity: float = 0.96,
+        line_width_recent: float = float(DEFAULT_RING_PARAMS["line_width_recent"]),
+        line_width_old: float = float(DEFAULT_RING_PARAMS["line_width_old"]),
+        opacity: float = float(DEFAULT_RING_PARAMS["opacity"]),
         name_suffix: str = "rings",
         visible: str = "on",  # "on" | "legendonly" | "off"
         verbose: bool = False,
-        mask_method: str = "mass_frac_grid",
-        trim_center: str = "median",
+        # Advanced
+        trim_center: str = str(DEFAULT_RING_PARAMS["trim_center"]),
         x_edges: Optional[np.ndarray] = None,
         y_edges: Optional[np.ndarray] = None,
     ) -> None:
         """
-        Add mask-derived ring hull outlines for each population.
+        Add mask-derived ring outlines for each population.
 
-        Delegates geometry to src/support_tube.py (to be implemented next).
+        Delegates geometry to src/support_tube.py.
         """
         if self.fig is None:
             raise RuntimeError("Call init_plot() before adding layers.")
@@ -563,31 +637,29 @@ class PlotEmbeddings:
             from src import support_tube  # type: ignore
         except Exception as e:
             raise ImportError(
-                "add_support_rings() requires src/support_tube.py to exist and be importable. "
-                "Next step: implement support_tube.compute_ring_traces(...)."
+                "add_support_rings() requires src/support_tube.py to exist and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"
-        tau_recent_val = float(tau) if tau_recent is None else float(tau_recent)
+        tau_recent_val = float(tau) if (tau_recent is None) else float(tau_recent)
+
+        tcol_for_geom = self.tplot_col if (self.time_scale == "log") else self.tcol
 
         for pop in pops:
             color = self.colors_dict.get(pop, self.default_color)
 
-            # Expected API (to implement next):
-            # returns list of dicts: each has x,y,z arrays, kind ("recent"/"old"), and hover fields
             rings = support_tube.compute_support_tube_rings(
                 df=self.embeddings_df,
                 pop=pop,
                 xcol=self.xcol,
                 ycol=self.ycol,
-                tcol=self.tplot_col if (self.time_scale == "log") else self.tcol,
+                tcol=tcol_for_geom,
                 popcol=self.popcol,
-                x_edges=x_edges, 
+                x_edges=x_edges,
                 y_edges=y_edges,
                 grid_res_xy=int(grid_res_xy),
                 grid_res_u=int(grid_res_u),
                 mass_frac=float(mass_frac),
-                sigma_xy=float(sigma_xy),
                 sigma_u=float(sigma_u),
                 min_points_per_slice=int(min_points_per_slice),
                 time_eps=float(time_eps),
@@ -598,10 +670,43 @@ class PlotEmbeddings:
                 tau=float(tau),
                 tau_recent=float(tau_recent_val),
                 min_boundary_points=int(min_boundary_points),
-                verbose=bool(verbose),
-                mask_method=str(mask_method),
                 trim_center=str(trim_center),
+                verbose=bool(verbose),
             )
+
+            # Optional UX diagnostics (verbose only)
+            if bool(verbose) and hasattr(support_tube, "build_support_volume"):
+                try:
+                    sv = support_tube.build_support_volume(
+                        df=self.embeddings_df,
+                        pop=pop,
+                        xcol=self.xcol,
+                        ycol=self.ycol,
+                        tcol=tcol_for_geom,
+                        popcol=self.popcol,
+                        grid_res_xy=int(grid_res_xy),
+                        grid_res_u=int(grid_res_u),
+                        mass_frac=float(mass_frac),
+                        sigma_u=float(sigma_u),
+                        min_points_per_slice=int(min_points_per_slice),
+                        time_eps=float(time_eps),
+                        x_edges=x_edges,
+                        y_edges=y_edges,
+                        trim_center=str(trim_center),
+                        verbose=False,
+                    )
+                    if sv is not None:
+                        valid = int(np.sum(sv.valid_slices_mask))
+                        total = int(sv.valid_slices_mask.size)
+                        frac = valid / max(total, 1)
+                        if frac < 0.5:
+                            print(
+                                f"[{pop}] Warning: only {valid}/{total} slices have support "
+                                f"({frac:.1%}). Consider lowering grid_res_u, lowering "
+                                f"min_points_per_slice, or increasing sigma_u."
+                            )
+                except Exception:
+                    pass
 
             if not rings:
                 if verbose:
