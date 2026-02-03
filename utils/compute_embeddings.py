@@ -4,6 +4,8 @@ import pandas as pd
 import sys
 sys.path.append("../src")
 sys.path.append("../../src")
+sys.path.append("src")
+
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 import numpy as np
 

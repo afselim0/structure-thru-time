@@ -4,6 +4,8 @@ import sys
 import pandas as pd
 sys.path.append("../../src")
 sys.path.append("../src")
+sys.path.append("src")
+
 from PlotEmbeddings import PlotEmbeddings
 
 def main():
