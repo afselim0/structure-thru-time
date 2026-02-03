@@ -30,7 +30,7 @@ from tqdm import tqdm
 #     grad = compute_gradient(X,R,D_prime,valid_mask)
 #     return loss, grad.ravel()
  
-inverse_distance=False
+inverse_distance=True
 
 def compute_f(D, N0):
     D_sq = D**2
