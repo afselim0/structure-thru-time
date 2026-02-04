@@ -1,5 +1,4 @@
 import os
-print(os.getcwd())
 def read_config(parameter, default, params = config):
     return config[parameter] if parameter in params else default
 
@@ -8,15 +7,16 @@ def read_config(parameter, default, params = config):
 # =====================================================
 
 # General Parameters
-ts_dir = read_config("ts_dir", default = None)
-output_path = read_config("output_path", default = None)
+output_path = read_config("output_path", default = "./")
+tree_output_path = os.path.join(output_path,"trees")
+trees_dir = read_config("trees_dir", default = tree_output_path)
 num_threads = read_config("num_threads", default = 1)
 version = read_config("version", default = 1)
 
 # Simulation Parameters
-demes_file_path = read_config("demes_file_path", default = None)
-num_contigs = read_config("num_contigs", default = 500)
-contig_length = read_config("contig_length", default = 1e6)
+demes_file_path = read_config("demes_file_path", default = "../data/demes/main/split.yaml")
+num_contigs = int(read_config("num_contigs", default = 500))
+contig_length = int(read_config("contig_length", default = 1e6))
 n_sim_per_pop = read_config("n_sim_per_pop", default = 20)
 mutation_rate = read_config("mutation_rate", default = 1.2e-8)
 recombination_rate = read_config("recombination_rate", default = 1.2e-8)
@@ -24,30 +24,29 @@ max_time = read_config("max_time", default = 10000)
 
 SIM_TAG = f".nC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 
-# Ensure parameters are provided
-assert (demes_file_path is not None) or (ts_dir is not None), "Provide either path to demography to be simulated, or tree sequences to be analyzed"
-assert output_path is not None, "Please specify output path"
 
 # Inference Parameters
 infer_method = read_config("infer_method", default = "tsinfer")
-num_posterior_samples = read_config("num_replicates", default = 50)
+num_posterior_samples = read_config("num_replicates", default = 1)
 thinning_interval = read_config("thinning_interval", default = 60)
 burnin = read_config("burnin", default = 4000)
+vcf_dir = read_config("vcf_dir", default=tree_output_path)
 
 # Rate Inference Parameters
 fraction_samples = read_config("fraction_samples", default = 1.0)
 min_window_size = read_config("min_window_size", default = 50)
 max_window_size = read_config("max_window_size", default = 500)
 max_time = read_config("max_time", default = 10000)
-num_timepoints = read_config("num_timepoints", default = 1000)
+n_timepoints = read_config("n_timepoints", default = 1000)
 
-PDF_TAG = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{num_timepoints}"
+PDF_TAG = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG 
 
 # STT Parameters 
-N0 = read_config("N0", default = 1)
+N_min = read_config("N_min", default = 1)
+N_max = read_config("N_max", default = 1000000)
 min_time = read_config("min_time", default = 1)
-STT_TAG = f".N0{N0}" + RATES_TAG
+STT_TAG = f".Nmin{N_min}.Nmax{N_max}" + RATES_TAG
 
 # Empirical dataset parameters
 pops = read_config("pops", "all").replace(","," ")
@@ -67,6 +66,7 @@ plot_demography_script = "plot_demography.py"
 pca_script = "run_pca.py"
 compute_rates_true_script = "compute_rates_true.py"
 simulate_trees_script = "simulate_trees.py"
+infer_trees_script = "infer_trees.py"
 
 compute_pdf_wrapper_script = "compute_pdf.py"
 compute_rates_wrapper_script = "compute_rates.py"
@@ -74,6 +74,8 @@ plot_rates_script = "plot_rates.py"
 compute_embeedings_wrapper_script = "compute_embeddings.py"
 plot_embeddings_wrapper_script = "plot_embeddings.py"
 evaluate_performance_script = "evaluate_performance.py"
+
+run_population_combs_script = "run_pop_combs.py"
 
 # =====================================================
 # File Names
@@ -89,12 +91,15 @@ pca_plot_file_name = "pca.png"
 demography_plot_file_name = "demography.png"
 rates_true_file_name = "rates_true.parquet"
 rates_true_plot_file_name = "rates_true.png"
-sim_finished_file_name = f"simulated{SIM_TAG}.txt"
-infer_finished_file_name = f"inferred{SIM_TAG}.txt"
+sim_finished_file_name = f"trees_ready{SIM_TAG}.txt"
+infer_finished_file_name = f"trees_ready{SIM_TAG}.txt"
+
+trees_ready = f"trees_ready{SIM_TAG}.txt" if trees_dir == tree_output_path else "trees_ready.txt"
+trees_ready = os.path.join(trees_dir,trees_ready)
 
 pdf_data_file_name = f"coal_pdf{PDF_TAG}.parquet"
-rates_data_file_name = f"coal_pdf{RATES_TAG}.parquet"
-rates_plot_file_name = f"coal_pdf{RATES_TAG}.png"
+rates_data_file_name = f"rates{RATES_TAG}.parquet"
+rates_plot_file_name = f"rates{RATES_TAG}.png"
 
 embeddings_data_file_name = f"embeddings{STT_TAG}.parquet"
 embeddings_plot_file_name = f"embeddings{STT_TAG}.html"
@@ -111,16 +116,15 @@ infer_finished = os.path.join(tree_output_path,infer_finished_file_name)
 
 pdf_data = os.path.join(data_output_path,pdf_data_file_name)
 rates_data = os.path.join(data_output_path,rates_data_file_name)
-rates_plot = os.path.join(data_output_path,rates_plot_file_name)
+rates_plot = os.path.join(plot_output_path,rates_plot_file_name)
 
 embeddings_data = os.path.join(data_output_path,embeddings_data_file_name)
-embeddings_plot = os.path.join(data_output_path,embeddings_plot_file_name)
+embeddings_plot = os.path.join(plot_output_path,embeddings_plot_file_name)
 performance_data = os.path.join(data_output_path,performance_data_file_name)
-performance_plot = os.path.join(data_output_path,performance_plot_file_name)
+performance_plot = os.path.join(plot_output_path,performance_plot_file_name)
 
 combs_data_dir = os.path.join(output_path,"combs/data")
 combs_plot_dir = os.path.join(output_path,"combs/plots")
-
 # =====================================================
 # Target Groups
 # =====================================================
@@ -138,8 +142,8 @@ rate_targets = [
 STT_targets = [
     embeddings_data,
     embeddings_plot,
-    performance_data,
-    performance_plot
+    # performance_data,
+    # performance_plot
     ]
 # =====================================================
 # General Rules
@@ -147,24 +151,28 @@ STT_targets = [
 rule sim:
     input: sim_targets
 
-# rule infer:
-#     input: infer_finished
+rule infer:
+    input: infer_finished
 
-# rule rates:
-#     input: rate_targets
+rule rates:
+    input: rate_targets
 
-# rule STT: 
-#     input: STT_targets
-
+rule STT: 
+    input: STT_targets
 
 # rule STT_combs:
 #     input: 
 #         directory(combs_data_dir),
 #         directory(combs_plot_dir)
-# rule all_sim:
-#     sim_targets,infer_finished,rate_targets,STT_targets
+
+rule sim_STT:
+    input: sim_targets, rate_targets, STT_targets
+
+rule infer_STT:
+    input: infer_finished, rate_targets, STT_targets
+
 # rule all_empirical:
-    # rate_targets,STT_targets
+#     rate_targets,STT_targets
 
 # =====================================================
 # Specific Rules
@@ -301,167 +309,185 @@ rule simulate_trees:
 
         """
 # # ______________________infer Rules_____________________
-# rule infer_trees:
-#     input:
-#         sim_finished = sim_finished,
-#         script="../../utils/infer_trees.py"
-#     output:
-#         INFER_FINISHED
-#     params:
-#         sim_tree_dir=SIM_TREE_OUTPUT_PATH,
-#         outdir=INFER_TREE_OUTPUT_PATH,
-#         output_name = INFER_FINISHED_FILE
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --sim_tree_path {params.sim_tree_dir} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name}
-#         """
+rule infer_trees:
+    input:
+        vcf_dir = vcf_dir,
+        sim_finished = os.path.join(vcf_dir,sim_finished_file_name),
+        script = infer_trees_script
+    output:
+        infer_finished
+    params:
+        outdir = tree_output_path,
+        output_name = infer_finished_file_name,
+        method = infer_method,
+        contig_length = contig_length,
+        num_posterior_samples = num_posterior_samples,
+        thinning_interval = thinning_interval,
+        burnin = burnin,
+        mu = mutation_rate,
+        r = recombination_rate,
+        num_threads = num_threads
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --vcf_dir {input.vcf_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --method {params.method} \
+            --contig_length {params.contig_length} \
+            --num_posterior_samples {params.num_posterior_samples} \
+            --thinning_interval {params.thinning_interval} \
+            --burnin {params.burnin} \
+            --mu {params.mu} \
+            --r {params.r} \
+            --num_threads {params.num_threads}
+        """
 # # ______________________rates Rules_____________________
-# rule compute_pdf:
-#     input:
-#         main_script = CountCoalEvents_SCRIPT,
-#         script = "../../utils/compute_pdf.py"
-#     params:
-#         trees_dir = trees_dir,
-#         outdir = data_output_path,
-#         output_name = os.path.basename(pdf_data),
-#         max_time = max_time,
-#         n_timepoints = n_timepoints,
-#         n_samples = n_samples,
-#         num_posterior_samples = num_posterior_samples,
-#         fraction_samples = fraction_samples,
-#         pops = pops,
-#         pop_labels = pop_labels,
-#         num_threads = num_threads
+rule compute_pdf:
+    input:
+        main_script = COUNT_COAL_EVENTS_SCRIPT,
+        script = compute_pdf_wrapper_script,
+        pop_labels = pop_labels,
+        trees_ready = trees_ready
+    params:
+        trees_dir = trees_dir,
+        outdir = data_output_path,
+        output_name = os.path.basename(pdf_data),
+        max_time = max_time,
+        n_timepoints = n_timepoints,
+        n_samples_per_pop = n_samples_per_pop,
+        num_posterior_samples = num_posterior_samples,
+        fraction_samples = fraction_samples,
+        pops = pops,
+        num_threads = num_threads
 
-#     output:
-#         pdf_data
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --input_path {params.trees_dir} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name} \
-#             --max_time {params.max_time} \
-#             --n_timepoints {params.n_timepoints} \
-#             --pops {params.pops} \
-#             --num_posterior_samples {params.num_posterior_samples} \
-#             --n_samples_per_pop {params.n_samples} \
-#             --fraction_samples {params.fraction_samples} \
-#             --pop_labels {params.pop_labels} \
-#             --num_threads {params.num_threads}
-#         """
+    output:
+        pdf_data
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input_path {params.trees_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --max_time {params.max_time} \
+            --n_timepoints {params.n_timepoints} \
+            --pops {params.pops} \
+            --num_posterior_samples {params.num_posterior_samples} \
+            --n_samples_per_pop {params.n_samples_per_pop} \
+            --fraction_samples {params.fraction_samples} \
+            --pop_labels {input.pop_labels} \
+            --num_threads {params.num_threads}
+        """
 
-# rule compute_rates:
-#     input:
-#         pdf_data=pdf_data,
-#         script="../../utils/compute_rates.py",
-#         main_script=COMPUTE_RATES_SCRIPT
-#     output:
-#         rates_data
-#     params:
-#         outdir=data_output_path,
-#         output_name=os.path.basename(rates_data),
-#         min_window_size=min_window_size,
-#         max_window_size=max_window_size
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --pdf_path {input.pdf_data} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name} \
-#             --minimum_window_size {params.min_window_size} \
-#             --maximum_window_size {params.max_window_size}
-#         """
+rule compute_rates:
+    input:
+        pdf_data = pdf_data,
+        script = compute_rates_wrapper_script,
+        main_script = COMPUTE_RATES_SCRIPT
+    output:
+        rates_data
+    params:
+        outdir = data_output_path,
+        output_name = rates_data_file_name,
+        min_window_size = min_window_size,
+        max_window_size = max_window_size
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --pdf_path {input.pdf_data} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --minimum_window_size {params.min_window_size} \
+            --maximum_window_size {params.max_window_size}
+        """
 
-# rule plot_rates:
-#     input:
-#         rates=rates_data,
-#         pop_colors=pop_colors,
-#         pop_labels=pop_labels,
-#         script="../../utils/plot_rates.py"
-#     output:
-#         rates_plot
-#     params:
-#         outdir=plot_output_path,
-#         output_name=os.path.basename(rates_plot),
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --input {input.rates} \
-#             --colors {input.pop_colors} \
-#             --labels {input.pop_labels} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name}
-#         """
-# # ______________________STT Rules_______________________
-# rule compute_embeddings:
-#     input:
-#         rates=rates_data,
-#         script="../../utils/compute_embeddings.py",
-#         main_script=COMPUTE_EMBEDDINGS_SCRIPT
-#     output:
-#         embeddings_data
-#     params:
-#         N0 = N0,
-#         outdir=data_output_path,
-#         output_name=os.path.basename(embeddings_data)
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --input {input.rates} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name} \
-#             --N0 {params.N0}
-#         """
-# rule plot_embeddings:
-#     input:
-#         embeddings=embeddings_data,
-#         pop_colors=pop_colors,
-#         pop_labels=pop_labels,
-#         script="../../utils/plot_embeddings.py",
-#         main_script=PLOT_EMBEDDINGS_SCRIPT
-#     output:
-#         embeddings_3d_plot
-#     params:
-#         outdir=plot_output_path,
-#         output_name=os.path.basename(embeddings_3d_plot),
-#         min_time=min_time,
-#         # generation_time=generation_time
-#     shell:
-#         """
-#         mkdir -p {params.outdir}
-#         python {input.script} \
-#             --input {input.embeddings} \
-#             --colors {input.pop_colors} \
-#             --labels {input.pop_labels} \
-#             --output_path {params.outdir} \
-#             --output_name {params.output_name} \
-#             --min_time {params.min_time}
-#         """
+rule plot_rates:
+    input:
+        rates = rates_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_rates_script
+    output:
+        rates_plot
+    params:
+        outdir = plot_output_path,
+        output_name = rates_plot_file_name
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name}
+        """
+# ______________________STT Rules_______________________
+rule compute_embeddings:
+    input:
+        rates = rates_data,
+        script = compute_embeedings_wrapper_script,
+        main_script = COMPUTE_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_data
+    params:
+        N_min = N_min,
+        N_max = N_max,
+        outdir = data_output_path,
+        output_name = embeddings_data_file_name
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max}
+        """
+rule plot_embeddings:
+    input:
+        embeddings = embeddings_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_embeddings_wrapper_script,
+        main_script = PLOT_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_plot
+    params:
+        outdir = plot_output_path,
+        output_name = embeddings_plot_file_name,
+        min_time=min_time
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
+        """
 # rule evaluate_performance:
 #     input:
-#         embeddings=embeddings_data,
-#         rates=rates_data,
-#         pop_colors=pop_colors,
-#         pop_labels=pop_labels,
-#         script="../../utils/evaluate_performance.py"
+#         embeddings = embeddings_data,
+#         rates = rates_data,
+#         pop_colors = pop_colors,
+#         pop_labels = pop_labels,
+#         script = evaluate_performance_script
 #     output:
 #         performance_data,
 #         performance_plot
 #     params:
 #         N0=N0,
-#         data_output_path=data_output_path,
-#         plot_output_path=plot_output_path,
-#         data_output_name=os.path.basename(performance_data),
-#         plot_output_name=os.path.basename(performance_plot)
+#         data_output_path = data_output_path,
+#         plot_output_path = plot_output_path,
+#         data_output_name = performance_data_file_name,
+#         plot_output_name = performance_plot_file_name
 #     shell:
 #         """
 #         python {input.script} \
@@ -477,23 +503,22 @@ rule simulate_trees:
 #         """
 # rule population_combinations:
 #     input:
-#         pop_labels=pop_labels,
-#         pop_colors=pop_colors,
-#         rates=rates_data,
-#         script="../../utils/run_pop_combs.py"
+#         pop_labels = pop_labels,
+#         pop_colors = pop_colors,
+#         rates = rates_data,
+#         script = run_population_combs_script
 #     params:
-#         data_dir=combs_data_dir,
-#         plots_dir=combs_plots_dir,
-#         N0=N0,
-#         # generation_time=generation_time
+#         data_dir = combs_data_dir,
+#         plot_dir = combs_plot_dir,
+#         N0=N0
 #     output:
 #         directory(combs_data_dir),
-#         directory(combs_plots_dir)
+#         directory(combs_plot_dir)
 #     shell:
 #         """
 #         python {input.script} \
 #             --data_dir {params.data_dir} \
-#             --plots_dir {params.plots_dir} \
+#             --plotrees_dir {params.plotrees_dir} \
 #             --pop_labels {input.pop_labels} \
 #             --pop_colors {input.pop_colors} \
 #             --rates_file {input.rates} \
