@@ -44,7 +44,7 @@ RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
 
 # STT Parameters 
 N_min = read_config("N_min", default = 1)
-N_max = read_config("N_max", default = 1000000)
+N_max = read_config("N_max", default = 1000000000000)
 min_time = read_config("min_time", default = 1)
 STT_TAG = f".Nmin{N_min}.Nmax{N_max}" + RATES_TAG
 
@@ -91,6 +91,8 @@ pca_plot_file_name = "pca.png"
 demography_plot_file_name = "demography.png"
 rates_true_file_name = "rates_true.parquet"
 rates_true_plot_file_name = "rates_true.png"
+embeddings_true_file_name = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.parquet"
+embeddings_true_plot_file_name = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.html"
 sim_finished_file_name = f"trees_ready{SIM_TAG}.txt"
 infer_finished_file_name = f"trees_ready{SIM_TAG}.txt"
 
@@ -111,6 +113,8 @@ pca_plot = os.path.join(plot_output_path,pca_plot_file_name)
 demography_plot = os.path.join(plot_output_path,demography_plot_file_name)
 rates_true = os.path.join(data_output_path,rates_true_file_name)
 rates_true_plot = os.path.join(plot_output_path,rates_true_plot_file_name)
+embeddings_true = os.path.join(data_output_path,embeddings_true_file_name)
+embeddings_true_plot = os.path.join(plot_output_path,embeddings_true_plot_file_name)
 sim_finished = os.path.join(tree_output_path,sim_finished_file_name)
 infer_finished = os.path.join(tree_output_path,infer_finished_file_name)
 
@@ -131,6 +135,7 @@ combs_plot_dir = os.path.join(output_path,"combs/plots")
 sim_targets = [
     pop_labels,pop_colors,pca_plot,demography_plot,
     rates_true,rates_true_plot, 
+    embeddings_true,embeddings_true_plot,
     sim_finished
     ]
 
@@ -278,6 +283,54 @@ rule plot_rates_true:
             --output_path {params.outdir} \
             --output_name {params.output_name}
         """
+rule compute_embeddings_true:
+    input:
+        rates = rates_true,
+        script = compute_embeedings_wrapper_script,
+        main_script = COMPUTE_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_true
+    params:
+        outdir = data_output_path,
+        output_name = embeddings_true_file_name,
+        N_min = N_min,
+        N_max = N_max,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max}
+        """
+
+rule plot_embeddings_true:
+    input:
+        embeddings = embeddings_true,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_embeddings_wrapper_script,
+        main_script = PLOT_EMBEDDINGS_SCRIPT
+    output:
+        embeddings_true_plot
+    params:
+        outdir = plot_output_path,
+        output_name = embeddings_true_plot_file_name,
+        min_time = min_time
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time}
+        """
+
 rule simulate_trees:
     input:
         demes_file_path = demes_file_path,
