@@ -1,134 +1,137 @@
 import os
+from pathlib import Path
 def read_config(parameter, default, params = config):
     return config[parameter] if parameter in params else default
 
 # =====================================================
-# Input Parameters
+# Input Parameters (from config)
 # =====================================================
 
 # General Parameters
-output_path = read_config("output_path", default = "./")
-tree_output_path = os.path.join(output_path,"trees")
-trees_dir = read_config("trees_dir", default = tree_output_path)
-num_threads = read_config("num_threads", default = 1)
-version = read_config("version", default = 1)
+output_path                       = read_config("output_path", default = "../results")
+tree_output_path                  = os.path.join(output_path,"trees") # This directory is used when trees are simulated or inferred
+trees_dir                         = read_config("trees_dir", default = tree_output_path) # Default is the output path of simulated/inferred trees
+num_threads                       = read_config("num_threads", default = 1) # Parallelization used in simulation, inference and computation of coalescent pdf
+version                           = read_config("version", default = 1)
 
 # Simulation Parameters
-demes_file_path = read_config("demes_file_path", default = "../data/demes/main/split.yaml")
-num_contigs = int(read_config("num_contigs", default = 500))
-contig_length = int(read_config("contig_length", default = 1e6))
-n_sim_per_pop = read_config("n_sim_per_pop", default = 20)
-mutation_rate = read_config("mutation_rate", default = 1.2e-8)
-recombination_rate = read_config("recombination_rate", default = 1.2e-8)
-max_time = read_config("max_time", default = 10000)
+demes_file_path                   = read_config("demes_file_path", default = "../data/demes/main/split.yaml")
+num_contigs                       = int(read_config("num_contigs", default = 500))
+contig_length                     = int(read_config("contig_length", default = 1e6))
+n_sim_per_pop                     = read_config("n_sim_per_pop", default = 20)
+mutation_rate                     = read_config("mutation_rate", default = 1.2e-8)
+recombination_rate                = read_config("recombination_rate", default = 1.2e-8)
 
-SIM_TAG = f".nC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
+SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 
 
 # Inference Parameters
-infer_method = read_config("infer_method", default = "tsinfer")
-num_posterior_samples = read_config("num_replicates", default = 1)
-thinning_interval = read_config("thinning_interval", default = 60)
-burnin = read_config("burnin", default = 4000)
-vcf_dir = read_config("vcf_dir", default=tree_output_path)
+infer_method                      = read_config("infer_method", default = "tsinfer")
+num_posterior_samples             = read_config("num_replicates", default = 1)
+thinning_interval                 = read_config("thinning_interval", default = 60)
+burnin                            = read_config("burnin", default = 4000)
+vcf_dir                           = read_config("vcf_dir", default=tree_output_path.replace(infer_method,"sim"))
 
 # Rate Inference Parameters
-fraction_samples = read_config("fraction_samples", default = 1.0)
-min_window_size = read_config("min_window_size", default = 50)
-max_window_size = read_config("max_window_size", default = 500)
-max_time = read_config("max_time", default = 10000)
-n_timepoints = read_config("n_timepoints", default = 1000)
+fraction_samples                  = read_config("fraction_samples", default = 1.0)   # Fraction of samples taken into account in pdf computation at each contig
+min_window_size                   = read_config("min_window_size", default = 50)    # Window size for local linear regression at t=0
+max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
+max_time                          = read_config("max_time", default = 10000)
+n_timepoints                      = read_config("n_timepoints", default = max_time)
 
-PDF_TAG = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
-RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG 
+PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
+RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
 
 # STT Parameters 
-N_min = read_config("N_min", default = 1)
-N_max = read_config("N_max", default = 1000000000000)
-min_time = read_config("min_time", default = 1)
-STT_TAG = f".Nmin{N_min}.Nmax{N_max}" + RATES_TAG
+N_min                             = read_config("N_min", default = 1)
+N_max                             = read_config("N_max", default = N_min + 100000)
+min_time                          = read_config("min_time", default = 1) # For plotting purposes only
+STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}" + RATES_TAG
 
 # Empirical dataset parameters
-pops = read_config("pops", "all").replace(","," ")
-n_samples_per_pop = read_config("n_samples_per_pop", -1)
-pop_colors = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
-pop_labels = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
+pops                              = read_config("pops", "all").replace(","," ")
+n_samples_per_pop                 = read_config("n_samples_per_pop", -1)
+pop_colors                        = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
+pop_labels                        = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
 
 # Main scripts
-COUNT_COAL_EVENTS_SCRIPT = "../src/CountCoalEvents.py"
-COMPUTE_RATES_SCRIPT = "../src/compute_coal_rates.py"
-COMPUTE_EMBEDDINGS_SCRIPT = "../src/LatentSpaceEmbeddings.py"
-PLOT_EMBEDDINGS_SCRIPT = "../src/PlotEmbeddings.py"
+COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
+COMPUTE_RATES_SCRIPT              = "../src/compute_coal_rates.py"
+COMPUTE_EMBEDDINGS_SCRIPT         = "../src/LatentSpaceEmbeddings.py"
+PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
 
 # Util Scripts
-preprocess_demography_script = "preprocess_demography.py"
-plot_demography_script = "plot_demography.py"
-pca_script = "run_pca.py"
-compute_rates_true_script = "compute_rates_true.py"
-simulate_trees_script = "simulate_trees.py"
-infer_trees_script = "infer_trees.py"
+preprocess_demography_script      = "preprocess_demography.py"
+plot_demography_script            = "plot_demography.py"
+pca_script                        = "run_pca.py"
+compute_rates_true_script         = "compute_rates_true.py"
+simulate_trees_script             = "simulate_trees.py"
+infer_trees_script                = "infer_trees.py"
 
-compute_pdf_wrapper_script = "compute_pdf.py"
-compute_rates_wrapper_script = "compute_rates.py"
-plot_rates_script = "plot_rates.py"
+compute_pdf_wrapper_script        = "compute_pdf.py"
+compute_rates_wrapper_script      = "compute_rates.py"
+plot_rates_script                 = "plot_rates.py"
 compute_embeedings_wrapper_script = "compute_embeddings.py"
-plot_embeddings_wrapper_script = "plot_embeddings.py"
-evaluate_performance_script = "evaluate_performance.py"
+plot_embeddings_wrapper_script    = "plot_embeddings.py"
+evaluate_performance_script       = "evaluate_performance.py"
 
-run_population_combs_script = "run_pop_combs.py"
+run_population_combs_script       = "run_pop_combs.py"
 
 # =====================================================
 # File Names
 # =====================================================
 
 # Base Output directories
-data_output_path = os.path.join(output_path,"data")
-plot_output_path = os.path.join(output_path,"plots")
-tree_output_path = os.path.join(output_path,"trees")
+data_output_path                  = os.path.join(output_path, "data")
+plot_output_path                  = os.path.join(output_path, "plots")
 
 # Target file names
-pca_plot_file_name = "pca.png"
-demography_plot_file_name = "demography.png"
-rates_true_file_name = "rates_true.parquet"
-rates_true_plot_file_name = "rates_true.png"
-embeddings_true_file_name = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.parquet"
-embeddings_true_plot_file_name = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.html"
-sim_finished_file_name = f"trees_ready{SIM_TAG}.txt"
-infer_finished_file_name = f"trees_ready{SIM_TAG}.txt"
+pca_plot_file_name                = "pca.png"
+demography_plot_file_name         = "demography.png"
+rates_true_file_name              = "rates_true.parquet"
+rates_true_plot_file_name         = "rates_true.png"
+embeddings_true_file_name         = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.parquet"
+embeddings_true_plot_file_name    = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.html"
+sim_finished_file_name            = f"trees_ready{SIM_TAG}.txt"
+infer_finished_file_name          = f"trees_ready{SIM_TAG}.txt"
 
-trees_ready = f"trees_ready{SIM_TAG}.txt" if trees_dir == tree_output_path else "trees_ready.txt"
-trees_ready = os.path.join(trees_dir,trees_ready)
+trees_ready                       = f"trees_ready{SIM_TAG}.txt" if trees_dir == tree_output_path else "trees_ready.txt"
+trees_ready                       = os.path.join(trees_dir, trees_ready)
 
-pdf_data_file_name = f"coal_pdf{PDF_TAG}.parquet"
-rates_data_file_name = f"rates{RATES_TAG}.parquet"
-rates_plot_file_name = f"rates{RATES_TAG}.png"
+pdf_data_file_name                = f"coal_pdf{PDF_TAG}.parquet"
+rates_data_file_name              = f"rates{RATES_TAG}.parquet"
+rates_plot_file_name              = f"rates{RATES_TAG}.png"
 
-embeddings_data_file_name = f"embeddings{STT_TAG}.parquet"
-embeddings_plot_file_name = f"embeddings{STT_TAG}.html"
-performance_data_file_name = f"performance{STT_TAG}.parquet"
-performance_plot_file_name = f"performance{STT_TAG}.png"
+embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
+embeddings_plot_file_name         = f"embeddings{STT_TAG}.html"
+performance_data_file_name        = f"performance{STT_TAG}.parquet"
+performance_plot_file_name        = f"performance{STT_TAG}.png"
 
 # Target file paths
-pca_plot = os.path.join(plot_output_path,pca_plot_file_name)
-demography_plot = os.path.join(plot_output_path,demography_plot_file_name)
-rates_true = os.path.join(data_output_path,rates_true_file_name)
-rates_true_plot = os.path.join(plot_output_path,rates_true_plot_file_name)
-embeddings_true = os.path.join(data_output_path,embeddings_true_file_name)
-embeddings_true_plot = os.path.join(plot_output_path,embeddings_true_plot_file_name)
-sim_finished = os.path.join(tree_output_path,sim_finished_file_name)
-infer_finished = os.path.join(tree_output_path,infer_finished_file_name)
+pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
+demography_plot                   = os.path.join(plot_output_path, demography_plot_file_name)
+rates_true                        = os.path.join(data_output_path, rates_true_file_name)
+rates_true_plot                   = os.path.join(plot_output_path, rates_true_plot_file_name)
+embeddings_true                   = os.path.join(data_output_path, embeddings_true_file_name)
+embeddings_true_plot              = os.path.join(plot_output_path, embeddings_true_plot_file_name)
+sim_finished                      = os.path.join(tree_output_path, sim_finished_file_name)
+infer_finished                    = os.path.join(tree_output_path, infer_finished_file_name)
 
-pdf_data = os.path.join(data_output_path,pdf_data_file_name)
-rates_data = os.path.join(data_output_path,rates_data_file_name)
-rates_plot = os.path.join(plot_output_path,rates_plot_file_name)
+pdf_data                          = os.path.join(data_output_path, pdf_data_file_name)
+rates_data                        = os.path.join(data_output_path, rates_data_file_name)
+rates_plot                        = os.path.join(plot_output_path, rates_plot_file_name)
 
-embeddings_data = os.path.join(data_output_path,embeddings_data_file_name)
-embeddings_plot = os.path.join(plot_output_path,embeddings_plot_file_name)
-performance_data = os.path.join(data_output_path,performance_data_file_name)
-performance_plot = os.path.join(plot_output_path,performance_plot_file_name)
+embeddings_data                   = os.path.join(data_output_path, embeddings_data_file_name)
+embeddings_plot                   = os.path.join(plot_output_path, embeddings_plot_file_name)
+performance_data                  = os.path.join(data_output_path, performance_data_file_name)
+performance_plot                  = os.path.join(plot_output_path, performance_plot_file_name)
 
-combs_data_dir = os.path.join(output_path,"combs/data")
-combs_plot_dir = os.path.join(output_path,"combs/plots")
+combs_data_dir                    = os.path.join(output_path, "combs/data")
+combs_plot_dir                    = os.path.join(output_path, "combs/plots")
+
+if trees_dir != tree_output_path and not os.path.exists(trees_ready): # In the case of using trees inferred from empirical data, create the trees ready file
+    Path(trees_ready).touch()
+
 # =====================================================
 # Target Groups
 # =====================================================
@@ -139,49 +142,38 @@ sim_targets = [
     sim_finished
     ]
 
-rate_targets = [
+STT_targets = [
     pdf_data,
     rates_data, rates_plot
-    ]
-
-STT_targets = [
-    embeddings_data,
-    embeddings_plot,
-    # performance_data,
-    # performance_plot
+    embeddings_data, embeddings_plot,
+    # performance_data, performance_plot
     ]
 # =====================================================
 # General Rules
 # =====================================================
-rule sim:
+rule sim: # Only simulate the trees 
     input: sim_targets
+rule sim_STT: # Simulate and run STT on simulated trees
+    input: sim_targets, STT_targets
 
-rule infer:
+rule infer: # Only infer the trees 
     input: infer_finished
+rule infer_STT: # Infer and run STT on inferred trees
+    input: infer_finished, STT_targets
 
-rule rates:
-    input: rate_targets
-
-rule STT: 
+rule STT: # Run STT
     input: STT_targets
 
-# rule STT_combs:
-#     input: 
-#         directory(combs_data_dir),
-#         directory(combs_plot_dir)
-
-rule sim_STT:
-    input: sim_targets, rate_targets, STT_targets
-
-rule infer_STT:
-    input: infer_finished, rate_targets, STT_targets
-
-# rule all_empirical:
-#     rate_targets,STT_targets
+rule STT_combs: # Run STT on full dataset and on all population combinations
+    input: 
+        STT_targets
+        directory(combs_data_dir),
+        directory(combs_plot_dir)
 
 # =====================================================
 # Specific Rules
 # =====================================================
+
 # ______________________sim Rules______________________
 rule preprocess_data:
     input:
@@ -478,7 +470,7 @@ rule plot_rates:
             --output_path {params.outdir} \
             --output_name {params.output_name}
         """
-# ______________________STT Rules_______________________
+# ______________________STT Rules_________________________
 rule compute_embeddings:
     input:
         rates = rates_data,
