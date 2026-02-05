@@ -108,22 +108,22 @@ def infer_relate(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, r=1.2e-
 
     return
 
-def infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None):
+def infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, burnin=None):
     if method == "tsinfer":
         infer_tsinfer(vcf_file_path, output_path, output_name, mu=mu, r=r)
     elif method == "singer":
-        infer_singer(vcf_file_path, output_path, output_name, Ne, mu=mu, contig_length=contig_length, num_posterior_samples=num_posterior_samples, thinning_interval=thinning_interval)
+        infer_singer(vcf_file_path, output_path, output_name, Ne, mu=mu, contig_length=contig_length, num_posterior_samples=num_posterior_samples, thinning_interval=thinning_interval, burnin=burnin)
     elif method == "relate":
         infer_relate(vcf_file_path, output_path, output_name, Ne, mu=mu, r=r, contig_length=contig_length)
     else:
         raise ValueError(f"Unknown method: {method}")
     return
 
-def infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, num_threads = 1):
+def infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, burnin=None, num_threads = 1):
     vcf_files = glob.glob(os.path.join(vcf_dir, "*.vcf"))
     os.makedirs(output_path, exist_ok=True)
     def infer_single_wrapper(vcf_file_path):
-        return infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval)
+        return infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin)
     start_time = time()
     if num_threads == 1:
         for vcf_file in tqdm(vcf_files):
@@ -154,6 +154,7 @@ def main():
     contig_length = args.contig_length
     num_posterior_samples = args.num_posterior_samples
     thinning_interval = args.thinning_interval
+    burnin = args.burnin
     mu = args.mu
     r = args.r
     output_name = args.output_name
@@ -161,6 +162,7 @@ def main():
     Ne = find_Ne(vcf_dir)
 
     time_taken = infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin, num_threads)
+
     with open(f"{output_path}/{output_name}", "w") as f:
         f.write(f"inference took {time_taken/60:.2f} minutes")
 
