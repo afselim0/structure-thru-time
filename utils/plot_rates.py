@@ -9,11 +9,11 @@ from matplotlib.lines import Line2D
 
 
 # ______________________________Plotting Params______________________________
-INDIVIDUAL_LINE_WIDTH = 0.5
-INDIVIDUAL_LINE_ALPHA = 0.2
-MEAN_LINE_WIDTH = 1
-MEAN_LINE_ALPHA = 0.7
-N0 = 5000
+INDIVIDUAL_LINE_WIDTH = 0.2
+INDIVIDUAL_LINE_ALPHA = 0.05
+MEAN_LINE_WIDTH = 2
+MEAN_LINE_ALPHA = 1
+min_N0 = 5000
 # ___________________________________________________________________________
 def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
     setup_plotting_style()
@@ -21,9 +21,9 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
 
     n_populations = len(populations)
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-    times = rates_df.columns.astype(int)
+    times = rates_df.columns.astype(float).astype(int)
 
-    fig, ax = plt.subplots(1,len(populations), figsize=(4*len(populations),3),sharex=True,sharey=True)
+    fig, ax = plt.subplots(1,len(populations), figsize=(6*len(populations),4),sharex=True,sharey=True)
     fig.supylabel(ylabel)
     for i in range(len(populations)):
         if n_populations == 1:  
@@ -31,12 +31,12 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
         ax[i].set_xlabel("Time")
         ax[i].set_title(f"{populations[i]}")
         ax[i].set_xscale("log")
-        ax[i].set_ylim(top=1/N0)
+        ax[i].set_ylim(top=1/min_N0)
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
             if pop1 == pop2:
-                color = "black"
+                color = "grey"
             else:
                 color = pop_colors_dict[pop2]
             pop1_samples = pop_labels[pop_labels['population'] == pop1]['sample_id'].values
@@ -51,7 +51,7 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
             mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
-            ax[i].plot(times, mean_rates, color=color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
+            ax[i].plot(times, mean_rates, color="black" if pop1 == pop2 else color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
             for pair in sample_pairs:
                 ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
 
