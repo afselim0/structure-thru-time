@@ -14,7 +14,8 @@ def main():
     parser.add_argument("--input", required=True, help="Path to rates parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for embeddings data")
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
-    parser.add_argument("--N0", type=int, required=False, help="N0 hyperparameter for the link function")
+    parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
+    parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
     
     args = parser.parse_args()
     input = args.input
@@ -23,8 +24,10 @@ def main():
     rates = rates_df.values
     rates_df += np.min(rates[rates!=0])/100
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2)
-    if args.N0:
-        LSE.N0 = args.N0
+    if args.N_min is not None:
+        LSE.N_min = args.N_min
+    if args.N_max is not None:
+        LSE.N_max = args.N_max
         
     np.random.seed(42)
     X_init = np.random.rand(LSE.num_samples, 2)
