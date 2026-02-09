@@ -29,7 +29,7 @@ Move `support_tube.py` to `utils/`, wire it into the Snakemake pipeline as a sep
 **`sandbox/convex_hull_sandbox.py`**:
 - Already uses `sys.path.insert(0, str(REPO_ROOT))`, so changing `from src.support_tube import ...` (if any direct imports) or verifying the indirect import through `PlotEmbeddings` still works
 
-### Step 3: Create `utils/plot_support_tubes.py` (CLI wrapper)
+### Step 3: Create `utils/plot_support_tubes.py` (CLI wrapper) 
 
 Thin CLI script following the pattern of `utils/plot_embeddings.py`:
 
