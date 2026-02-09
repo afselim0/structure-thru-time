@@ -485,10 +485,10 @@ class PlotEmbeddings:
             return
 
         try:
-            from src import support_tube  # type: ignore
+            from utils import support_tube  # type: ignore
         except Exception as e:
             raise ImportError(
-                "add_support_tube() requires src/support_tube.py to exist and be importable."
+                "add_support_tube() requires utils/support_tube.py to exist and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"
@@ -634,10 +634,10 @@ class PlotEmbeddings:
             return
 
         try:
-            from src import support_tube  # type: ignore
+            from utils import support_tube  # type: ignore
         except Exception as e:
             raise ImportError(
-                "add_support_rings() requires src/support_tube.py to exist and be importable."
+                "add_support_rings() requires utils/support_tube.py to exist and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"
