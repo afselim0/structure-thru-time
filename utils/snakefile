@@ -144,7 +144,7 @@ sim_targets = [
 
 STT_targets = [
     pdf_data,
-    rates_data, rates_plot
+    rates_data, rates_plot,
     embeddings_data, embeddings_plot,
     # performance_data, performance_plot
     ]
@@ -164,11 +164,11 @@ rule infer_STT: # Infer and run STT on inferred trees
 rule STT: # Run STT
     input: STT_targets
 
-rule STT_combs: # Run STT on full dataset and on all population combinations
-    input: 
-        STT_targets
-        directory(combs_data_dir),
-        directory(combs_plot_dir)
+# rule STT_combs: # Run STT on full dataset and on all population combinations
+#     input: 
+#         STT_targets,
+#         directory(combs_data_dir),
+#         directory(combs_plot_dir)
 
 # =====================================================
 # Specific Rules
