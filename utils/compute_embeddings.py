@@ -23,12 +23,7 @@ def main():
     rates_df.columns = rates_df.columns.astype(float)
     rates = rates_df.values
     rates_df += np.min(rates[rates!=0])/100
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2)
-    if args.N_min is not None:
-        LSE.N_min = args.N_min
-    if args.N_max is not None:
-        LSE.N_max = args.N_max
-        
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2, N_min=args.N_min, N_max=args.N_max)
     np.random.seed(42)
     X_init = np.random.rand(LSE.num_samples, 2)
     _ = LSE.compute_embeddings_through_time(X_init=X_init)
