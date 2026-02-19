@@ -1,11 +1,30 @@
 # outputs / workflow engineering
+- Ready to run
+    - Debugging what's gone awry with latest chimp analyses relative to the summer 2025 embeddings
+
 
 - Finalize performance evaluation
-- Text and colors in embedding files to capture residuals
+    - reconstructed rates vs input rates
+    - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations)
+        - d=2, d=10
+    - Special: Do admixed individuals pull their sources too much?
 
+    - visualizing performance
+        - text and colors to denote residuals
+        - interactive dash?
+
+- Resolve which ARG inference we want to use
+    - Finish SINGER testing on simulation
+
+- Finalizing Empirical Analyses
+    - Finalize strategy of inference
+        - ARG inference across ~2500 1 Mb spans
+    - Preparing Datasets
+        - reinfer Wohns with SINGER?
+        - reinfer Chimps with if necessary?
+        - reinfer HPRC
 
 - Revise Wohns/HPRC and Chimp analsyes
-    - Debugging what's gone awry with latest chimp analyses relative to the summer 2025 embeddings
     - Preparing the "many loci" approach (500 loci 1 Mb? - 500kb?) and reinfer [Haoyang]
     
 - Revised set of preliminary figures 
@@ -13,17 +32,8 @@
 - For manuscript - template figure in the latex 
 - In the working directories - several figure outputs;     
 
-- Master snakefile for running both simulations and empirical results
-- Revisit Procrustes analysis per time step option [ Ahmed ]
-- Revisit penalty on locations [ Ahmed ]
-    Note: Can implement as forward-backward over multiple sweeps
 - Set up to show multiple solutions for same data (HT Amy G) [ Ahmed ]
 
-- Add max distance
-    
-- Adding option for Singer vs tsinfer/tsdate, and relate [ Ahmed ]
-    - add to simulation pipeline
-    - For Wohns et al - output to vcf and reinfer with SINGER 
 
 - Turn attention to the local admixture problem 
 
@@ -88,6 +98,13 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - DONE Getting outputs similar to sim structure so same util scripts can run on it 
 - DONE In sim snakemake - Update True embedding outputs to mark choices of N0 and other specific relevant params 
 - DONE Polish the rate inference - because of newly appreciated issues with recent times
+- DONE Revisit Procrustes analysis per time step option [ Ahmed ]
+- DONE Penalized inference
+- DONE add max distance
+- DONE Adding option for Singer vs tsinfer/tsdate, and relate [ Ahmed ]
+    - add to simulation pipeline
+- DONE Master snakefile for running both simulations and empirical results
+
 
 
 ### Miscellnaeous archived notes
