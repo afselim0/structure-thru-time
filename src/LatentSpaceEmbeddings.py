@@ -1,101 +1,8 @@
-#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
-from scipy.spatial.distance import pdist, squareform
+from optimization_functions import *
 from tqdm import tqdm
-
-EPSILON = 1e-16
-
-
-def compute_f(D, N_min, N_max, link="inverse_sq_distance"):
-    # N_max = np.inf
-    D_sq = D**2
-    if link == "inverse_distance":
-        D_max = N_max - N_min
-        f = 1/(D + N_min)
-        f_prime = -1/(D + N_min)**2
-
-        f[D > D_max] = 0
-        f_prime[D > D_max] = 0
-    elif link == "inverse_sq_distance":
-        D_max = np.sqrt(N_max-N_min)
-        f = 1/(D_sq + N_min)
-        f_prime = -2*D/(D_sq + N_min)**2
-
-        f[D > D_max] = 0
-        f_prime[D > D_max] = 0
-    elif link == "exponential":
-        f = (1/N_min)*np.exp(-D_sq)
-        f_prime = -2*D*f
-    return f,f_prime
-
-def compute_M(f,f_prime,D,R,valid_mask):
-    M = np.zeros_like(R)
-    M[valid_mask] = (f_prime[valid_mask]/D[valid_mask])*(1-R[valid_mask]/(f[valid_mask] + EPSILON))
-    return M
-
-def compute_loss(f,R,valid_mask):
-    loss_values = f[valid_mask] - R[valid_mask] * np.log(f[valid_mask] + EPSILON)
-    return 0.5*np.nansum(loss_values)
-
-def compute_gradient(X,f,f_prime,D,R,valid_mask):
-    M = compute_M(f,f_prime,D,R,valid_mask)
-    grad = (np.sum(M, axis=1)[:, np.newaxis] * X - M @ X)
-    return grad
-
-def compute_loss_gradient(X_flat,R,N_min,N_max,compute_f=compute_f,change_penalty = 0, X_prev_flat = None):
-    # Compute f is a function that computes f and f_prime given Distances and N0
-    n_samples = R.shape[0]
-    X = X_flat.reshape((n_samples, -1))
-    valid_mask = ~np.isnan(R)
-    D = squareform(pdist(X, 'euclidean'))
-    f,f_prime = compute_f(D,N_min,N_max)
-    loss = compute_loss(f,R,valid_mask)
-    grad = compute_gradient(X,f,f_prime,D,R,valid_mask)
-
-    # if X_prev_flat is not None and change_penalty > 0:
-    #     X_prev = X_prev_flat.reshape((n_samples, -1))
-    #     change_diff = X - X_prev
-
-        # loss += change_penalty * 0.5 * np.sum(change_diff**2)
-        # grad += change_penalty * change_diff
-        # loss += change_penalty * np.sum(np.abs(change_diff))
-        # grad += change_penalty * np.sign(change_diff)
-
-    return loss, grad.ravel()
-
-def compute_embeddings(X_init, R, N_min, N_max,change_penalty=0, X_prev=None, d=2, max_iter=30000, tol=1e-16):
-    # Optimize using L-BFGS-B
-    # X_prev_flat = X_prev.ravel() if X_prev is not None else None
-    X_prev_flat = None
-    result = minimize(compute_loss_gradient, X_init.ravel(), args=(R, N_min, N_max, compute_f, change_penalty, X_prev_flat), method='L-BFGS-B',
-                      jac=True, options={'maxiter': max_iter, 'disp': False,'ftol':tol, 'gtol': tol})
-    # print(f"BFGS solved with message: {result.message}, nit={result.nit},nfev={result.nfev},fun={result.fun}\n")
-    X_opt = result.x.reshape(X_init.shape)
-    return X_opt, result.fun
-
-def procrustes_single_time(X_reference, Y):
-    X_reference_centered = X_reference - np.mean(X_reference, axis=0)
-    Y_centered = Y - np.mean(Y, axis=0)
-    cov_matrix = np.dot(Y_centered.T, X_reference_centered)
-    U, _, Vt = np.linalg.svd(cov_matrix)
-    rotation_matrix = np.dot(U, Vt)
-    Y_rotated = np.dot(Y_centered, rotation_matrix)
-    return Y_rotated
-
-def procrustes_alignment(X):
-    X_aligned = np.zeros_like(X)
-    n_timepoints = X.shape[2]
-    X_reference = X[:,:,0]
-    X_reference = X_reference - np.mean(X_reference, axis=0)
-    X_aligned[:,:,0] = X_reference
-    for t in range(1,n_timepoints):
-        Y = X[:,:,t]
-        Y_aligned = procrustes_single_time(X_reference,Y)
-        X_aligned[:,:,t] = Y_aligned
-    return X_aligned
 
 class LatentSpaceEmbeddings:
     def __init__(self,
@@ -120,6 +27,8 @@ class LatentSpaceEmbeddings:
             R[j, i, :] = row.values
                 
         self.R = R
+        if N_max is not None:
+            self.R += 1/N_max
     
         if sample_times is None:
             self.sample_times = np.array([0]*self.num_samples)
@@ -128,15 +37,13 @@ class LatentSpaceEmbeddings:
 
         self.embeddings = None
 
-        if N_min is not None and N_max is not None:
+        if N_min is not None:
             self.N_min = N_min
-            self.N_max = N_max
         else:
-            # Selecting N_min as 2nd percentile of Ne estimates
+            # Selecting N_min as 1st percentile of Ne estimates
             with np.errstate(divide='ignore', invalid='ignore'):
                 Ne = 1/(R + 1e-10)
             self.N_min = np.nanquantile(Ne, 0.01)
-            self.N_max = np.inf
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
@@ -167,7 +74,7 @@ class LatentSpaceEmbeddings:
         R = R[extant_samples,:,]
         R = R[:,extant_samples,]
         X = X_init[extant_samples, :]
-        X,loss = compute_embeddings(X_init, R, self.N_min, self.N_max, change_penalty=change_penalty, X_prev=X_prev)
+        X,loss = compute_embeddings(X_init, R, self.N_min, change_penalty=change_penalty, X_prev=X_prev)
         return X, loss
 
     def compute_embeddings_through_time(self, X_init = None, change_penalty=0):
@@ -202,3 +109,35 @@ class LatentSpaceEmbeddings:
             "X2": X2_flat
         })
         return df
+# # %%
+# import matplotlib.pyplot as plt
+# from plotly import express as px
+# rates = pd.read_parquet("../results/simulations/outputs/split/sim/data/rates.minWS101.maxWS501.V1.FS1.0.maxT4000.nT1000.parquet")
+# rates.columns = rates.columns.astype(float)
+# times = rates.columns.values
+# LSE = LatentSpaceEmbeddings(rates_df=rates, n_components=2)
+# R = LSE.R
+# #%%
+# LSE.N_min = 1
+# LSE.N_max = 1000000
+# alpha = 0
+# embeddings = LSE.compute_embeddings_through_time(change_penalty=alpha)
+# embeddings_df = LSE.get_embeddings_df()
+# embeddings_df["color"] = np.nan
+# embeddings_df.loc[embeddings_df["sample_id"]<20, "color"] = "red"
+# embeddings_df.loc[embeddings_df["sample_id"]>=20, "color"] = "blue"
+# # %%
+# plt.plot(times,embeddings_df[embeddings_df["sample_id"]==0][["X2"]])
+# #%%
+# xy_min = min(embeddings_df["X1"].min(), embeddings_df["X2"].min())
+# xy_max = max(embeddings_df["X1"].max(), embeddings_df["X2"].max())
+# fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time", line_group="sample_id", color="color", hover_data=["sample_id"])
+# fig.update_layout(
+#     scene=dict(
+#         xaxis=dict(range=[xy_min, xy_max]),
+#         yaxis=dict(range=[xy_min, xy_max]),
+#         aspectmode="cube"
+#     )
+# )
+# fig.show()
+# # %%
