@@ -4,13 +4,20 @@ import pandas as pd
 from optimization_functions import *
 from tqdm import tqdm
 
+STDERR_ROLLING_WINDOW= 10
+
 class LatentSpaceEmbeddings:
     def __init__(self,
                  rates_df: pd.DataFrame,
                  sample_times: list = None,
                  N_min = None,
                  N_max = None,
+                 l1_penalty = None,
+                 l2_penalty = None,
+                 individuals = False,
                  n_components: int = 2):
+        
+        rates_df.columns = rates_df.columns.astype(float)
         self.samples  = np.unique([x for pair in rates_df.index.values for x in pair])
         self.num_samples = len(self.samples)
         self.sample_idx_map = {sample: idx for idx, sample in enumerate(self.samples)}
@@ -18,6 +25,8 @@ class LatentSpaceEmbeddings:
         self.time_points = rates_df.columns.values
         self.num_timepoints = len(self.time_points)
         self.n_components = n_components
+        self.delta_t = self.time_points[1] - self.time_points[0]
+        self.stderr = np.nanmean(rates_df.rolling(window=STDERR_ROLLING_WINDOW, axis=1).std().mean())
 
         R = np.full((self.num_samples, self.num_samples, self.num_timepoints), np.nan)
         for (s1, s2), row in rates_df.iterrows():
@@ -51,48 +60,86 @@ class LatentSpaceEmbeddings:
             R[~sampled_by_time[:,t], :, t] = np.nan
             R[:, ~sampled_by_time[:,t], t] = np.nan
 
-        # if individuals:
-        #     R_individuals = np.full((int(self.num_idx/2), int(self.num_idx/2), self.num_timepoints), np.nan)
-        #     for i in range(int(self.num_idx/2)):
-        #         individual_i_rates = R[2*i:2*i+2, :, :]
-        #         for j in range(i+1, int(self.num_idx/2)):
-        #             individual_i_j_rates = individual_i_rates[:, 2*j:2*j+2, :]
-        #             if np.all(np.isnan(individual_i_j_rates)):
-        #                 continue
-        #             R_individuals[i, j, :] = np.nanmean(individual_i_j_rates, axis=(0,1))
-        #             R_individuals[j, i, :] = R_individuals[i, j, :]
+        # Parse penalties
+        if l1_penalty is not None or l2_penalty is not None:
+            assert l1_penalty is None or isinstance(l1_penalty, dict), "l1_penalty must be a dictionary"
+            assert l2_penalty is None or isinstance(l2_penalty, dict), "l2_penalty must be a dictionary"
+            max_l1_order = max(l1_penalty.keys()) if l1_penalty is not None else 0
+            max_l2_order = max(l2_penalty.keys()) if l2_penalty is not None else 0
+            max_order = max(max_l1_order, max_l2_order)
+            difference_operators = compute_difference_operators(self.num_timepoints, max_order, self.delta_t)
+            self.smoothing_params = {
+                "l1": l1_penalty if l1_penalty is not None else {},
+                "l2": l2_penalty if l2_penalty is not None else {},
+                "difference_operators": difference_operators
+            }
 
-        #     self.R = R_individuals
-        #     self.num_idx = R_individuals.shape[0]
-        #     self.sampled_by_time = self.sampled_by_time[::2, :]
+        if individuals:
+            R_individuals = np.full((int(self.num_samples/2), int(self.num_samples/2), self.num_timepoints), np.nan)
+            for i in range(int(self.num_samples/2)):
+                individual_i_rates = R[2*i:2*i+2, :, :]
+                for j in range(i+1, int(self.num_samples/2)):
+                    individual_i_j_rates = individual_i_rates[:, 2*j:2*j+2, :]
+                    if np.all(np.isnan(individual_i_j_rates)):
+                        continue
+                    R_individuals[i, j, :] = np.nanmean(individual_i_j_rates, axis=(0,1))
+                    R_individuals[j, i, :] = R_individuals[i, j, :]
 
-    def compute_embeddings(self,X_init,time_idx, change_penalty=0, X_prev=None):
-        # Compute embeddings for a specific time index
-        R = self.R[:,:,time_idx]
-        # Remove indices of samples that have not been sampled yet
-        extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
-        R = R[extant_samples,:,]
-        R = R[:,extant_samples,]
-        X = X_init[extant_samples, :]
-        X,loss = compute_embeddings(X_init, R, self.N_min, change_penalty=change_penalty, X_prev=X_prev)
+            self.R = R_individuals
+            self.num_samples = R_individuals.shape[0]
+            self.sampled_by_time = self.sampled_by_time[::2, :]
+
+    def compute_embeddings_jointly(self, X_init=None, max_iter=10000, tol=1e-12):
+        if X_init is None:
+            X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
+        else:
+            assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
+        X, loss = optimize_all(X_init, self.R, self.N_min, self.stderr, self.smoothing_params)
+        self.embeddings = X
         return X, loss
 
-    def compute_embeddings_through_time(self, X_init = None, change_penalty=0):
-        embeddings = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
+    def compute_embeddings_through_time(self, X_init = None, max_iter=10000, tol=1e-12):
+        X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
+        total_loss = 0
         if X_init is not None:
-            X = X_init
+            X_t = X_init
         else:
-            X = np.random.rand(self.num_samples,self.n_components)
+            X_t = np.random.rand(self.num_samples,self.n_components)
         for k in tqdm(range(self.num_timepoints)):
-            idx = len(self.time_points) - k - 1
-            # idx = k
-            X, _ = self.compute_embeddings(X_init = X, time_idx=idx, change_penalty=change_penalty, X_prev=X if k > 0 else None)
+            time_idx = len(self.time_points) - k - 1
+            # time_idx = k
+            R_t = self.R[:,:,time_idx]
+            extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
+            R_t = R_t[extant_samples,:,]
+            R_t = R_t[:,extant_samples,]
+            X_t = X[extant_samples, :]
+            X_t, loss = optimize_timepoint(X_t, X, R_t, self.N_min, self.stderr, self.smoothing_params, max_iter, tol)
             if k==0:
                 X -= X.mean(axis=0)
-            embeddings[:,:,idx] = X
-        embeddings = procrustes_alignment(embeddings)
-        self.embeddings = embeddings
-        return embeddings
+            X[extant_samples,:,time_idx] = X_t
+            X_t = X[:,:,time_idx]
+            total_loss += loss
+        X = procrustes_alignment(X)
+        self.X = X
+        return X, total_loss
+    
+    def compute_embeddings_coordinate_descent(self, X_init = None, max_iter=1000, tol=1e-12, num_epochs=10):
+        if X_init is None:
+            X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=max_iter, tol=tol)
+            X_init = np.repeat(X_init[:, :, np.newaxis], self.num_timepoints, axis=2)
+        else:
+            assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
+        
+        X = X_init.copy()
+        for _ in range(num_epochs):
+            for i in tqdm(range(self.num_samples)):
+                X_i = X[i,:,:]
+                R_i = self.R[i,:,:]
+                X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.stderr, self.smoothing_params, max_iter, tol)
+                X[i,:,:] = X_i_opt
+                X = X - np.mean(X, axis=0, keepdims=True)  # Centering step to remove translation indeterminacy
+        return X
+        
 
     def get_embeddings_df(self):
         assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
@@ -109,35 +156,3 @@ class LatentSpaceEmbeddings:
             "X2": X2_flat
         })
         return df
-# # %%
-# import matplotlib.pyplot as plt
-# from plotly import express as px
-# rates = pd.read_parquet("../results/simulations/outputs/split/sim/data/rates.minWS101.maxWS501.V1.FS1.0.maxT4000.nT1000.parquet")
-# rates.columns = rates.columns.astype(float)
-# times = rates.columns.values
-# LSE = LatentSpaceEmbeddings(rates_df=rates, n_components=2)
-# R = LSE.R
-# #%%
-# LSE.N_min = 1
-# LSE.N_max = 1000000
-# alpha = 0
-# embeddings = LSE.compute_embeddings_through_time(change_penalty=alpha)
-# embeddings_df = LSE.get_embeddings_df()
-# embeddings_df["color"] = np.nan
-# embeddings_df.loc[embeddings_df["sample_id"]<20, "color"] = "red"
-# embeddings_df.loc[embeddings_df["sample_id"]>=20, "color"] = "blue"
-# # %%
-# plt.plot(times,embeddings_df[embeddings_df["sample_id"]==0][["X2"]])
-# #%%
-# xy_min = min(embeddings_df["X1"].min(), embeddings_df["X2"].min())
-# xy_max = max(embeddings_df["X1"].max(), embeddings_df["X2"].max())
-# fig = px.line_3d(embeddings_df, x="X1", y="X2", z="time", line_group="sample_id", color="color", hover_data=["sample_id"])
-# fig.update_layout(
-#     scene=dict(
-#         xaxis=dict(range=[xy_min, xy_max]),
-#         yaxis=dict(range=[xy_min, xy_max]),
-#         aspectmode="cube"
-#     )
-# )
-# fig.show()
-# # %%

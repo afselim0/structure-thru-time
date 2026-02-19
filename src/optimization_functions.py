@@ -326,3 +326,18 @@ def procrustes_alignment(X):
         Y_aligned = procrustes_single_time(X_reference,Y)
         X_aligned[:,:,t] = Y_aligned
     return X_aligned
+
+def compute_difference_operators(num_timepoints, max_order, delta_t):
+    D1 = np.zeros((num_timepoints-1,num_timepoints))
+    np.fill_diagonal(D1, -1)
+    for t in range(num_timepoints-1):
+        D1[t, t+1] = 1
+    D1 /= delta_t
+    D1 = np.vstack((D1, np.zeros((1,num_timepoints)))) # Pad to make square, where the derivative at last time is zero (or could be forward difference if you prefer)
+
+    D = np.eye(num_timepoints)
+    D_dict = {}
+    for k in range(1,max_order+1):
+        D = D1 @ D
+        D_dict[k] = D
+    return D_dict
