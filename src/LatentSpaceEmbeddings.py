@@ -15,8 +15,13 @@ class LatentSpaceEmbeddings:
                  l1_penalty = None,
                  l2_penalty = None,
                  individuals = False,
+                 n_timepoints = None,
                  n_components: int = 2):
         
+        self.stderr = np.nanmean(rates_df.rolling(window=STDERR_ROLLING_WINDOW, axis=1).std().mean())
+        if n_timepoints is not None:
+            time_step = len(rates_df.columns) // n_timepoints
+            rates_df = rates_df.iloc[:, ::int(time_step)]
         rates_df.columns = rates_df.columns.astype(float)
         self.samples  = np.unique([x for pair in rates_df.index.values for x in pair])
         self.num_samples = len(self.samples)
@@ -26,7 +31,6 @@ class LatentSpaceEmbeddings:
         self.num_timepoints = len(self.time_points)
         self.n_components = n_components
         self.delta_t = self.time_points[1] - self.time_points[0]
-        self.stderr = np.nanmean(rates_df.rolling(window=STDERR_ROLLING_WINDOW, axis=1).std().mean())
 
         R = np.full((self.num_samples, self.num_samples, self.num_timepoints), np.nan)
         for (s1, s2), row in rates_df.iterrows():
@@ -61,18 +65,7 @@ class LatentSpaceEmbeddings:
             R[:, ~sampled_by_time[:,t], t] = np.nan
 
         # Parse penalties
-        if l1_penalty is not None or l2_penalty is not None:
-            assert l1_penalty is None or isinstance(l1_penalty, dict), "l1_penalty must be a dictionary"
-            assert l2_penalty is None or isinstance(l2_penalty, dict), "l2_penalty must be a dictionary"
-            max_l1_order = max(l1_penalty.keys()) if l1_penalty is not None else 0
-            max_l2_order = max(l2_penalty.keys()) if l2_penalty is not None else 0
-            max_order = max(max_l1_order, max_l2_order)
-            difference_operators = compute_difference_operators(self.num_timepoints, max_order, self.delta_t)
-            self.smoothing_params = {
-                "l1": l1_penalty if l1_penalty is not None else {},
-                "l2": l2_penalty if l2_penalty is not None else {},
-                "difference_operators": difference_operators
-            }
+        self.smoothing_params = self._parse_smoothing_params(l1_penalty, l2_penalty)
 
         if individuals:
             R_individuals = np.full((int(self.num_samples/2), int(self.num_samples/2), self.num_timepoints), np.nan)
@@ -89,16 +82,37 @@ class LatentSpaceEmbeddings:
             self.num_samples = R_individuals.shape[0]
             self.sampled_by_time = self.sampled_by_time[::2, :]
 
+    def _parse_smoothing_params(self, l1_penalty, l2_penalty):
+        if l1_penalty is not None or l2_penalty is not None:
+            assert l1_penalty is None or isinstance(l1_penalty, dict), "l1_penalty must be a dictionary"
+            assert l2_penalty is None or isinstance(l2_penalty, dict), "l2_penalty must be a dictionary"
+            max_l1_order = max(l1_penalty.keys()) if l1_penalty is not None else 0
+            max_l2_order = max(l2_penalty.keys()) if l2_penalty is not None else 0
+            max_order = max(max_l1_order, max_l2_order)
+            difference_operators = compute_difference_operators(self.num_timepoints, max_order, self.delta_t)
+            self.smoothing_params = {
+                "l1": l1_penalty if l1_penalty is not None else {},
+                "l2": l2_penalty if l2_penalty is not None else {},
+                "diff_operators": difference_operators
+            }
+        else:
+            self.smoothing_params = None
+
     def compute_embeddings_jointly(self, X_init=None, max_iter=10000, tol=1e-12):
         if X_init is None:
             X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
         else:
             assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
-        X, loss = optimize_all(X_init, self.R, self.N_min, self.stderr, self.smoothing_params)
+        X, loss = optimize_all(X_init, self.R, self.N_min, 1, self.smoothing_params, max_iter, tol)
+        X = procrustes_alignment(X)
         self.embeddings = X
         return X, loss
 
-    def compute_embeddings_through_time(self, X_init = None, max_iter=10000, tol=1e-12):
+    def compute_embeddings_through_time(self, X_init = None, max_iter=10000, tol=1e-12, smooth = False):
+        if smooth:
+            smoothing_params = self.smoothing_params
+        else:
+            smoothing_params = None
         X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
         total_loss = 0
         if X_init is not None:
@@ -112,19 +126,20 @@ class LatentSpaceEmbeddings:
             extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
             R_t = R_t[extant_samples,:,]
             R_t = R_t[:,extant_samples,]
-            X_t = X[extant_samples, :]
-            X_t, loss = optimize_timepoint(X_t, X, R_t, self.N_min, self.stderr, self.smoothing_params, max_iter, tol)
+            X_t = X_t[extant_samples, :]
+            X_t, loss = optimize_timepoint(X_t, X, R_t, self.N_min, self.stderr, smoothing_params,time_idx, max_iter, tol)
             if k==0:
-                X -= X.mean(axis=0)
+                X_t -= X_t.mean(axis=0)
             X[extant_samples,:,time_idx] = X_t
             X_t = X[:,:,time_idx]
             total_loss += loss
-        X = procrustes_alignment(X)
-        self.X = X
+        # X = procrustes_alignment(X)
+        self.embeddings = X
         return X, total_loss
     
     def compute_embeddings_coordinate_descent(self, X_init = None, max_iter=1000, tol=1e-12, num_epochs=10):
         if X_init is None:
+            X_init = np.random.rand(self.num_samples, self.n_components)
             X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=max_iter, tol=tol)
             X_init = np.repeat(X_init[:, :, np.newaxis], self.num_timepoints, axis=2)
         else:
@@ -132,14 +147,22 @@ class LatentSpaceEmbeddings:
         
         X = X_init.copy()
         for _ in range(num_epochs):
+            total_loss = 0
             for i in tqdm(range(self.num_samples)):
                 X_i = X[i,:,:]
                 R_i = self.R[i,:,:]
                 X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.stderr, self.smoothing_params, max_iter, tol)
                 X[i,:,:] = X_i_opt
                 X = X - np.mean(X, axis=0, keepdims=True)  # Centering step to remove translation indeterminacy
-        return X
-        
+                total_loss += X_i_loss
+        # X = procrustes_alignment(X)
+        self.embeddings = X
+        return X, total_loss
+    
+    def compute_embeddings_two_pass(self, max_iter=2000, tol=1e-12):
+        X,loss = self.compute_embeddings_through_time(max_iter = max_iter, tol = tol, smooth=False)
+        X,loss = self.compute_embeddings_coordinate_descent(X_init=X, max_iter = max_iter, tol = tol, num_epochs=1)
+        return X, loss
 
     def get_embeddings_df(self):
         assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
@@ -156,3 +179,27 @@ class LatentSpaceEmbeddings:
             "X2": X2_flat
         })
         return df
+#%%
+from PlotEmbeddings import *
+rates_df = pd.read_parquet("../results/simulations/outputs/split/data/rates.minWS10.maxWS100.V1.FS1.0.maxT10000.nT2000.parquet")
+pop_labels = pd.read_csv("../results/simulations/outputs/split/data/pop_labels.csv")
+pop_colors = pd.read_csv("../results/simulations/outputs/split/data/pop_colors.csv")
+N_min = 100
+N_max = 1e6
+n_timepoints = 200
+max_iter = 2000
+tol = 1e-16
+LSE = LatentSpaceEmbeddings(rates_df, N_min=N_min, N_max=N_max, l1_penalty=None, l2_penalty=None, n_timepoints=n_timepoints)
+X_unpenalized,loss = LSE.compute_embeddings_through_time(max_iter = max_iter, tol = tol)
+# %%
+l1_penalty = {1:100}
+l2_penalty = {1:1e-4}
+LSE._parse_smoothing_params(l1_penalty, l2_penalty)
+X,loss = LSE.compute_embeddings_coordinate_descent(X_init=X_unpenalized, max_iter = max_iter, tol = tol, num_epochs=5)
+embeddings_df = LSE.get_embeddings_df()
+# %%
+Plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=pop_labels, colors_df=pop_colors)
+Plotter.init_plot(time_scale = "linear")
+Plotter.add_sample_trajectories()
+Plotter.fig.show()
+# %%
