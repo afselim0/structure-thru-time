@@ -10,7 +10,7 @@
     - Rerun chimps asap to identify what's gone awry since the 2025 set of results [high]
 
 - **Smoothing the Embeddings**
-    - Add the sample-based coordinate descent to the LatentSpaceEmbeddings.py script
+    - track loss function 
     - Determine a standard level of smoothing given standard error of rate estimates
     - Add necessary parameters and changes to snakemake
         - A basic unsmoothed output
@@ -28,7 +28,6 @@
         - interactive dash?
 
 - **Finalize choice of ARG inference method**
-    - Finish SINGER inference on simulated data [high]
     - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
     - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
     - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
@@ -96,6 +95,8 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - DONE Adding option for Singer vs tsinfer/tsdate, and relate [ Ahmed ]
     - add to simulation pipeline
 - DONE Master snakefile for running both simulations and empirical results
+- DONE Finish SINGER inference on simulated data
+- DONE Add the sample-based coordinate descent to the LatentSpaceEmbeddings.py script 
 
 ### Archived discussion points
 - Wohns et al and Chimp et al for UCLA talk 

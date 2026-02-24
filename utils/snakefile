@@ -46,7 +46,9 @@ RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_s
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
-STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}" + RATES_TAG
+l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
+l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
+STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}]" + RATES_TAG
 
 # Empirical dataset parameters
 pops                              = read_config("pops", "all").replace(","," ")
@@ -481,6 +483,8 @@ rule compute_embeddings:
     params:
         N_min = N_min,
         N_max = N_max,
+        l1_penalties = l1_penalties,
+        l2_penalties = l2_penalties,
         outdir = data_output_path,
         output_name = embeddings_data_file_name
     shell:
@@ -491,7 +495,9 @@ rule compute_embeddings:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --N_min {params.N_min} \
-            --N_max {params.N_max}
+            --N_max {params.N_max} \
+            --l1_penalties {params.l1_penalties} \
+            --l2_penalties {params.l2_penalties}
         """
 rule plot_embeddings:
     input:

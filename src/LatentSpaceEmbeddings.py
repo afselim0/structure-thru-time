@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ class LatentSpaceEmbeddings:
                  n_timepoints = None,
                  n_components: int = 2):
         
-        self.stderr = np.nanmean(rates_df.rolling(window=STDERR_ROLLING_WINDOW, axis=1).std().mean())
+        self.stderr = np.nanmean(rates_df.T.rolling(window=STDERR_ROLLING_WINDOW).std().mean())
         if n_timepoints is not None:
             time_step = len(rates_df.columns) // n_timepoints
             rates_df = rates_df.iloc[:, ::int(time_step)]
@@ -65,7 +66,7 @@ class LatentSpaceEmbeddings:
             R[:, ~sampled_by_time[:,t], t] = np.nan
 
         # Parse penalties
-        self.smoothing_params = self._parse_smoothing_params(l1_penalty, l2_penalty)
+        self._parse_smoothing_params(l1_penalty, l2_penalty)
 
         if individuals:
             R_individuals = np.full((int(self.num_samples/2), int(self.num_samples/2), self.num_timepoints), np.nan)
@@ -133,7 +134,7 @@ class LatentSpaceEmbeddings:
             X[extant_samples,:,time_idx] = X_t
             X_t = X[:,:,time_idx]
             total_loss += loss
-        # X = procrustes_alignment(X)
+        X = procrustes_alignment(X)
         self.embeddings = X
         return X, total_loss
     
@@ -179,27 +180,30 @@ class LatentSpaceEmbeddings:
             "X2": X2_flat
         })
         return df
-#%%
-from PlotEmbeddings import *
-rates_df = pd.read_parquet("../results/simulations/outputs/split/data/rates.minWS10.maxWS100.V1.FS1.0.maxT10000.nT2000.parquet")
-pop_labels = pd.read_csv("../results/simulations/outputs/split/data/pop_labels.csv")
-pop_colors = pd.read_csv("../results/simulations/outputs/split/data/pop_colors.csv")
-N_min = 100
-N_max = 1e6
-n_timepoints = 200
-max_iter = 2000
-tol = 1e-16
-LSE = LatentSpaceEmbeddings(rates_df, N_min=N_min, N_max=N_max, l1_penalty=None, l2_penalty=None, n_timepoints=n_timepoints)
-X_unpenalized,loss = LSE.compute_embeddings_through_time(max_iter = max_iter, tol = tol)
-# %%
-l1_penalty = {1:100}
-l2_penalty = {1:1e-4}
-LSE._parse_smoothing_params(l1_penalty, l2_penalty)
-X,loss = LSE.compute_embeddings_coordinate_descent(X_init=X_unpenalized, max_iter = max_iter, tol = tol, num_epochs=5)
-embeddings_df = LSE.get_embeddings_df()
-# %%
-Plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=pop_labels, colors_df=pop_colors)
-Plotter.init_plot(time_scale = "linear")
-Plotter.add_sample_trajectories()
-Plotter.fig.show()
+# #%%
+# #%%
+# from PlotEmbeddings import *
+# rates_df = pd.read_parquet("../results/simulations/outputs/split/sim/data/rates.minWS50.maxWS100.V1.FS1.0.maxT10000.nT2000.parquet")
+# pop_labels = pd.read_csv("../results/simulations/outputs/split/sim/data/pop_labels.csv")
+# pop_colors = pd.read_csv("../results/simulations/outputs/split/sim/data/pop_colors.csv")
+# N_min = 100
+# N_max = 1e6
+# n_timepoints = 200
+# max_iter = 2000
+# tol = 1e-16
+# LSE = LatentSpaceEmbeddings(rates_df, N_min=N_min, N_max=N_max, l1_penalty=None, l2_penalty=None, n_timepoints=n_timepoints)
+# X_unpenalized,loss = LSE.compute_embeddings_through_time(max_iter = max_iter, tol = tol)
+# # %%
+# l1_penalty = {1:0}
+# l2_penalty = {1:1e-2}
+# LSE._parse_smoothing_params(l1_penalty, l2_penalty)
+# X,loss = LSE.compute_embeddings_coordinate_descent(X_init=X_unpenalized, max_iter = max_iter, tol = tol, num_epochs=5)
+# embeddings_df = LSE.get_embeddings_df()
+# # %%
+# Plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=pop_labels, colors_df=pop_colors)
+# Plotter.init_plot(time_scale = "linear")
+# Plotter.add_sample_trajectories()
+# Plotter.fig.show()
+# # %%
+
 # %%
