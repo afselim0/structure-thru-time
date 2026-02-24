@@ -123,13 +123,14 @@ def compute_penalty_loss_gradient(X,smoothing_params):
 
     loss = 0
     grad = np.zeros_like(X)
+    n_timepoints = X.shape[-1]
 
     for k,D in smoothing_params["diff_operators"].items():
         l1 = smoothing_params["l1"].get(k, 0)
         l2 = smoothing_params["l2"].get(k, 0)
         DX = X @ D.T
         loss += l1 * np.sum(np.abs(DX)) + l2 * np.sum(DX**2)
-        grad += l1 * np.sign(DX) @ D.T + 2 * l2 * DX @ D.T
+        grad += l1 * np.sign(DX) @ D + 2 * l2 * DX @ D
     
     return loss, grad
 
@@ -167,7 +168,7 @@ def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_
 
     return loss, grad.ravel()
 
-def compute_loss_gradient_timepoint(X_t_flat,X,R_t,N_min,epsilon = None, smoothing_params=None):
+def compute_loss_gradient_timepoint(X_t_flat,X,R_t,N_min,epsilon = None, smoothing_params=None, time_idx = None):
     """Wrapper function to to compute both loss and gradient for minimization for a given time point
 
     Args:
@@ -196,7 +197,10 @@ def compute_loss_gradient_timepoint(X_t_flat,X,R_t,N_min,epsilon = None, smoothi
     if smoothing_params is not None:
         penalty_loss, penalty_grad = compute_penalty_loss_gradient(X, smoothing_params)
         loss += penalty_loss
-        grad += penalty_grad
+        if time_idx is not None:
+            grad += penalty_grad[:,:,time_idx]
+        else:
+            grad += penalty_grad
 
     return loss, grad.ravel()
 
@@ -235,7 +239,7 @@ def compute_loss_gradient_all(X_flat,R,N_min,epsilon = None, smoothing_params=No
 
     return loss, grad.ravel()
 
-def optimize_timepoint(X_t_init, X, R_t, N_min, epsilon, smoothing_params, max_iter, tol):
+def optimize_timepoint(X_t_init, X, R_t, N_min, epsilon, smoothing_params,time_idx, max_iter, tol):
     """A single coordinate descent step.
     For a given time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization.
 
@@ -247,12 +251,13 @@ def optimize_timepoint(X_t_init, X, R_t, N_min, epsilon, smoothing_params, max_i
         smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
         max_iter (int): Maximum number of iterations for the optimizer.
         tol (float): Tolerance for the optimizer.
+        time_idx (int): Index of the current time point.
 
     Returns:
         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for the t-th time point.
     """
     result = minimize(compute_loss_gradient_timepoint, 
-                      X_t_init.ravel(), args=(X_t_init, X, R_t, N_min, epsilon, smoothing_params), 
+                      X_t_init.ravel(), args=(X, R_t, N_min, epsilon, smoothing_params, time_idx), 
                       method='L-BFGS-B', 
                       jac=True, 
                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
@@ -277,7 +282,7 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
     """
     # Optimize using L-BFGS-B for a given sample
     result = minimize(compute_loss_gradient_sample, 
-                      X_i_init.ravel(), args=(X_i_init, X, R_i, N_min, epsilon, smoothing_params), 
+                      X_i_init.ravel(), args=(X, R_i, N_min, epsilon, smoothing_params), 
                       method='L-BFGS-B', 
                       jac=True, 
                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
@@ -299,7 +304,7 @@ def optimize_all(X_init, R, N_min, epsilon, smoothing_params, max_iter, tol):
         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for all time points.
     """
     result = minimize(compute_loss_gradient_all, 
-                      X_init.ravel(), args=(X_init, R, N_min, epsilon, smoothing_params), 
+                      X_init.ravel(), args=(R, N_min, epsilon, smoothing_params), 
                       method='L-BFGS-B', 
                       jac=True, 
                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
