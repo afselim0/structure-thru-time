@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import argparse
 import tskit
@@ -43,11 +44,14 @@ def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8):
     vdata = tsinfer.VariantData(vcz_path, ancestral_state=vcf_zarr["variant_allele"][:, 0])
     inferred_ts = tsinfer.infer(vdata, recombination_rate=r)
     inferred_ts = inferred_ts.simplify()
-    dated_ts = tsdate.date(inferred_ts, mutation_rate=mu)
-    dated_ts.dump(os.path.join(output_path, f"{contig_id}.trees"))
-    
-    shutil.rmtree(f"{output_prefix}.icf")
-    shutil.rmtree(f"{output_prefix}.vcz")
+    try:
+        dated_ts = tsdate.date(inferred_ts, mutation_rate=mu)
+        dated_ts.dump(os.path.join(output_path, f"{contig_id}.trees"))
+        shutil.rmtree(f"{output_prefix}.icf")
+        shutil.rmtree(f"{output_prefix}.vcz")
+    except:
+        shutil.rmtree(f"{output_prefix}.icf")
+        shutil.rmtree(f"{output_prefix}.vcz")
     return
 
 def infer_singer(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, contig_length=1e6, num_posterior_samples = 50, thinning_interval=100, burnin=1000):

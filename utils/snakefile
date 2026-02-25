@@ -26,7 +26,7 @@ SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_s
 
 
 # Inference Parameters
-infer_method                      = read_config("infer_method", default = "tsinfer")
+infer_method                      = read_config("infer_method", default = "None")
 num_posterior_samples             = read_config("num_replicates", default = 1)
 thinning_interval                 = read_config("thinning_interval", default = 60)
 burnin                            = read_config("burnin", default = 4000)
@@ -94,10 +94,17 @@ rates_true_file_name              = "rates_true.parquet"
 rates_true_plot_file_name         = "rates_true.png"
 embeddings_true_file_name         = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.parquet"
 embeddings_true_plot_file_name    = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.html"
-sim_finished_file_name            = f"trees_ready{SIM_TAG}.txt"
-infer_finished_file_name          = f"trees_ready{SIM_TAG}.txt"
+sim_finished_file_name            = f"sim_trees_ready{SIM_TAG}.txt"
+infer_finished_file_name          = f"infer_trees_ready{SIM_TAG}.txt"
 
-trees_ready                       = f"trees_ready{SIM_TAG}.txt" if trees_dir == tree_output_path else "trees_ready.txt"
+if trees_dir == tree_output_path: # The case of simulation or inference
+    if infer_method == "None": # Simulation
+        trees_ready = sim_finished_file_name
+    else: # Inference
+        trees_ready = infer_finished_file_name
+else: # The case of using empirical trees
+    trees_ready = "trees_ready.txt"
+
 trees_ready                       = os.path.join(trees_dir, trees_ready)
 
 pdf_data_file_name                = f"coal_pdf{PDF_TAG}.parquet"

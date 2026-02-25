@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
     parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
     parser.add_argument("--tol", type=float, default=1e-12, help="Tolerance for convergence in optimization")
-    parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs for coordinate descent optimization")
+    parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     
     args = parser.parse_args()
     input = args.input
