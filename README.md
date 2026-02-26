@@ -50,7 +50,6 @@ The following are parameters that can be passed to `--config` and that affect do
 | **max_time**             | Maximum time used for computing PDFs, rates, and embeddings                  | Coalescent PDF |
 | **n_timepoints**         | Number of equally spaced time points from `t = 0` to `max_time`              | Coalescent PDF |
 | **fraction_samples**     | Fraction of samples used per contig (default: 1.0)                           | Coalescent PDF |
-| **num_threads**          | Number of parallel threads used for PDF computation                          | Coalescent PDF |
 | **min_window_size**      | Minimum window size for local regression when computing rates                | Rates          |
 | **max_window_size**      | Maximum window size for local regression when computing rates (linear growth)| Rates          |
 | **N_min**                | Population size for two samples at zero distance                             | Embeddings     |
@@ -61,4 +60,32 @@ The following are parameters that can be passed to `--config` and that affect do
 
 Since we can't push large files on github, we will start gathering interesting outputs in the directory `/project/jnovembre/STT_data` on `Midway3`.  
 
+## Simulations
+To simulate a set of tree sequences given a demography, use the rule `snakemake sim`. This rule also runs STT on the true rates from the demes file.
+TO simulate tree sequences and then run STT on them, use the rule `snakemake sim_STT`.
+For a given demogarphy, a set of independent contig of the same size are simulated with a constant mutation and recombination rate.
+
+| Parameter                | Description                                                                  | Affected files |
+|--------------------------|------------------------------------------------------------------------------|----------------|
+| **num_threads**          | Number of threads for parallel pdf computation (too much is too slow!)       | None           |
+| **demes_file_path**      | Path to the demes file to simulate                                           | All.           |
+| **num_contigs**          | Number of independent contigs to simulate                                    | All.           |
+| **contig_length**        | Number of base pairs in each contig                                          | All.           |
+| **n_sim_per_pop**        | Number of samples to simualte per population                                 | All.           |
+| **mutation_rate**        | Constant mutation rate                                                       | All.           |
+| **recombination_rate**   | Constant recombination rate                                                  | All.           |
+
+## Inference
+To infer trees from a set of simulated vcfsy, use the rule `snakemake infer`.
+TO infer tree sequences and then run STT on them, use the rule `snakemake infer_STT`.
+
+| Parameter                | Description                                                                  | Affected files |
+|--------------------------|------------------------------------------------------------------------------|----------------|
+| **num_threads**          | Number of threads for parallel pdf computation (too much is too slow!)       | None           |
+| **vcf_dir**              | Directory containing vcfs from simulated trees                               | All.           |
+| **num_contigs**          | Number of independent contigs simualted.                                     | All.           |
+| **contig_length**        | Number of base pairs in each contig                                          | All.           |
+| **burnin**               | MCMC burnin (SINGER).                                                        | All.           |
+| **num_posterior_samples**| number of posterior MCMC samples (SINGER)                                    | All.           |
+| **thinning_interval**    | MCMC thinning interval (SINGER)                                              | All.           |
 

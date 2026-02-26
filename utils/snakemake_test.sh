@@ -120,18 +120,34 @@ dempgraphy=zigzag
 #     num_threads=8 \
 #     --cores all \
 
+# snakemake STT --config \
+#     output_path=../results/empirical/Wohns/all.npp.2 \
+#     trees_dir=../data/trees/wohns_chopped \
+#     n_samples_per_pop=2 \
+#     pop_colors=../data/metadata/Wohns_pop_colors.csv \
+#     pop_labels=../data/metadata/Wohns_pop_labels.csv \
+#     min_time=1 \
+#     max_time=4000 \
+#     n_timepoints=4000 \
+#     min_window_size=100 \
+#     max_window_size=1500 \
+#     N_min=1000 \
+#     N_max=1000000 \
+#     num_threads=4 \
+#     --cores all \
+
 snakemake STT --config \
-    output_path=../results/empirical/Wohns/all.npp.2 \
-    trees_dir=../data/trees/wohns_chopped \
-    n_samples_per_pop=2 \
-    pop_colors=../data/metadata/Wohns_pop_colors.csv \
-    pop_labels=../data/metadata/Wohns_pop_labels.csv \
-    min_time=1 \
-    max_time=4000 \
-    n_timepoints=4000 \
+    output_path=../results/empirical/DeManuel/all \
+    trees_dir=../data/trees/DeManuel/chr21_chopped \
+    pop_colors=../data/metadata/DeManuel_pop_colors.csv \
+    pop_labels=../data/metadata/DeManuel_pop_labels.csv \
+    min_time=2000 \
+    max_time=100000 \
+    n_timepoints=2000 \
     min_window_size=100 \
-    max_window_size=1500 \
+    max_window_size=2000 \
     N_min=1000 \
     N_max=1000000 \
+    l2=0.01 \
     num_threads=4 \
     --cores all \
