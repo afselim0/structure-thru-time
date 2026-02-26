@@ -54,6 +54,8 @@ The following are parameters that can be passed to `--config` and that affect do
 | **max_window_size**      | Maximum window size for local regression when computing rates (linear growth)| Rates          |
 | **N_min**                | Population size for two samples at zero distance                             | Embeddings     |
 | **N_max**                | Population size for two samples at max distance                              | Embeddings     |
+| **l1**                   | list of l1 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
+| **l2**                   | list of l2 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
 | **min_time**             | Minimum time shown in plots                                                  | Plotting       |
 | **pop_labels**           | Path to population labels for each sample                                    | Plotting       |
 | **pop_colors**           | Path to population colors                                                    | Plotting       |
