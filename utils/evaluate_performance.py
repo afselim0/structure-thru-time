@@ -3,15 +3,21 @@
 import numpy as np
 import pandas as pd
 import sys
+import plotly.graph_objects as go
+import matplotlib.cm as cm
+import matplotlib.colors as colors
+from scipy.stats import spearmanr
+
 sys.path.append("../../src")
 sys.path.append("../src")
-from LatentSpaceEmbeddings import LatentSpaceEmbeddings, compute_f
+from optimization_functions import compute_f
+from plotting_style import *
 from plot_rates import plot_rates
 import argparse
 import matplotlib.pyplot as plt
 import os
 
-def reconstruct_rates(embeddings, N0):
+def reconstruct_rates(embeddings, N_min, N_max):
     embeddings_pairs = embeddings.merge(embeddings, on="time", suffixes=("_1", "_2"))
     embeddings_pairs = embeddings_pairs[embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]]
     embeddings_pairs["distance"] = np.sqrt(
@@ -22,89 +28,181 @@ def reconstruct_rates(embeddings, N0):
     .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
     .unstack("time"))
 
-    reconstructed_rates,_ = compute_f(D_df, N0)
+    reconstructed_rates,_ = compute_f(D_df, N_min)
+    # reconstructed_rates -= 1/N_max
     return reconstructed_rates
 
-def performance_across_pairs(rates, reconstructed_rates):
-    rates_norm = rates.div(rates.sum(axis=1), axis=0)
-    reconstructed_rates_norm = reconstructed_rates.div(reconstructed_rates.sum(axis=1), axis=0)
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
+    input_rates += 1/N_max
+    cmap = cm.viridis
+    input_rates.columns = input_rates.columns.astype(float)
+    reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
 
-    error = np.abs(rates_norm - reconstructed_rates_norm)
-    error /= np.mean(rates_norm)
+    assert input_rates.shape == reconstructed_rates.shape, "Input and reconstructed rates must have the same shape"
+    assert np.all(input_rates.columns.values == reconstructed_rates.columns.values), "Input and reconstructed rates must have the same time points"
+    assert input_rates.index.equals(reconstructed_rates.index), "Input and reconstructed rates must have the same samples"
+    times = input_rates.columns.astype(float)
+
+    fig, ax = plt.subplots(figsize=(6,4))
+
+    # Normalize times to [0, 1] for the colormap
+    norm = colors.Normalize(vmin=min(times), vmax=max(times))
+    for t, time in enumerate(times):
+        ax.scatter(
+            input_rates.iloc[:, t],
+            reconstructed_rates.iloc[:, t],
+            alpha=0.4,
+            s=1,
+            color=cmap(norm(time))
+        )
+    ax.set_xlabel("input rates + 1/N_max")
+    ax.set_ylabel("reconstructed rates")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.grid(True, alpha=0.3)
+    # y=x line for reference
+    ax.plot([np.min(input_rates.values), np.max(input_rates.values)], [np.min(input_rates.values), np.max(input_rates.values)], 'k--', lw=2)
+
+    # Colorbar lenged
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])  # required for older matplotlib
+    cbar = fig.colorbar(sm, ax=ax)
+    cbar.set_label("time")
+
+    ## Add r^2 value to the plot
+    input_rate_values = input_rates.values.flatten()
+    reconstructed_rate_values = reconstructed_rates.values.flatten()
+    r_squared = np.corrcoef(input_rate_values, reconstructed_rate_values)[0, 1] ** 2
+    corr, p_value = spearmanr(input_rate_values, reconstructed_rate_values)
+    ax.text(0.05, 0.95, f"$r^2$ = {r_squared:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+    ax.text(0.05, 0.90, f"Spearman $\\rho$ = {corr:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+
+    return fig
+
+def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, pop_labels, pop_colors, N_max):
+    input_rates += 1/N_max
+    input_rates.columns = input_rates.columns.astype(float)
+    reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
+
+    assert input_rates.shape == reconstructed_rates.shape, "Input and reconstructed rates must have the same shape"
+    assert np.all(input_rates.columns.values == reconstructed_rates.columns.values), "Input and reconstructed rates must have the same time points"
+    assert input_rates.index.equals(reconstructed_rates.index), "Input and reconstructed rates must have the same samples"
+
+    pairs = input_rates.index.values
+    pair_mask = np.array([(sample_id in pair) for pair in pairs])
+    pair_indices = np.where(pair_mask)[0]
+    other_sample_ids = np.array([pair[0] if pair[1] == sample_id else pair[1] for pair in pairs[pair_mask]])
+    other_sample_labels = pop_labels.set_index("sample_id").loc[other_sample_ids]["population"].values
+    other_sample_colors = pop_colors.set_index("population").loc[other_sample_labels]["color"].values
+
+    filtered_input_rates = input_rates.iloc[pair_indices].values
+    filtered_reconstructed_rates = reconstructed_rates.iloc[pair_indices].values
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    for i in range(filtered_input_rates.shape[0]):
+        ax.scatter(
+            filtered_input_rates[i, :],
+            filtered_reconstructed_rates[i, :],
+            alpha=0.4,
+            s=1,
+            color=other_sample_colors[i]
+        )
+    ax.set_xlabel("input rates + 1/N_max")
+    ax.set_ylabel("reconstructed rates")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.grid(True, alpha=0.3)
+    # y=x line for reference
+    ax.plot([np.min(filtered_input_rates), np.max(filtered_input_rates)], [np.min(filtered_input_rates), np.max(filtered_input_rates)], 'k--', lw=2)
+    ## Add r^2 value to the plot
+    input_rate_values = filtered_input_rates.flatten()
+    reconstructed_rate_values = filtered_reconstructed_rates.flatten()
+    r_squared = np.corrcoef(input_rate_values, reconstructed_rate_values)[0, 1] ** 2
+    corr, p_value = spearmanr(input_rate_values, reconstructed_rate_values)
+    ax.text(0.05, 0.95, f"$r^2$ = {r_squared:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+    ax.text(0.05, 0.90, f"Spearman $\\rho$ = {corr:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+
+    return fig
+
+def find_percent_error(input_rates, reconstructed_rates, N_max):
+    input_rates += 1/N_max
+    error = np.abs(reconstructed_rates - input_rates) / np.abs(input_rates)
+
     return error
-
+    
 def main():
     argparser = argparse.ArgumentParser(description="Evaluate performance of rate reconstruction from embeddings")
     argparser.add_argument("--embeddings", type=str, required=True, help="Path to embeddings parquet file")
     argparser.add_argument("--rates", type=str, required=True, help="Path to true rates parquet file")
     argparser.add_argument("--colors", type=str, required=True, help="Path to population colors csv file")
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
-    argparser.add_argument("--N0", type=float, default=None, help="N0 used to compute embeddings")
+    argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
+    argparser.add_argument("--N_max", type=float, default=None, help="N_max used to compute embeddings")
     argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--data_output_name", type=str, required=True, help="Name of the output file")
     argparser.add_argument("--plot_output_name", type=str, required=True, help="Name of the output file")
-    
     args = argparser.parse_args()
 
+    # Loading data
+    N_min = args.N_min
+    N_max = args.N_max
     embeddings = pd.read_parquet(args.embeddings)
     rates = pd.read_parquet(args.rates)
-
-    embeddings.columns = embeddings.columns.astype(float)
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
+    reconstructed_rates = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
 
-    LSE = LatentSpaceEmbeddings(rates)
-    N0 = LSE.N0 if args.N0 is None else args.N0
-    reconstructed_rates = reconstruct_rates(embeddings, N0=N0)
-    error = performance_across_pairs(rates, reconstructed_rates)
-    print(f"{args.data_output_path}/{args.data_output_name}")
-    error.columns = error.columns.astype(str)
-    error.to_parquet(f"{args.data_output_path}/{args.data_output_name}")
+    # True vs Reconstructed rates across all time points
+    tvr_fig = reconstructed_vs_input_all_times(rates, reconstructed_rates, N_max)
+    tvr_fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500, bbox_inches="tight")
 
+    # Percent error in reconstructed rates
+    error = find_percent_error(rates, reconstructed_rates, N_max)
+    error.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
-    # Subsetting labels_df and colors_df to active samples only
-    active_pairs = error.index.values
-    active_samples = np.unique([item for sublist in active_pairs for item in sublist])
-    pop_labels = pop_labels[pop_labels['sample_id'].isin(active_samples)]
-    populations = pop_labels['population'].unique()
-    pop_colors = pop_colors[pop_colors['population'].isin(populations)]
+    # # Subsetting labels_df and colors_df to active samples only
+    # active_pairs = error.index.values
+    # active_samples = np.unique([item for sublist in active_pairs for item in sublist])
+    # pop_labels = pop_labels[pop_labels['sample_id'].isin(active_samples)]
+    # populations = pop_labels['population'].unique()
+    # pop_colors = pop_colors[pop_colors['population'].isin(populations)]
     
-    out_png = f"{args.plot_output_path}/{args.plot_output_name}"
-    os.makedirs(args.plot_output_path, exist_ok=True)
+    # out_png = f"{args.plot_output_path}/{args.plot_output_name}"
+    # os.makedirs(args.plot_output_path, exist_ok=True)
     
-    if len(pop_colors) < 10:
-        fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
-        fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
+    # if len(pop_colors) < 10:
+    #     fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
+    #     fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
      
-        # Draft of an extra plot that would plot True vs Reconstructed Rate
-        tvsrplot = False
-        if tvsrplot:         
-            fig,ax = plt.subplots(figsize = (6,4))
-            ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
-            ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
-            ax.set_xscale("log")
-            ax.set_xlabel("Rate index")          # or whatever x represents
-            ax.set_ylabel("Rate value")          # adjust as needed
-            ax.legend()
-            fig.tight_layout()
-            fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
+    #     # Draft of an extra plot that would plot True vs Reconstructed Rate
+    #     tvsrplot = False
+    #     if tvsrplot:         
+    #         fig,ax = plt.subplots(figsize = (6,4))
+    #         ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
+    #         ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
+    #         ax.set_xscale("log")
+    #         ax.set_xlabel("Rate index")          # or whatever x represents
+    #         ax.set_ylabel("Rate value")          # adjust as needed
+    #         ax.legend()
+    #         fig.tight_layout()
+    #         fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
             
         
     
-    else:
-    # Make a small placeholder file so Snakemake sees the expected output, othrewise cluster job will fail
-        fig = plt.figure(figsize=(6, 2))
-        plt.text(
-            0.01, 0.5,
-            f"Performance plot skipped: {len(pop_colors)} populations (threshold < 10).",
-            va="center"
-        )
-        plt.axis("off")
-        fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    # else:
+    # # Make a small placeholder file so Snakemake sees the expected output, othrewise cluster job will fail
+    #     fig = plt.figure(figsize=(6, 2))
+    #     plt.text(
+    #         0.01, 0.5,
+    #         f"Performance plot skipped: {len(pop_colors)} populations (threshold < 10).",
+    #         va="center"
+    #     )
+    #     plt.axis("off")
+    #     fig.savefig(out_png, dpi=150, bbox_inches="tight")
 
-        plt.close(fig)
+    #     plt.close(fig)
 
 if __name__ == "__main__":
     main()
