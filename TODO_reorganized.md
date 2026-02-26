@@ -23,10 +23,6 @@
         - d=2, d=10
     - Special: Do admixed individuals pull their sources too much? [medium]
 
-    - visualizing performance [low]
-        - text and colors to denote residuals
-        - interactive dash?
-
 - **Finalize choice of ARG inference method**
     - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
     - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
