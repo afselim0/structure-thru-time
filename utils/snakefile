@@ -155,7 +155,7 @@ STT_targets = [
     pdf_data,
     rates_data, rates_plot,
     embeddings_data, embeddings_plot,
-    # performance_data, performance_plot
+    performance_plot, performance_data
     ]
 # =====================================================
 # General Rules
@@ -173,11 +173,11 @@ rule infer_STT: # Infer and run STT on inferred trees
 rule STT: # Run STT
     input: STT_targets
 
-# rule STT_combs: # Run STT on full dataset and on all population combinations
-#     input: 
-#         STT_targets,
-#         directory(combs_data_dir),
-#         directory(combs_plot_dir)
+rule STT_combs: # Run STT on full dataset and on all population combinations
+    input: 
+        STT_targets,
+        combs_data_dir,
+        combs_plot_dir
 
 # =====================================================
 # Specific Rules
@@ -530,35 +530,38 @@ rule plot_embeddings:
             --output_name {params.output_name} \
             --min_time {params.min_time}
         """
-# rule evaluate_performance:
-#     input:
-#         embeddings = embeddings_data,
-#         rates = rates_data,
-#         pop_colors = pop_colors,
-#         pop_labels = pop_labels,
-#         script = evaluate_performance_script
-#     output:
-#         performance_data,
-#         performance_plot
-#     params:
-#         N0=N0,
-#         data_output_path = data_output_path,
-#         plot_output_path = plot_output_path,
-#         data_output_name = performance_data_file_name,
-#         plot_output_name = performance_plot_file_name
-#     shell:
-#         """
-#         python {input.script} \
-#             --embeddings {input.embeddings} \
-#             --rates {input.rates} \
-#             --N0 {params.N0} \
-#             --colors {input.pop_colors} \
-#             --labels {input.pop_labels} \
-#             --data_output_path {params.data_output_path} \
-#             --plot_output_path {params.plot_output_path} \
-#             --data_output_name {params.data_output_name} \
-#             --plot_output_name {params.plot_output_name}
-#         """
+rule evaluate_performance:
+    input:
+        embeddings = embeddings_data,
+        rates = rates_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = evaluate_performance_script
+    output:
+        performance_data,
+        performance_plot
+    params:
+        N_min = N_min,
+        N_max = N_max,
+        data_output_path = data_output_path,
+        plot_output_path = plot_output_path,
+        data_output_name = performance_data_file_name,
+        plot_output_name = performance_plot_file_name
+    shell:
+        """
+        python {input.script} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name}
+        """
+
 # rule population_combinations:
 #     input:
 #         pop_labels = pop_labels,
@@ -568,7 +571,8 @@ rule plot_embeddings:
 #     params:
 #         data_dir = combs_data_dir,
 #         plot_dir = combs_plot_dir,
-#         N0=N0
+#         N_min = N_min,
+#         N_max = N_max
 #     output:
 #         directory(combs_data_dir),
 #         directory(combs_plot_dir)
