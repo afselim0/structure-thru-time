@@ -238,12 +238,16 @@ class CountCoalEvents:
 
         # --- Count pair-coalescence events in each time bin -------------
         time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
+        
+        # print(active_samples)
+        # print(local_pairs)
         coal_segments = ts.pair_coalescence_counts(
             sample_sets=[[i] for i in range(len(active_samples))],
             indexes=local_pairs,
             span_normalise=False,
             time_windows=time_windows,
         ).astype(self.datatype)
+        
 
         # Place results into the full (all-pairs) output array
         coal_segments_total = np.zeros(
