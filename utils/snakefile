@@ -27,7 +27,7 @@ SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_s
 
 # Inference Parameters
 infer_method                      = read_config("infer_method", default = "None")
-num_posterior_samples             = read_config("num_replicates", default = 1)
+num_posterior_samples             = read_config("num_posterior_samples", default = 1)
 thinning_interval                 = read_config("thinning_interval", default = 60)
 burnin                            = read_config("burnin", default = 4000)
 vcf_dir                           = read_config("vcf_dir", default=tree_output_path.replace(infer_method,"sim"))

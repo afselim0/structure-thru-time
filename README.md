@@ -80,10 +80,12 @@ For a given demogarphy, a set of independent contig of the same size are simulat
 ## Inference
 To infer trees from a set of simulated vcfsy, use the rule `snakemake infer`.
 TO infer tree sequences and then run STT on them, use the rule `snakemake infer_STT`.
+If you're running this using relate or singer make sure to reference the correct version of relate/singer in the file `utils/infer_trees.py`. Recommended to run this on linux.
 
 | Parameter                | Description                                                                  | Affected files |
 |--------------------------|------------------------------------------------------------------------------|----------------|
 | **num_threads**          | Number of threads for parallel pdf computation (too much is too slow!)       | None           |
+| **infer_method**         | Inference method from (tsinfer, relate, singer)                              | None           |
 | **vcf_dir**              | Directory containing vcfs from simulated trees                               | All.           |
 | **num_contigs**          | Number of independent contigs simualted.                                     | All.           |
 | **contig_length**        | Number of base pairs in each contig                                          | All.           |

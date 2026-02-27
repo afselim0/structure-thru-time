@@ -6,9 +6,6 @@
 
 
 # Specific Tasks
-- **Fast tests**
-    - Rerun chimps asap to identify what's gone awry since the 2025 set of results [high]
-
 - **Smoothing the Embeddings**
     - track loss function 
     - Determine a standard level of smoothing given standard error of rate estimates
@@ -18,7 +15,6 @@
         - Any additional outputs for additionally specified smoothing parameters
 
 - **Performance Evaluation**
-    - reconstructed rates vs input rates [high]
     - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
         - d=2, d=10
     - Special: Do admixed individuals pull their sources too much? [medium]
@@ -93,6 +89,8 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - DONE Master snakefile for running both simulations and empirical results
 - DONE Finish SINGER inference on simulated data
 - DONE Add the sample-based coordinate descent to the LatentSpaceEmbeddings.py script 
+- Done Rerun chimps asap to identify what's gone awry since the 2025 set of results 
+- DONE reconstructed rates vs input rates [high]
 
 ### Archived discussion points
 - Wohns et al and Chimp et al for UCLA talk 
