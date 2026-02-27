@@ -38,7 +38,7 @@ def main():
     print("Building plots...")
 
     embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
-    plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df,generation_time=generation_time)
+    plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
     plotter.init_plot(time_scale="log")
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()

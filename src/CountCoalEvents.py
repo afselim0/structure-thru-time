@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 """Count pairwise coalescent events across tree sequences and estimate coalescence-time PDFs.
 
@@ -98,6 +99,7 @@ class CountCoalEvents:
             raise ValueError(f"No .trees files found in directory: {ts_dir}")
 
         # --- Resolve contigs & posterior samples ------------------------
+        # Counts number of contigs and contig lengths, and extracts contig IDs from filenames.
         self._init_contigs(num_posterior_samples)
 
         # --- Choose compact dtype based on total genome length ----------
@@ -238,12 +240,16 @@ class CountCoalEvents:
 
         # --- Count pair-coalescence events in each time bin -------------
         time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
+        
+        # print(active_samples)
+        # print(local_pairs)
         coal_segments = ts.pair_coalescence_counts(
             sample_sets=[[i] for i in range(len(active_samples))],
             indexes=local_pairs,
             span_normalise=False,
             time_windows=time_windows,
         ).astype(self.datatype)
+        
 
         # Place results into the full (all-pairs) output array
         coal_segments_total = np.zeros(
@@ -444,3 +450,17 @@ class CountCoalEvents:
             .values.sum(axis=1)
             .astype(self.datatype)
         )
+# # %%
+# ts_dir = "../data/trees/DeManuel/chr21"
+# ts_files = sorted(f.name for f in Path(ts_dir).glob("*.trees"))
+# times = []
+# for ts_file in tqdm(ts_files):
+#     ts = tskit.load(os.path.join(ts_dir, ts_file))
+#     times.append(ts.nodes_time)
+# # %%
+# times = np.concatenate(times)
+# times = np.sort(times)
+# times = times[times > 0]
+# # %%
+# len(times[times<100])
+# # %%
