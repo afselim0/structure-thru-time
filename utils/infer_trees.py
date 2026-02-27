@@ -18,7 +18,7 @@ from tqdm import tqdm
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(script_dir)
 
-singer_path = os.path.join(script_dir, "singer_mac")
+singer_path = os.path.join(script_dir, "singer_linux")
 relate_path = os.path.join(script_dir, "relate_mac")
 
 def find_Ne(sim_ts_dir):
