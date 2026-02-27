@@ -166,17 +166,28 @@ class CountCoalEvents:
             # Multiple posterior samples per contig
             # File naming convention: {ContigID}_{PosteriorSampleID}.trees
             self.num_posterior_samples = num_posterior_samples
-            self.contig_ids = np.unique([
+            contig_ids = np.unique([
                 re.sub(r"_[0-9]+\.trees$", "", f) for f in self.ts_files
             ])
+            contigs_with_complete_replicates = []
+            for cid in contig_ids:
+                cid_tree_files = [f for f in self.ts_files if f.startswith(cid + "_")]
+                num_posterior_samples_found = len(cid_tree_files)
+                if num_posterior_samples_found == num_posterior_samples:
+                    contigs_with_complete_replicates.append(cid)
+                else:
+                    print(
+                        f"Warning: Contig '{cid}' has {num_posterior_samples_found} "
+                        f"posterior samples (expected {num_posterior_samples}). "
+                        "Skipping this contig."
+                    )
+            self.contig_ids = np.array(contigs_with_complete_replicates)
             self.num_contigs = len(self.contig_ids)
+            self.ts_files = [
+                f for f in self.ts_files if any(f.startswith(cid + "_") for cid in self.contig_ids)
+            ]
 
-            if len(self.ts_files) % num_posterior_samples != 0:
-                raise ValueError(
-                    f"Number of .trees files ({len(self.ts_files)}) is not "
-                    f"divisible by num_posterior_samples ({num_posterior_samples})"
-                )
-
+            print(f"using {len(self.ts_files)} tree-sequence files across {self.num_contigs} contigs with {self.num_posterior_samples} posterior samples each.")
             # Use the first posterior sample (_0) to read sequence lengths
             self.contig_lengths = np.array([
                 tskit.load(os.path.join(self.ts_dir, cid + "_0.trees")).sequence_length
