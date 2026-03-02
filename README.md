@@ -37,6 +37,8 @@ To run a particular mode of the pipeline, specify the rule associated with that 
 ## STT only
 To run STT on trees that are already inferred, use the rule `snakemake STT` **Note: Make sure that the directory that contains the trees has a file with the name `trees_ready.txt`**
 
+**Note: Computational time scales linearly with max_time and number of internal nodes in a given tree sequence. Memory scales linearly with num_timepoints**
+
 The following are parameters that can be passed to `--config` and that affect downstream results
 | Parameter                | Description                                                                  | Affected files |
 |--------------------------|------------------------------------------------------------------------------|----------------|

@@ -1,9 +1,10 @@
-
 # log files
 *.pyc
 *.DS_Store
 job_logs/
 *.ipynb
+*.err
+*.out
 
 ## Output files
 *.parquet
@@ -15,12 +16,8 @@ job_logs/
 *.mp4
 *trees*
 
-*trees*
-
 pop_colors.csv
 pop_labels.csv
-
-## Inferred Trees
 
 ## Tests
 tests/

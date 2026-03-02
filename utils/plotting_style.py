@@ -29,3 +29,4 @@ def setup_plotting_style():
     # -- Saving Options --
     rcParams['savefig.bbox'] = 'tight'
     rcParams['savefig.dpi'] = 500
+setup_plotting_style()
