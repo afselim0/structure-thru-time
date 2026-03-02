@@ -1,4 +1,3 @@
-#%%
 #!/usr/bin/env python3
 """Count pairwise coalescent events across tree sequences and estimate coalescence-time PDFs.
 
@@ -104,7 +103,7 @@ class CountCoalEvents:
 
         # --- Choose compact dtype based on total genome length ----------
         total_bp = int(np.sum(self.contig_lengths))
-        self.datatype = np.uint32 if total_bp < 2**32 else np.uint64
+        self.datatype = np.uint32 if total_bp*num_posterior_samples < 2**32 else np.uint64
 
         # --- Sample metadata -------------------------------------------
         ts_first = tskit.load(os.path.join(ts_dir, self.ts_files[0]))
@@ -194,6 +193,10 @@ class CountCoalEvents:
                 for cid in tqdm(self.contig_ids, total=self.num_contigs,
                                 desc="Reading contig lengths")
             ], dtype=np.uint64)
+
+            print(f"Total genome length across contigs: {np.sum(self.contig_lengths)} bp")
+            for cid, length in zip(self.contig_ids, self.contig_lengths):
+                print(f"  Contig '{cid}': {length} bp")
 
     def _resolve_contig_id(self, ts_file: str) -> str:
         """Extract the contig ID from a tree-sequence filename."""
@@ -347,10 +350,12 @@ class CountCoalEvents:
         # if *both* samples were selected on that contig.
         total_segments_per_pair = self._total_segments_per_pair()
 
+        print(pdf_df.sum(axis=1))
+        print(f"dividing by {total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples}")
         pdf_df = pdf_df / (
             total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples
         )
-
+        print(pdf_df.sum(axis=1))
         return pdf_df
 
     # ------------------------------------------------------------------ #
@@ -403,8 +408,9 @@ class CountCoalEvents:
         )
 
         # Aggregate chunk files
+        print("Aggregating results from parallel workers …")
         coal_segments_total: Optional[np.ndarray] = None
-        for chunk_id in range(len(chunks)):
+        for chunk_id in tqdm(range(len(chunks))):
             chunk_path = os.path.join(
                 data_output, f"coal_segments_chunk_{chunk_id}.npy"
             )
@@ -461,17 +467,3 @@ class CountCoalEvents:
             .values.sum(axis=1)
             .astype(self.datatype)
         )
-# # %%
-# ts_dir = "../data/trees/DeManuel/chr21"
-# ts_files = sorted(f.name for f in Path(ts_dir).glob("*.trees"))
-# times = []
-# for ts_file in tqdm(ts_files):
-#     ts = tskit.load(os.path.join(ts_dir, ts_file))
-#     times.append(ts.nodes_time)
-# # %%
-# times = np.concatenate(times)
-# times = np.sort(times)
-# times = times[times > 0]
-# # %%
-# len(times[times<100])
-# # %%
