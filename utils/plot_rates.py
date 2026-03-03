@@ -32,6 +32,7 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
         ax[i].set_xlabel("Time")
         ax[i].set_title(f"{populations[i]}")
         ax[i].set_xscale("log")
+        # ax[i].set_yscale("log")
         ax[i].set_ylim(top=1/min_N0)
         for j in range(len(populations)):
             pop1 = populations[i]
