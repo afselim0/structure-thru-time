@@ -180,6 +180,8 @@ class CountCoalEvents:
                         f"posterior samples (expected {num_posterior_samples}). "
                         "Skipping this contig."
                     )
+
+            # Use only contigs with the expected number of posterior samples
             self.contig_ids = np.array(contigs_with_complete_replicates)
             self.num_contigs = len(self.contig_ids)
             self.ts_files = [
@@ -194,7 +196,7 @@ class CountCoalEvents:
                                 desc="Reading contig lengths")
             ], dtype=np.uint64)
 
-            print(f"Total genome length across contigs: {np.sum(self.contig_lengths)} bp")
+            print(f"Total used genome length across contigs: {np.sum(self.contig_lengths)} bp")
             for cid, length in zip(self.contig_ids, self.contig_lengths):
                 print(f"  Contig '{cid}': {length} bp")
 
