@@ -13,19 +13,17 @@ conda activate /project/jnovembre/afselim/STT
 
 full_ts_dir=../../../data/external_private/chimp_data/scratch_isilon/groups/compgen/nhermosilla/PROJECTS/Structure_thru_time/pantro_data/SINGER/parallel_SINGER/pan_pbl
 snakemake STT --config \
-    output_path=../results/empirical/DeManuel/Western_npp.2 \
+    output_path=../results/empirical/DeManuel/all_chroms_all_samples_1 \
     trees_dir="$full_ts_dir" \
     pop_colors=../data/metadata/DeManuel_pop_colors.csv \
     pop_labels=../data/metadata/DeManuel_pop_labels.csv \
     num_posterior_samples=100 \
-    pops=Western \
-    n_samples_per_pop=2 \
-    min_time=1 \
+    min_time=200 \
     max_time=1000 \
     n_timepoints=1000 \
-    min_window_size=100 \
-    max_window_size=200 \
+    min_window_size=400 \
+    max_window_size=500 \
     N_min=1 \
-    N_max=10000000000000000 \
+    N_max=2e10 \
     num_threads=16 \
     --cores all
