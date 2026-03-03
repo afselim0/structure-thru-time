@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-MIN_RATE = 1e-16
+MIN_RATE = 1e-12
 
 def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_timepoints, time_step):
     # -------------------------
