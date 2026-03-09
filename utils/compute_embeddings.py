@@ -18,8 +18,8 @@ def main():
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
-    parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
-    parser.add_argument("--tol", type=float, default=1e-12, help="Tolerance for convergence in optimization")
+    # parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
+    # parser.add_argument("--tol", type=float, default=1e-16, help="Tolerance for convergence in optimization")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     
     args = parser.parse_args()
@@ -40,10 +40,10 @@ def main():
     rates_df = pd.read_parquet(input)
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
     if l1_penalties is None and l2_penalties is None:
-        X,loss = LSE.compute_embeddings_through_time(max_iter = args.max_iter, tol = args.tol)
+        X,loss = LSE.compute_embeddings_through_time()
     else:
-        X_unpenalized,loss_unpenalized = LSE.compute_embeddings_through_time(max_iter = args.max_iter, tol = args.tol)
-        X,loss = LSE.compute_embeddings_coordinate_descent(X_init=X_unpenalized, max_iter = args.max_iter, tol = args.tol, num_epochs=args.num_epochs)
+        X_unpenalized,loss_unpenalized = LSE.compute_embeddings_through_time()
+        X,loss = LSE.compute_embeddings_coordinate_descent(X_init=X_unpenalized, num_epochs=args.num_epochs)
 
     embeddings_df = LSE.get_embeddings_df()
     embeddings_df.columns = embeddings_df.columns.astype(str)

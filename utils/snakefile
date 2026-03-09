@@ -62,6 +62,7 @@ pop_labels                        = read_config("pop_labels", os.path.join(outpu
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
 COMPUTE_RATES_SCRIPT              = "../src/compute_coal_rates.py"
 COMPUTE_EMBEDDINGS_SCRIPT         = "../src/LatentSpaceEmbeddings.py"
+OPTIMIZATION_FUNCTIONS_SCRIPT         = "../src/optimization_functions.py"
 PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
 
 # Util Scripts
@@ -494,7 +495,8 @@ rule compute_embeddings:
     input:
         rates = rates_data,
         script = compute_embeedings_wrapper_script,
-        main_script = COMPUTE_EMBEDDINGS_SCRIPT
+        main_script = COMPUTE_EMBEDDINGS_SCRIPT,
+        support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
     output:
         embeddings_data
     params:

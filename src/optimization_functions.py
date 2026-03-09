@@ -260,7 +260,7 @@ def optimize_timepoint(X_t_init, X, R_t, N_min, epsilon, smoothing_params,time_i
                       X_t_init.ravel(), args=(X, R_t, N_min, epsilon, smoothing_params, time_idx), 
                       method='L-BFGS-B', 
                       jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
     X_opt = result.x.reshape(X_t_init.shape)
     return X_opt, result.fun
 
@@ -285,7 +285,7 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
                       X_i_init.ravel(), args=(X, R_i, N_min, epsilon, smoothing_params), 
                       method='L-BFGS-B', 
                       jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
     X_opt = result.x.reshape(X_i_init.shape)
     return X_opt, result.fun
 
@@ -307,7 +307,7 @@ def optimize_all(X_init, R, N_min, epsilon, smoothing_params, max_iter, tol):
                       X_init.ravel(), args=(R, N_min, epsilon, smoothing_params), 
                       method='L-BFGS-B', 
                       jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol})
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
     X_opt = result.x.reshape(X_init.shape)
     return X_opt, result.fun
 

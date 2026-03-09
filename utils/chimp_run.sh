@@ -10,9 +10,9 @@ snakemake STT --config \
     min_time=1 \
     max_time=1000 \
     n_timepoints=1000 \
-    min_window_size=100 \
-    max_window_size=100 \
+    min_window_size=500 \
+    max_window_size=500 \
     N_min=1 \
-    N_max=10000000000000000 \
+    N_max=100000000 \
     num_threads=16 \
-    --cores all \
+    --cores all

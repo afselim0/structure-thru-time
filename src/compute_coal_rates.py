@@ -3,6 +3,8 @@
 import numpy as np
 import pandas as pd
 
+MIN_RATE = 1e-12
+
 def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_timepoints, time_step):
     # -------------------------
     # Window sizes (in indices)
@@ -100,12 +102,13 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
         S[t, left:] = coeffs
     return S
 
-def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size):
+def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, min_rate = MIN_RATE):
     times = pdf_df.columns
     time_step = times[1]-times[0]
     survival_df = 1 - pdf_df.cumsum(axis=1)
     H = -np.log(survival_df)
     S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, len(times), time_step)
     rates = H.values @ S.T
+    rates[rates<min_rate] = 0
     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
     return rates_df
