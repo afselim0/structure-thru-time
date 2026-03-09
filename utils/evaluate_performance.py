@@ -12,7 +12,6 @@ sys.path.append("../../src")
 sys.path.append("../src")
 from optimization_functions import compute_f
 from plotting_style import *
-from plot_rates import plot_rates
 import argparse
 import matplotlib.pyplot as plt
 import os
