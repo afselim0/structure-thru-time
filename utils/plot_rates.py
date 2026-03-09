@@ -14,25 +14,26 @@ INDIVIDUAL_LINE_WIDTH = 0.2
 INDIVIDUAL_LINE_ALPHA = 0.05
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
-min_N0 = 5000
 # ___________________________________________________________________________
-def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
+def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate"):
     setup_plotting_style()
     populations = pop_labels['population'].unique()
 
     n_populations = len(populations)
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-    times = rates_df.columns.astype(float).astype(int)
+    times = rates_df.columns.astype(float)
 
     fig, ax = plt.subplots(1,len(populations), figsize=(6*len(populations),4),sharex=True,sharey=True)
     fig.supylabel(ylabel)
     for i in range(len(populations)):
         if n_populations == 1:  
             ax = [ax]
-        ax[i].set_xlabel("Time")
+        ax[i].set_xlabel("Time (generations ago)")
         ax[i].set_title(f"{populations[i]}")
         ax[i].set_xscale("log")
-        ax[i].set_ylim(top=1/min_N0)
+        if max_rate_plot is not None:
+            ax[i].set_ylim(top=max_rate_plot)
+        ax[i].set_xlim(left=float(min_time))
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
@@ -68,12 +69,31 @@ def plot_rates(rates_df, pop_colors, pop_labels, ylabel="Coalescence Rate"):
 
     return fig
 
+def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="Coalescence Rate"):
+    setup_plotting_style()
+    times = rates_df.columns.astype(float)
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.set_xlabel("Time (generations ago)")
+    ax.set_ylabel(ylabel)
+    ax.set_xscale("log")
+    if max_rate_plot is not None:
+        ax.set_ylim(top=max_rate_plot)
+    ax.set_xlim(left=float(min_time))
+    for pair in rates_df.index.values:
+        ax.plot(times, rates_df.loc[pair,:].values, color="grey", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
+    mean_rates = np.mean(rates_df.values, axis=0)
+    ax.plot(times, mean_rates, color="black", lw=MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
+    fig.tight_layout()
+    return fig
+
 
 def main():
     parser = argparse.ArgumentParser(description="Plot coalescence rates")
     parser.add_argument("--input", required=True, help="Path to rates parquet file")
     parser.add_argument("--colors", required=True, help="Path to population colors parquet file")
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
+    parser.add_argument("--min_time", type=float, required=True, help="Minimum time for plotting")
+    parser.add_argument("--max_rate_plot", type=float, required=True, help="Maximum rate for plotting")
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
     
@@ -83,6 +103,8 @@ def main():
     labels_df = pd.read_csv(args.labels)
     output_path = args.output_path
     output_name = args.output_name
+    min_time = args.min_time
+    max_rate_plot = args.max_rate_plot
 
     # Subsetting labels_df and colors_df to active samples only
     active_pairs = rates_df.index.values
@@ -91,7 +113,10 @@ def main():
     populations = pop_labels['population'].unique()
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
-    rates_fig = plot_rates(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels)
+    if len(populations) <= 6 and len(populations) > 1:
+        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot)
+    else:
+        rates_fig = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
     rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
 
 

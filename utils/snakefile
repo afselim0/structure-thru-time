@@ -38,6 +38,7 @@ min_window_size                   = read_config("min_window_size", default = 50)
 max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
+max_rate_plot                     = read_config("max_rate_plot", default = 1/1000)
 
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
@@ -46,6 +47,7 @@ RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_s
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
+min_time                          = int(max(min_time,min_window_size/2)) # To avoid discontinuity at the edges, can be turned off
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
 STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}]" + RATES_TAG
@@ -273,7 +275,9 @@ rule plot_rates_true:
         rates_true_plot
     params:
         outdir = plot_output_path,
-        output_name = rates_true_plot_file_name
+        output_name = rates_true_plot_file_name,
+        min_time = min_time,
+        max_rate_plot = max_rate_plot
     shell:
         """
         mkdir -p {params.outdir}
@@ -281,6 +285,8 @@ rule plot_rates_true:
             --input {input.rates} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
+            --min_time {params.min_time} \
+            --max_rate_plot {params.max_rate_plot} \
             --output_path {params.outdir} \
             --output_name {params.output_name}
         """
@@ -468,7 +474,9 @@ rule plot_rates:
         rates_plot
     params:
         outdir = plot_output_path,
-        output_name = rates_plot_file_name
+        output_name = rates_plot_file_name,
+        min_time = min_time,
+        max_rate_plot = max_rate_plot
     shell:
         """
         mkdir -p {params.outdir}
@@ -476,6 +484,8 @@ rule plot_rates:
             --input {input.rates} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
+            --min_time {params.min_time} \
+            --max_rate_plot {params.max_rate_plot} \
             --output_path {params.outdir} \
             --output_name {params.output_name}
         """
