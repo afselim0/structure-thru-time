@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
     parser.add_argument("--min_time", default=0, type=float,help="Minimum time for plotting")
+    parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
 
     print("Reading files...")
@@ -27,6 +28,10 @@ def main():
     output_name = args.output_name
     min_time = args.min_time
     generation_time = args.generation_time
+    if args.lims == "None":
+        lims = None
+    else:
+        lims = float(args.lims)
     
     # subsetting labels_df and colors_df to active samples only
     active_samples = embeddings_df.sample_id.unique()
@@ -39,7 +44,7 @@ def main():
 
     embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
     plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-    plotter.init_plot(time_scale="log")
+    plotter.init_plot(time_scale="log",xy_lims=args.lims)
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()

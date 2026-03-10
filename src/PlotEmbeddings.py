@@ -223,6 +223,7 @@ class PlotEmbeddings:
         axis_background: str = "whitesmoke",
         pad_frac: float = 0.05,
         aspectratio: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        xy_lims: Optional[float] = None,
     ) -> None:
         """
         Initialize an empty Plotly Figure with consistent axis ranges.
@@ -269,19 +270,24 @@ class PlotEmbeddings:
         )
 
         # Equal scaling for X and Y
-        x_min = float(df[self.xcol].min())
-        x_max = float(df[self.xcol].max())
-        y_min = float(df[self.ycol].min())
-        y_max = float(df[self.ycol].max())
+        if xy_lims is not None:
+            x_range = (-float(xy_lims), float(xy_lims))
+            y_range = (-float(xy_lims), float(xy_lims))
 
-        common_min = float(min(x_min, y_min))
-        common_max = float(max(x_max, y_max))
-        pad = float(pad_frac) * (common_max - common_min if common_max > common_min else 1.0)
-        common_min -= pad
-        common_max += pad
+        else:
+            x_min = float(df[self.xcol].min())
+            x_max = float(df[self.xcol].max())
+            y_min = float(df[self.ycol].min())
+            y_max = float(df[self.ycol].max())
 
-        x_range = (common_min, common_max)
-        y_range = (common_min, common_max)
+            common_min = float(min(x_min, y_min))
+            common_max = float(max(x_max, y_max))
+            pad = float(pad_frac) * (common_max - common_min if common_max > common_min else 1.0)
+            common_min -= pad
+            common_max += pad
+
+            x_range = (common_min, common_max)
+            y_range = (common_min, common_max)
 
         # Z ticks based on plotting-time (so log scale and layers agree)
         t = df[self.tplot_col].to_numpy(dtype=float)
