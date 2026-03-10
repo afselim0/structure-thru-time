@@ -6,7 +6,7 @@ num_threads: 12
 # Simulation Parameters
 num_contigs: 500
 contig_length: 5000000
-n_sim_per_pop: 20
+n_sim_per_pop: 10
 mutation_rate: 1.2e-8
 recombination_rate: 1.2e-8
 
@@ -26,5 +26,5 @@ N_max: 1000000
 
 # Plotting parameters
 min_time: 1
-max_rate_plot: 0.0001
+max_rate_plot: 0.0002
 embeddings_plot_lims: 1000000
