@@ -9,7 +9,7 @@ for configfile in "$PATH_TO_CONFIG_FILES"/*; do
   demography=$(grep -E '^(demography|dempgraphy):' "$configfile" | head -n1 | awk '{print $2}')
   
   # Optionally, handle missing demography
-  if [[ -z "$demography" ]](); then
+  if [[ -z "$demography" ]]; then
     echo "Could not find demography/dempgraphy label in $configfile"
     continue
   fi
