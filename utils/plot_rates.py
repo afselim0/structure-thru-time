@@ -32,7 +32,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
         ax[i].set_xscale("log")
         if max_rate_plot is not None:
             ax[i].set_ylim(top=max_rate_plot)
-        ax.set_xlim(float(min_time), times.max())
+        ax[i].set_xlim(float(min_time), times.max())
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
