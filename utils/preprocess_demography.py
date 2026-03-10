@@ -35,12 +35,11 @@ def main():
     parser.add_argument("--output_path", required=True, help="Output directory for preprocessed demography data", type=str)
     parser.add_argument("--n", required=True, help="Number of diploid samples per population", type=int)
 
-    print(f"preprocessing demography from the demes file: {args.demes_file_path} to generate population labels and colors for {args.n} diploid samples per population")
-
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
     output_path = args.output_path
     n = args.n
+    print(f"preprocessing demography from the demes file: {demes_file_path} to generate population labels and colors for {n} diploid samples per population")
     pop_labels, pop_colors = preprocess_demography(demes_file_path=demes_file_path,n_samples_per_pop=n)
     pop_colors.to_csv(os.path.join(output_path,"pop_colors.csv"))
     pop_labels.to_csv(os.path.join(output_path,"pop_labels.csv"))

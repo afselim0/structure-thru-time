@@ -352,12 +352,12 @@ class CountCoalEvents:
         # if *both* samples were selected on that contig.
         total_segments_per_pair = self._total_segments_per_pair()
 
-        print(pdf_df.sum(axis=1))
-        print(f"dividing by {total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples}")
+        # print(pdf_df.sum(axis=1))
+        # print(f"dividing by {total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples}")
         pdf_df = pdf_df / (
             total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples
         )
-        print(pdf_df.sum(axis=1))
+        # print(pdf_df.sum(axis=1))
         return pdf_df
 
     # ------------------------------------------------------------------ #
