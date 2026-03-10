@@ -50,6 +50,7 @@ min_time                          = read_config("min_time", default = 1) # For p
 min_time                          = int(max(min_time,min_window_size/2)) # To avoid discontinuity at the edges, can be turned off
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
+embeddings_plot_lims              = read_config("embeddings_plot_lims", default="None")
 STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}]" + RATES_TAG
 
 # Empirical dataset parameters
@@ -326,7 +327,8 @@ rule plot_embeddings_true:
     params:
         outdir = plot_output_path,
         output_name = embeddings_true_plot_file_name,
-        min_time = min_time
+        min_time = min_time,
+        embeddings_plot_lims = embeddings_plot_lims
     shell:
         """
         mkdir -p {params.outdir}
@@ -336,6 +338,7 @@ rule plot_embeddings_true:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
+            --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time}
         """
 
@@ -530,7 +533,8 @@ rule plot_embeddings:
     params:
         outdir = plot_output_path,
         output_name = embeddings_plot_file_name,
-        min_time=min_time
+        min_time=min_time,
+        embeddings_plot_lims = embeddings_plot_lims
     shell:
         """
         mkdir -p {params.outdir}
@@ -540,6 +544,7 @@ rule plot_embeddings:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
+            --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time}
         """
 rule evaluate_performance:
