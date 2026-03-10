@@ -52,9 +52,9 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
             mean_rates = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
-            ax[i].plot(times, mean_rates, color="black" if pop1 == pop2 else color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
             for pair in sample_pairs:
                 ax[i].plot(times, rates_df.loc[pair,:].values, color=color, lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
+            ax[i].plot(times, mean_rates, color="black" if pop1 == pop2 else color, lw = MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
 
     legend_handles = [Line2D(
             [0], [0],
