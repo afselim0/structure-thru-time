@@ -1,4 +1,3 @@
-#%%
 #!/usr/bin/env python3
 import pandas as pd
 import argparse
@@ -11,7 +10,7 @@ from matplotlib.lines import Line2D
 
 # ______________________________Plotting Params______________________________
 INDIVIDUAL_LINE_WIDTH = 0.2
-INDIVIDUAL_LINE_ALPHA = 0.05
+INDIVIDUAL_LINE_ALPHA = 1
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
@@ -33,7 +32,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
         ax[i].set_xscale("log")
         if max_rate_plot is not None:
             ax[i].set_ylim(top=max_rate_plot)
-        ax[i].set_xlim(left=float(min_time))
+        ax.set_xlim(float(min_time), times.max())
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
@@ -78,7 +77,7 @@ def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="
     ax.set_xscale("log")
     if max_rate_plot is not None:
         ax.set_ylim(top=max_rate_plot)
-    ax.set_xlim(left=float(min_time))
+    ax.set_xlim(float(min_time), times.max())
     for pair in rates_df.index.values:
         ax.plot(times, rates_df.loc[pair,:].values, color="grey", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
     mean_rates = np.mean(rates_df.values, axis=0)
