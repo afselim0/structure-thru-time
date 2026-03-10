@@ -16,23 +16,41 @@ stdpopsim_demes_dir=../data/demes/stdpopsim
 ## Simulate
 dempgraphy=zigzag
 
-# snakemake sim_STT --cores all --config \
-#     demes_file_path="$main_demes_dir"/"$dempgraphy".yaml \
-#     output_path=../results/simulations/outputs/"$dempgraphy"/sim \
-#     num_contigs=500 \
-#     contig_length=5e6 \
-#     n_sim_per_pop=20 \
-#     max_time=40000 \
-#     n_timepoints=2000 \
-#     min_window_size=50 \
-#     max_window_size=100 \
-#     n_sim_per_pop=10 \
-#     N_min=100 \
-#     N_max=100000 \
-#     min_time=100 \
-#     num_threads=12 \
-    # l1=1e-3,1e-2 \
-    # l2=1e-2
+num_contigs=500
+contig_length=5000000
+n_sim_per_pop=20
+
+min_time=1
+max_time=40000
+n_timepoints=10000
+min_window_size=20
+max_window_size=100
+N_min=1000
+N_max=1000000
+max_rate_plot=0.0001
+
+l1=1e-3,1e-2
+l2=1e-2
+num_threads=12
+
+snakemake sim_STT --cores all --config \
+    demes_file_path="$main_demes_dir"/"$dempgraphy".yaml \
+    output_path=../results/simulations/outputs/"$dempgraphy"/sim \
+    num_contigs=$num_contigs \
+    contig_length=$contig_length \
+    n_sim_per_pop=$n_sim_per_pop \
+    max_time=$max_time \
+    n_timepoints=$n_timepoints \
+    min_window_size=$min_window_size \
+    max_window_size=$max_window_size \
+    n_sim_per_pop=$n_sim_per_pop \
+    N_min=$N_min \
+    N_max=$N_max \
+    min_time=$min_time \
+    max_rate_plot=$max_rate_plot \
+    num_threads=$num_threads \
+    # l1="$l1" \
+    # l2="$l2"
     
 ## Infer
 ### 1. tsinfer
@@ -57,27 +75,27 @@ dempgraphy=zigzag
 #     burnin=500 \
 #     num_threads=12
     
-# ### 2. relate
-# infer_method=relate
-# snakemake infer_STT --cores all --config \
-#     vcf_dir=../results/simulations/outputs/"$dempgraphy"/sim/trees \
-#     output_path=../results/simulations/outputs/"$dempgraphy"/"$infer_method" \
-#     infer_method="$infer_method" \
-#     num_contigs=2500 \
-#     contig_length=1e6 \
-#     n_sim_per_pop=20 \
-#     max_time=10000 \
-#     n_timepoints=2000 \
-#     min_window_size=20 \
-#     max_window_size=200 \
-#     n_sim_per_pop=10 \
-#     N_min=100 \
-#     N_max=100000 \
-#     min_time=100 \
-#     num_posterior_samples=5 \
-#     thinning_interval=10 \
-#     burnin=500 \
-#     num_threads=12
+### 2. relate
+infer_method=relate
+snakemake infer_STT --cores all --config \
+    vcf_dir=../results/simulations/outputs/"$dempgraphy"/sim/trees \
+    output_path=../results/simulations/outputs/"$dempgraphy"/"$infer_method" \
+    infer_method="$infer_method" \
+    num_contigs=$num_contigs \
+    contig_length=$contig_length \
+    n_sim_per_pop=$n_sim_per_pop \
+    max_time=$max_time \
+    n_timepoints=$n_timepoints \
+    min_window_size=$min_window_size \
+    max_window_size=$max_window_size \
+    n_sim_per_pop=$n_sim_per_pop \
+    N_min=$N_min \
+    N_max=$N_max \
+    min_time=$min_time \
+    max_rate_plot=$max_rate_plot \
+    num_threads=$num_threads \
+    # l1="$l1" \
+    # l2="$l2"
 
 # ### 3. singer
 # infer_method=singer
@@ -155,20 +173,20 @@ dempgraphy=zigzag
 #     --cores all \
 
 # ## Pop Choices
-pops=Western,Eastern
-snakemake STT --config \
-    output_path=../results/empirical/DeManuel/"$pops" \
-    trees_dir=../data/trees/DeManuel/chr21 \
-    pop_colors=../data/metadata/DeManuel_pop_colors.csv \
-    pop_labels=../data/metadata/DeManuel_pop_labels.csv \
-    pops="$pops" \
-    num_posterior_samples=100 \
-    min_time=1 \
-    max_time=2000 \
-    n_timepoints=2000 \
-    min_window_size=1000 \
-    max_window_size=1500 \
-    N_min=1 \
-    N_max=10000000000000000000 \
-    num_threads=10 \
-    --cores all \
+# pops=Western,Eastern
+# snakemake STT --config \
+#     output_path=../results/empirical/DeManuel/"$pops" \
+#     trees_dir=../data/trees/DeManuel/chr21 \
+#     pop_colors=../data/metadata/DeManuel_pop_colors.csv \
+#     pop_labels=../data/metadata/DeManuel_pop_labels.csv \
+#     pops="$pops" \
+#     num_posterior_samples=100 \
+#     min_time=1 \
+#     max_time=2000 \
+#     n_timepoints=2000 \
+#     min_window_size=1000 \
+#     max_window_size=1500 \
+#     N_min=1 \
+#     N_max=10000000000000000000 \
+#     num_threads=10 \
+#     --cores all \
