@@ -5,6 +5,7 @@ import pandas as pd
 sys.path.append("../../src")
 sys.path.append("../src")
 sys.path.append("src")
+# import support_tube
 
 from PlotEmbeddings import PlotEmbeddings
 
@@ -47,12 +48,19 @@ def main():
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()
-    # plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
-    # plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
-    plotter.fig.write_html(f"{output_path}/{output_basename}.html")
-    # plotter.add_convex_hull()
-    # plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
     plotter.fig.show()
+    plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+    plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
+    plotter.fig.write_html(f"{output_path}/{output_basename}.html")
+    if len(populations) <=5:
+        plotter.add_support_tube()
+        plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
+
+        plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
+        plotter.init_plot(time_scale="log",xy_lims=args.lims)
+        plotter.add_support_tube()
+        plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
+
     
 if __name__ == "__main__":
     main()

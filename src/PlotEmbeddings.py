@@ -491,7 +491,8 @@ class PlotEmbeddings:
             return
 
         try:
-            from utils import support_tube  # type: ignore
+            # from utils import support_tube  # type: ignore
+            import support_tube
         except Exception as e:
             raise ImportError(
                 "add_support_tube() requires utils/support_tube.py to exist and be importable."
