@@ -58,9 +58,12 @@ The following are parameters that can be passed to `--config` and that affect do
 | **N_max**                | Population size for two samples at max distance                              | Embeddings     |
 | **l1**                   | list of l1 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
 | **l2**                   | list of l2 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
+| **max_rate_plot**        | Maximum rate (y-axis) in rate plots (for easy comparisons)                   | Plotting       |
 | **min_time**             | Minimum time shown in plots                                                  | Plotting       |
+| **embeddings_plot_lims** | Limits of X and Y axes in embeddings plots (for easy comparisons)            | Plotting       |
 | **pop_labels**           | Path to population labels for each sample                                    | Plotting       |
 | **pop_colors**           | Path to population colors                                                    | Plotting       |
+
 
 Since we can't push large files on github, we will start gathering interesting outputs in the directory `/project/jnovembre/STT_data` on `Midway3`.  
 
