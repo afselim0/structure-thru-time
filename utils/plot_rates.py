@@ -10,7 +10,7 @@ from matplotlib.lines import Line2D
 
 # ______________________________Plotting Params______________________________
 INDIVIDUAL_LINE_WIDTH = 0.2
-INDIVIDUAL_LINE_ALPHA = 1
+INDIVIDUAL_LINE_ALPHA = 0.2
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
@@ -37,7 +37,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
             pop1 = populations[i]
             pop2 = populations[j]
             if pop1 == pop2:
-                color = "grey"
+                color = "black"
             else:
                 color = pop_colors_dict[pop2]
             pop1_samples = pop_labels[pop_labels['population'] == pop1]['sample_id'].values
@@ -79,7 +79,7 @@ def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="
         ax.set_ylim(top=max_rate_plot)
     ax.set_xlim(float(min_time), times.max())
     for pair in rates_df.index.values:
-        ax.plot(times, rates_df.loc[pair,:].values, color="grey", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
+        ax.plot(times, rates_df.loc[pair,:].values, color="black", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
     mean_rates = np.mean(rates_df.values, axis=0)
     ax.plot(times, mean_rates, color="black", lw=MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
     fig.tight_layout()
