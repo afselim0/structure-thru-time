@@ -19,7 +19,6 @@ def main():
     parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
 
-    print("Reading files...")
     args = parser.parse_args()
     embeddings_df = pd.read_parquet(args.input)
     colors_df = pd.read_csv(args.colors)
@@ -40,7 +39,7 @@ def main():
     colors_df = colors_df[colors_df['population'].isin(populations)]
 
     output_basename = output_name.removesuffix(".html")
-    print("Building plots...")
+    print(f"Building Embeddings plots for embeddings file: {args.input}")
 
     embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
     plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)

@@ -7,7 +7,7 @@ output_path=""
 infer_method=""
 configfile=""
 
-while [[ $# -gt 0 ]](); do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     -o|--output_path)
       output_path="$2"
@@ -23,20 +23,22 @@ while [[ $# -gt 0 ]](); do
       ;;
     *)
       echo "Unknown argument: $1"
-      echo "Usage: $0 -o <output_path> -m <infer_method> -p <configfile>"
+      echo "Usage: $0 -o <output_path> -i <infer_method> -p <configfile>"
       exit 1
       ;;
   esac
 done
 
 # Check for required arguments
-if [[ -z "$output_path" ]]() || [[ -z "$infer_method" ]]() || [[ -z "$configfile" ]](); then
-  echo "Usage: $0 -o <output_path> -m <infer_method> -p <configfile>"
+if [[ -z "$output_path" ]] || [[ -z "$infer_method" ]] || [[ -z "$configfile" ]]; then
+  echo "Usage: $0 -o <output_path> -i <infer_method> -p <configfile>"
   exit 1
 fi
 
-snakemake --configfile "$configfile" \
-  --config output_path="$output_path"/sim infer_method="$infer_method"
+snakemake sim_STT --configfile "$configfile" \
+  --config output_path="$output_path"/sim\
+  --cores all
 
-snakemake --configfile "$configfile" \
-  --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees
+snakemake infer_STT --configfile "$configfile" \
+  --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
+  --cores all

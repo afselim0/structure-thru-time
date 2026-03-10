@@ -37,6 +37,7 @@ def main():
     n_samples_per_pop = None if n_samples_per_pop == -1 else n_samples_per_pop
     chosen_pops = None if chosen_pops == ["all"] else chosen_pops
 
+    print(f"estimating the probability density funciton of pairwise coalescent times for trees in {input_path}")
     os.makedirs(output_path, exist_ok=True)
     all_pops = population_labels["population"].unique()
     assert chosen_pops is None or np.all(np.isin(chosen_pops, all_pops)), "Some chosen populations are not in the population labels file."

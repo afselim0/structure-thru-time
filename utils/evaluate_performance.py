@@ -153,6 +153,7 @@ def main():
     pop_labels = pd.read_csv(args.labels)
     reconstructed_rates = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
 
+    print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
     # True vs Reconstructed rates across all time points
     tvr_fig = reconstructed_vs_input_all_times(rates, reconstructed_rates, N_max)
     tvr_fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500, bbox_inches="tight")

@@ -66,6 +66,7 @@ def main():
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
     
+    print(f"Running latent space embeddings and plotting for all population combinations using rates from file: {args.rates_file}")
     run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N0, generation_time)
 
 if __name__ == "__main__":

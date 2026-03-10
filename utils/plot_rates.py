@@ -105,6 +105,8 @@ def main():
     min_time = args.min_time
     max_rate_plot = args.max_rate_plot
 
+    print(f"Plotting coalescence rates from file: {args.input}")
+
     # Subsetting labels_df and colors_df to active samples only
     active_pairs = rates_df.index.values
     active_samples = np.unique([item for sublist in active_pairs for item in sublist])

@@ -165,6 +165,7 @@ def main():
     num_threads = args.num_threads
     Ne = find_Ne(vcf_dir)
 
+    print(f"inferring trees from vcf files in {vcf_dir} using method {method}")
     time_taken = infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin, num_threads)
 
     with open(f"{output_path}/{output_name}", "w") as f:

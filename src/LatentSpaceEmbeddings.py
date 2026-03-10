@@ -113,7 +113,6 @@ class LatentSpaceEmbeddings:
         return X, loss
 
     def compute_embeddings_through_time(self, X_init = None, max_iter=MAX_ITER, tol=TOLERANCE, smooth=False):
-        print(f"tolerance: {tol}")
         if smooth:
             smoothing_params = self.smoothing_params
         else:

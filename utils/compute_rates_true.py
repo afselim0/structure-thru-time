@@ -69,6 +69,7 @@ def main():
     labels_path = args.labels
     delta_t = args.delta_t
 
+    print(f"Computing true rates for the demes file: {demes_file_path}")
     # if delta_t is None:
     #     delta_t = max_time // 1000  # Default to 1000 time points
 

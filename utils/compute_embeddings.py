@@ -37,6 +37,7 @@ def main():
     if l2_penalties is not None:
         l2_penalties = {i+1: float(l2) for i, l2 in enumerate(l2_penalties.split(","))} 
 
+    print(f"computing embeddings for {input}")
     rates_df = pd.read_parquet(input)
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
     if l1_penalties is None and l2_penalties is None:
