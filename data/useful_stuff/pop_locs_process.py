@@ -40,7 +40,7 @@ world = gpd.read_file(url)
 fig, ax = plt.subplots(figsize=(12,6), dpi= 500)
 
 # Plot world map
-world.plot(ax=ax, color="lightgray", edgecolor="black")
+world.plot(ax=ax, color="lightgray", edgecolor=None)
 
 # Plot your points
 ax.scatter(df["lng"], df["lat"], c=df["color"], s=50)
@@ -53,8 +53,8 @@ for _, row in df.iterrows():
     ax.text(
         row["lng"],
         row["lat"],
-        row["pop"],
-        fontsize=6,
+        row["pop"][:3],
+        fontsize=8,
         ha="left",
         va="bottom"
     )
