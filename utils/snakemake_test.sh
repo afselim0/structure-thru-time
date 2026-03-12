@@ -144,7 +144,7 @@ snakemake STT --config \
     n_samples_per_pop=2 \
     pop_colors=../data/metadata/Wohns_pop_colors.csv \
     pop_labels=../data/metadata/Wohns_pop_labels.csv \
-    min_time=1 \
+    min_time=50 \
     max_time=4000 \
     n_timepoints=4000 \
     min_window_size=100 \
@@ -153,7 +153,8 @@ snakemake STT --config \
     N_max=10000000 \
     num_threads=4 \
     max_rate_plot=0.0002 \
-    embeddings_plot_lims=6000000 \
+    embeddings_plot_lims=8000000 \
+    embeddings_max_time=100000 \
     --cores all 
 
 # Chimps
