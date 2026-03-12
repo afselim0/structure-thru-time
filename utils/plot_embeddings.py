@@ -16,7 +16,8 @@ def main():
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
-    parser.add_argument("--min_time", default=0, type=float,help="Minimum time for plotting")
+    parser.add_argument("--min_time", type=float,help="Minimum time for plotting")
+    parser.add_argument("--max_time", type=float,help="Maximum time for plotting")
     parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
 
@@ -27,6 +28,7 @@ def main():
     output_path = args.output_path
     output_name = args.output_name
     min_time = args.min_time
+    max_time = args.max_time
     generation_time = args.generation_time
     if args.lims == "None":
         lims = None
@@ -42,9 +44,9 @@ def main():
     output_basename = output_name.removesuffix(".html")
     print(f"Building Embeddings plots for embeddings file: {args.input}")
 
-    embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
+    # embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
     plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-    plotter.init_plot(time_scale="log",xy_lims=args.lims)
+    plotter.init_plot(time_scale="log",xy_lims=lims, min_time=min_time, max_time=max_time)
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()
@@ -57,7 +59,7 @@ def main():
         plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
 
         plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-        plotter.init_plot(time_scale="log",xy_lims=args.lims)
+        plotter.init_plot(time_scale="log",xy_lims=lims, min_time=min_time, max_time=max_time)
         plotter.add_support_tube()
         plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
 
