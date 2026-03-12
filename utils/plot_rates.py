@@ -116,6 +116,8 @@ def main():
 
     if len(populations) <= 6 and len(populations) > 1:
         rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:
         rates_fig = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
     rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
