@@ -14,41 +14,41 @@ stdpopsim_demes_dir=../data/demes/stdpopsim
 
 # Simulated Data Examples
 ## Simulate
-dempgraphy=zigzag
+# dempgraphy=zigzag
 
-num_contigs=500
-contig_length=5000000
-n_sim_per_pop=20
+# num_contigs=500
+# contig_length=5000000
+# n_sim_per_pop=20
 
-min_time=1
-max_time=40000
-n_timepoints=10000
-min_window_size=20
-max_window_size=100
-N_min=1000
-N_max=1000000
-max_rate_plot=0.0001
+# min_time=1
+# max_time=40000
+# n_timepoints=10000
+# min_window_size=20
+# max_window_size=100
+# N_min=1000
+# N_max=1000000
+# max_rate_plot=0.0001
 
-l1=1e-3,1e-2
-l2=1e-2
-num_threads=12
+# l1=1e-3,1e-2
+# l2=1e-2
+# num_threads=12
 
-snakemake sim_STT --cores all --config \
-    demes_file_path="$main_demes_dir"/"$dempgraphy".yaml \
-    output_path=../results/simulations/outputs/"$dempgraphy"/sim \
-    num_contigs=$num_contigs \
-    contig_length=$contig_length \
-    n_sim_per_pop=$n_sim_per_pop \
-    max_time=$max_time \
-    n_timepoints=$n_timepoints \
-    min_window_size=$min_window_size \
-    max_window_size=$max_window_size \
-    n_sim_per_pop=$n_sim_per_pop \
-    N_min=$N_min \
-    N_max=$N_max \
-    min_time=$min_time \
-    max_rate_plot=$max_rate_plot \
-    num_threads=$num_threads \
+# snakemake sim_STT --cores all --config \
+#     demes_file_path="$main_demes_dir"/"$dempgraphy".yaml \
+#     output_path=../results/simulations/outputs/"$dempgraphy"/sim \
+#     num_contigs=$num_contigs \
+#     contig_length=$contig_length \
+#     n_sim_per_pop=$n_sim_per_pop \
+#     max_time=$max_time \
+#     n_timepoints=$n_timepoints \
+#     min_window_size=$min_window_size \
+#     max_window_size=$max_window_size \
+#     n_sim_per_pop=$n_sim_per_pop \
+#     N_min=$N_min \
+#     N_max=$N_max \
+#     min_time=$min_time \
+#     max_rate_plot=$max_rate_plot \
+#     num_threads=$num_threads \
     # l1="$l1" \
     # l2="$l2"
     
@@ -76,24 +76,24 @@ snakemake sim_STT --cores all --config \
 #     num_threads=12
     
 ### 2. relate
-infer_method=relate
-snakemake infer_STT --cores all --config \
-    vcf_dir=../results/simulations/outputs/"$dempgraphy"/sim/trees \
-    output_path=../results/simulations/outputs/"$dempgraphy"/"$infer_method" \
-    infer_method="$infer_method" \
-    num_contigs=$num_contigs \
-    contig_length=$contig_length \
-    n_sim_per_pop=$n_sim_per_pop \
-    max_time=$max_time \
-    n_timepoints=$n_timepoints \
-    min_window_size=$min_window_size \
-    max_window_size=$max_window_size \
-    n_sim_per_pop=$n_sim_per_pop \
-    N_min=$N_min \
-    N_max=$N_max \
-    min_time=$min_time \
-    max_rate_plot=$max_rate_plot \
-    num_threads=$num_threads \
+# infer_method=relate
+# snakemake infer_STT --cores all --config \
+#     vcf_dir=../results/simulations/outputs/"$dempgraphy"/sim/trees \
+#     output_path=../results/simulations/outputs/"$dempgraphy"/"$infer_method" \
+#     infer_method="$infer_method" \
+#     num_contigs=$num_contigs \
+#     contig_length=$contig_length \
+#     n_sim_per_pop=$n_sim_per_pop \
+#     max_time=$max_time \
+#     n_timepoints=$n_timepoints \
+#     min_window_size=$min_window_size \
+#     max_window_size=$max_window_size \
+#     n_sim_per_pop=$n_sim_per_pop \
+#     N_min=$N_min \
+#     N_max=$N_max \
+#     min_time=$min_time \
+#     max_rate_plot=$max_rate_plot \
+#     num_threads=$num_threads \
     # l1="$l1" \
     # l2="$l2"
 
@@ -138,21 +138,24 @@ snakemake infer_STT --cores all --config \
 #     num_threads=8 \
 #     --cores all \
 
-# snakemake STT --config \
-#     output_path=../results/empirical/Wohns/all.npp.2 \
-#     trees_dir=../data/trees/wohns_chopped \
-#     n_samples_per_pop=2 \
-#     pop_colors=../data/metadata/Wohns_pop_colors.csv \
-#     pop_labels=../data/metadata/Wohns_pop_labels.csv \
-#     min_time=1 \
-#     max_time=4000 \
-#     n_timepoints=4000 \
-#     min_window_size=100 \
-#     max_window_size=1500 \
-#     N_min=1000 \
-#     N_max=1000000 \
-#     num_threads=4 \
-#     --cores all \
+snakemake STT --config \
+    output_path=../results/empirical/Wohns/all.npp.2 \
+    trees_dir=../data/trees/wohns_chopped \
+    n_samples_per_pop=2 \
+    pop_colors=../data/metadata/Wohns_pop_colors.csv \
+    pop_labels=../data/metadata/Wohns_pop_labels.csv \
+    min_time=50 \
+    max_time=4000 \
+    n_timepoints=4000 \
+    min_window_size=100 \
+    max_window_size=1500 \
+    N_min=1000 \
+    N_max=10000000 \
+    num_threads=4 \
+    max_rate_plot=0.0002 \
+    embeddings_plot_lims=8000000 \
+    embeddings_max_time=100000 \
+    --cores all 
 
 # Chimps
 ## All

@@ -113,6 +113,7 @@ def _safe_positive_min(x: np.ndarray, *, fallback: float = 1.0) -> float:
 class PlotRanges:
     x_range: Tuple[float, float]
     y_range: Tuple[float, float]
+    z_range: Tuple[float, float]
     z_ticks: np.ndarray
     z_ticktext: List[str]
 
@@ -224,6 +225,8 @@ class PlotEmbeddings:
         pad_frac: float = 0.05,
         aspectratio: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         xy_lims: Optional[float] = None,
+        min_time: Optional[float] = None,
+        max_time: Optional[float] = None
     ) -> None:
         """
         Initialize an empty Plotly Figure with consistent axis ranges.
@@ -291,16 +294,37 @@ class PlotEmbeddings:
 
         # Z ticks based on plotting-time (so log scale and layers agree)
         t = df[self.tplot_col].to_numpy(dtype=float)
-        min_time = _safe_positive_min(t, fallback=self.time_eps_plot if time_scale == "log" else 1.0)
-        max_time = float(np.nanmax(t[np.isfinite(t)])) if np.isfinite(t).any() else 10.0
+        if min_time is None:
+            min_time = _safe_positive_min(t, fallback=self.time_eps_plot if time_scale == "log" else 1.0)
+        if max_time is None:
+            max_time = float(np.nanmax(t[np.isfinite(t)])) if np.isfinite(t).any() else 10.0
 
-        z_min_decade = int(np.floor(np.log10(min_time)))
-        z_max_decade = int(np.ceil(np.log10(max_time)))
-        z_ticks = (10.0 ** np.arange(z_min_decade, z_max_decade + 1)).astype(float)
+        min_time = float(min_time)
+        max_time = float(max_time)
+
+        if not np.isfinite(min_time) or not np.isfinite(max_time):
+            raise ValueError("min_time and max_time must be finite numbers")
+        if max_time <= min_time:
+            raise ValueError("max_time must be greater than min_time")
+
+        z_range = (min_time, max_time)
+
+        if time_scale == "log":
+            if min_time <= 0:
+                raise ValueError("For log time_scale, min_time must be > 0")
+            z_min_decade = int(np.floor(np.log10(min_time)))
+            z_max_decade = int(np.ceil(np.log10(max_time)))
+            z_ticks = (10.0 ** np.arange(z_min_decade, z_max_decade + 1)).astype(float)
+            # Plotly expects log-axis ranges in log10 units.
+            z_axis_range = [float(np.log10(min_time)), float(np.log10(max_time))]
+        else:
+            z_ticks = np.linspace(min_time, max_time, num=6)
+            z_axis_range = [min_time, max_time]
 
         self._plot_ranges = PlotRanges(
             x_range=x_range,
             y_range=y_range,
+            z_range=z_range,
             z_ticks=z_ticks,
             z_ticktext=[str(int(z)) for z in z_ticks],
         )
@@ -310,6 +334,7 @@ class PlotEmbeddings:
                 xaxis=dict(title=x_label, range=list(x_range), zeroline=True, **axis_style),
                 yaxis=dict(title=y_label, range=list(y_range), zeroline=True, **axis_style),
                 zaxis=dict(
+                    range=z_axis_range,
                     title=z_label,
                     tickvals=z_ticks,
                     ticktext=[str(int(z)) for z in z_ticks],

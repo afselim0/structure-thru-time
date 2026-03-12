@@ -73,6 +73,10 @@ def main():
     # if delta_t is None:
     #     delta_t = max_time // 1000  # Default to 1000 time points
 
+    if "SS" in demes_file_path:
+        print("Cannot compute true rates for SS model")
+        rates_df = pd.DataFrame(columns=np.arange(0,max_time,delta_t))
+        rates_df.to_parquet(f"{output_path}/rates_true.parquet")
     pop_rates_df = compute_true_rates(demes_file_path, max_time, delta_t=delta_t)
     pop_labels = pd.read_csv(labels_path)
     expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels)

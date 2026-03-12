@@ -51,7 +51,11 @@ min_time                          = int(max(min_time,min_window_size/2)) # To av
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
 embeddings_plot_lims              = read_config("embeddings_plot_lims", default="None")
+
+# embeddings_min_time               = read_config("embeddings_min_time", default = min_time)
+embeddings_max_time               = read_config("embeddings_max_time", default = max_time)
 STT_TAG                           = f".Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}]" + RATES_TAG
+PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 
 # Empirical dataset parameters
 pops                              = read_config("pops", "all").replace(","," ")
@@ -116,7 +120,7 @@ rates_data_file_name              = f"rates{RATES_TAG}.parquet"
 rates_plot_file_name              = f"rates{RATES_TAG}.png"
 
 embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
-embeddings_plot_file_name         = f"embeddings{STT_TAG}.html"
+embeddings_plot_file_name         = f"embeddings{PLOT_TAG}.html"
 performance_data_file_name        = f"performance{STT_TAG}.parquet"
 performance_plot_file_name        = f"performance{STT_TAG}.png"
 
@@ -322,7 +326,8 @@ rule plot_embeddings_true:
         outdir = plot_output_path,
         output_name = embeddings_true_plot_file_name,
         min_time = min_time,
-        embeddings_plot_lims = embeddings_plot_lims
+        embeddings_plot_lims = embeddings_plot_lims,
+        embeddings_max_time = embeddings_max_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -333,7 +338,8 @@ rule plot_embeddings_true:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --lims {params.embeddings_plot_lims} \
-            --min_time {params.min_time}
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time}
         """
 
 rule simulate_trees:
@@ -528,7 +534,8 @@ rule plot_embeddings:
         outdir = plot_output_path,
         output_name = embeddings_plot_file_name,
         min_time=min_time,
-        embeddings_plot_lims = embeddings_plot_lims
+        embeddings_plot_lims = embeddings_plot_lims,
+        embeddings_max_time = embeddings_max_time
     shell:
         """
         mkdir -p {params.outdir}
@@ -539,7 +546,8 @@ rule plot_embeddings:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --lims {params.embeddings_plot_lims} \
-            --min_time {params.min_time}
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time}
         """
 rule evaluate_performance:
     input:

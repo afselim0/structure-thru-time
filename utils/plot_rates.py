@@ -37,7 +37,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
             pop1 = populations[i]
             pop2 = populations[j]
             if pop1 == pop2:
-                color = "black"
+                color = "grey"
             else:
                 color = pop_colors_dict[pop2]
             pop1_samples = pop_labels[pop_labels['population'] == pop1]['sample_id'].values
@@ -79,7 +79,7 @@ def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="
         ax.set_ylim(top=max_rate_plot)
     ax.set_xlim(float(min_time), times.max())
     for pair in rates_df.index.values:
-        ax.plot(times, rates_df.loc[pair,:].values, color="black", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
+        ax.plot(times, rates_df.loc[pair,:].values, color="grey", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
     mean_rates = np.mean(rates_df.values, axis=0)
     ax.plot(times, mean_rates, color="black", lw=MEAN_LINE_WIDTH, alpha=MEAN_LINE_ALPHA)
     fig.tight_layout()
@@ -116,6 +116,8 @@ def main():
 
     if len(populations) <= 6 and len(populations) > 1:
         rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:
         rates_fig = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
     rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
