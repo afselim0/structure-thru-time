@@ -1,3 +1,4 @@
+#%%
 #!/usr/bin/env python3
 import os
 import argparse
@@ -11,7 +12,7 @@ def plot_demography(demes_file_path, pop_colors, max_time, min_time):
     setup_plotting_style()
     graph = demes.load(demes_file_path)
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-    fig, ax = plt.subplots(figsize=(4, 4))
+    fig, ax = plt.subplots(figsize=(2, 4.5))
     demesdraw.tubes(
         graph,
         ax=ax,
@@ -43,3 +44,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+# %%
+demes_file_path = "../data/demes/main/OOA4.yaml"
+pop_colors = pd.read_csv("../results/simulations/outputs/OOA4/sim/data/pop_colors.csv")
+max_time = 20000
+min_time = 50
+fig = plot_demography(demes_file_path, pop_colors, max_time, min_time)
+fig.savefig("../results/simulations/outputs/OOA4/sim/plots/demography.png", dpi=500)
+# %%
