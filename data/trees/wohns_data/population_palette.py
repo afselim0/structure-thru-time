@@ -159,12 +159,12 @@ def draw_palette(df: pd.DataFrame, plot_path: Path):
     for ridx, region in enumerate(reversed(regions)):
         y=len(regions)-1-ridx
         sub=df[df.region==region].reset_index(drop=True)
-        ax.text(-0.5, y+0.5, region.replace('_',' '), ha='right', va='center', fontweight='bold')
+        ax.text(-0.5, y+0.5, region.replace('_',' '), ha='right', va='center', fontweight='bold', fontsize = 28)
         for x,(pop,col) in enumerate(zip(sub.population, sub.hex_colour)):
             ax.add_patch(Rectangle((x,y),1,1,facecolor=col,edgecolor='black',linewidth=0.4))
-            ax.text(x+0.5, y+0.5, pop, ha='center', va='center', fontsize=5,
+            ax.text(x+0.5, y+0.5, pop, ha='center', va='center', fontsize=6,
                     color='white' if _is_dark(col) else 'black')
-    plt.tight_layout(); fig.savefig(plot_path, dpi=300, bbox_inches='tight'); print(f"Saved → {plot_path}")
+    plt.tight_layout(); fig.savefig(plot_path, dpi=600, bbox_inches='tight'); print(f"Saved → {plot_path}")
 
 def _is_dark(hexc: str) -> bool:
     r,g,b = [int(hexc[i:i+2],16) for i in (1,3,5)]
