@@ -181,12 +181,6 @@ rule infer_STT: # Infer and run STT on inferred trees
 rule STT: # Run STT
     input: STT_targets
 
-rule STT_combs: # Run STT on full dataset and on all population combinations
-    input: 
-        STT_targets,
-        combs_data_dir,
-        combs_plot_dir
-
 # =====================================================
 # Specific Rules
 # =====================================================
@@ -587,27 +581,27 @@ rule evaluate_performance:
             --plot_output_name {params.plot_output_name}
         """
 
-# rule population_combinations:
-#     input:
-#         pop_labels = pop_labels,
-#         pop_colors = pop_colors,
-#         rates = rates_data,
-#         script = run_population_combs_script
-#     params:
-#         data_dir = combs_data_dir,
-#         plot_dir = combs_plot_dir,
-#         N_min = N_min,
-#         N_max = N_max
-#     output:
-#         directory(combs_data_dir),
-#         directory(combs_plot_dir)
-#     shell:
-#         """
-#         python {input.script} \
-#             --data_dir {params.data_dir} \
-#             --plotrees_dir {params.plotrees_dir} \
-#             --pop_labels {input.pop_labels} \
-#             --pop_colors {input.pop_colors} \
-#             --rates_file {input.rates} \
-#             --N0 {params.N0}
-#         """
+rule STT_pop_combs:
+    input:
+        pop_labels = pop_labels,
+        pop_colors = pop_colors,
+        rates = rates_data,
+        script = run_population_combs_script
+    params:
+        data_dir = combs_data_dir,
+        plot_dir = combs_plot_dir,
+        N_min = N_min,
+        N_max = N_max
+    output:
+        directory(combs_data_dir),
+        directory(combs_plot_dir)
+    shell:
+        """
+        python {input.script} \
+            --data_dir {params.data_dir} \
+            --plotrees_dir {params.plotrees_dir} \
+            --pop_labels {input.pop_labels} \
+            --pop_colors {input.pop_colors} \
+            --rates_file {input.rates} \
+            --N0 {params.N0}
+        """
