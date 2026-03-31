@@ -142,9 +142,9 @@ snakemake STT --config \
     output_path=../results/empirical/Wohns/all.npp.2 \
     trees_dir=../data/trees/wohns_chopped \
     n_samples_per_pop=2 \
-    pop_colors=../data/metadata/Wohns_pop_colors.csv \
-    pop_labels=../data/metadata/Wohns_pop_labels.csv \
-    min_time=50 \
+    pop_colors=../data/metadata/wohns_pop_colors.csv \
+    pop_labels=../data/metadata/wohns_pop_labels.csv \
+    min_time=20 \
     max_time=4000 \
     n_timepoints=4000 \
     min_window_size=100 \
@@ -154,8 +154,27 @@ snakemake STT --config \
     num_threads=4 \
     max_rate_plot=0.0002 \
     embeddings_plot_lims=8000000 \
-    embeddings_max_time=100000 \
+    embeddings_max_time=4000 \
     --cores all 
+
+# snakemake STT --config \
+#     output_path=../results/empirical/Wohns/OOA4.npp.20 \
+#     trees_dir=../data/trees/wohns_chopped \
+#     pops=YRI,CEU,CHB,JPT \
+#     n_samples_per_pop=20 \
+#     pop_colors=../data/metadata/OOA4_colors.csv \
+#     pop_labels=../data/metadata/wohns_pop_labels.csv \
+#     min_time=50 \
+#     max_time=20000 \
+#     n_timepoints=4000 \
+#     min_window_size=100 \
+#     max_window_size=5000 \
+#     N_min=1000 \
+#     N_max=1000000 \
+#     num_threads=4 \
+#     max_rate_plot=0.0002 \
+#     embeddings_plot_lims=1000000 \
+#     --cores all 
 
 # Chimps
 ## All
