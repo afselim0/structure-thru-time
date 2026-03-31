@@ -56,7 +56,8 @@ for _, row in df.iterrows():
         row["pop"][:3],
         fontsize=8,
         ha="left",
-        va="bottom"
+        va="bottom",
+        c=row["color"]
     )
 
 fig.show()
