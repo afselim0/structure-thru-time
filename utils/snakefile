@@ -47,7 +47,7 @@ RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_s
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
-min_time                          = int(max(min_time,min_window_size/2)) # To avoid discontinuity at the edges, can be turned off
+# min_time                          = int(max(min_time,min_window_size/2)) # To avoid discontinuity at the edges, can be turned off
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
 embeddings_plot_lims              = read_config("embeddings_plot_lims", default="None")
