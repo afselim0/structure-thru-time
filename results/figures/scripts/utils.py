@@ -18,7 +18,6 @@ def setup_plotting_style():
     # -- Fonts --
     rcParams['font.size'] = 10
     rcParams['font.family'] = 'serif'
-    # plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'sans-serif']
     rcParams['text.color'] = 'black'
     rcParams['axes.labelcolor'] = 'black'
     # -- Figure size --
@@ -26,3 +25,5 @@ def setup_plotting_style():
     # -- Saving Options --
     rcParams['savefig.bbox'] = 'tight'
     rcParams['savefig.dpi'] = 500
+
+setup_plotting_style()
