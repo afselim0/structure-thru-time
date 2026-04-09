@@ -18,11 +18,13 @@
     - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
         - d=2, d=10
     - Special: Do admixed individuals pull their sources too much? [medium]
+    - Look more into highlighting outliers
 
 - **Finalize choice of ARG inference method**
     - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
     - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
     - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
+    - Follow up with Yan about new tsinfer/tsdate + new Wohns data
 
 - **Finalyzing Empirical Analyses** *(If we decide to move forward with SINGER)*
     - Finalize inference strategy (SINGER on 1 Mb regions of the genome) [medium]
@@ -32,6 +34,8 @@
         - Infer HPRC trees
 
 # Minor Tasks
+- Embeddings for individuals rather than haplotypes [high]
+- Config files to save parameters used in runs [high]
 - Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
