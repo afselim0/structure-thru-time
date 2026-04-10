@@ -37,6 +37,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
+from PIL import Image
 
 # ----------------------- tunables ------------------------------------------
 sample_line_width = 2
@@ -356,11 +357,34 @@ class PlotEmbeddings:
         scale: int = 2,
         eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
         up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
+        crop_white = True
     ) -> None:
         if self.fig is None:
             raise RuntimeError("Call init_plot() before saving.")
         self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
         pio.write_image(fig=self.fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
+        if crop_white:
+            assert format in ["png", "jpg", "jpeg"], "Cropping is only supported for raster formats like PNG or JPEG."
+            with Image.open(f"{filename}.{format}") as img:
+                img_array = np.array(img)
+                mask = ~(np.all(img_array[:, :, :3] == 255, axis=2))  # True wherever the image is not white
+                # Get bounding box
+                coords = np.argwhere(mask)
+                y0, x0 = coords.min(axis=0)
+                y1, x1 = coords.max(axis=0) + 1  # Add one since slicing is exclusive
+                cropped_img = img.crop((x0, y0, x1, y1))
+                # w, h = cropped_img.size
+                # size = max(w, h)
+                # if w != h:
+                #     # Create square white image and paste cropped plot in center
+                #     new_img = Image.new("RGB", (size, size), (255,255,255))
+                #     paste_x = (size - w) // 2
+                #     paste_y = (size - h) // 2
+                #     new_img.paste(cropped_img, (paste_x, paste_y))
+                #     new_img.save(f"{filename}.{format}")
+                # else:
+                cropped_img.save(f"{filename}.{format}")
+
 
     # ------------------------- core layers --------------------------------
 
