@@ -5,22 +5,24 @@ from optimization_functions import *
 from tqdm import tqdm
 
 STDERR_ROLLING_WINDOW= 10
-TOLERANCE = 1e-20
+TIMEPOINT_TOL = 1e-20
+SMOOTHING_TOL = 1e-12
 MAX_ITER = 6000
+
 
 class LatentSpaceEmbeddings:
     def __init__(self,
                  rates_df: pd.DataFrame,
                  sample_times: list = None,
-                 N_min = None,
-                 N_max = None,
+                 N_min = 1,
+                 N_max = np.inf,
                  l1_penalty = None,
                  l2_penalty = None,
                  individuals = False,
                  n_timepoints = None,
                  n_components: int = 2):
         
-        self.stderr = np.nanmean(rates_df.T.rolling(window=STDERR_ROLLING_WINDOW).std().mean())
+        # self.stderr = np.nanmean(rates_df.T.rolling(window=STDERR_ROLLING_WINDOW).std().mean())
         # self.multiplier = np.nanquantile(rates_df.values,0.01)**2 # A multiplier to scale the loss and gradient when computing the first pass over the time points, to help with convergence.
         self.multiplier = 1
         if n_timepoints is not None:
@@ -44,8 +46,8 @@ class LatentSpaceEmbeddings:
             R[j, i, :] = row.values
                 
         self.R = R
-        if N_max is not None:
-            self.R += 1/N_max
+        self.N_min = N_min
+        self.N_max = N_max
     
         if sample_times is None:
             self.sample_times = np.array([0]*self.num_samples)
@@ -53,14 +55,6 @@ class LatentSpaceEmbeddings:
             self.sample_times = sample_times
 
         self.embeddings = None
-
-        if N_min is not None:
-            self.N_min = N_min
-        else:
-            # Selecting N_min as 1st percentile of Ne estimates
-            with np.errstate(divide='ignore', invalid='ignore'):
-                Ne = 1/(R + 1e-10)
-            self.N_min = np.nanquantile(Ne, 0.01)
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
@@ -102,21 +96,25 @@ class LatentSpaceEmbeddings:
         else:
             self.smoothing_params = None
 
-    def compute_embeddings_jointly(self, X_init=None, max_iter=MAX_ITER, tol=TOLERANCE):
+    def compute_embeddings_jointly(self, X_init=None):
         if X_init is None:
             X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
         else:
             assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
-        X, loss = optimize_all(X_init, self.R, self.N_min, 1, self.smoothing_params, max_iter, tol)
+        X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
         X = procrustes_alignment(X)
         self.embeddings = X
         return X, loss
 
-    def compute_embeddings_through_time(self, X_init = None, max_iter=MAX_ITER, tol=TOLERANCE, smooth=False):
-        if smooth:
-            smoothing_params = self.smoothing_params
-        else:
-            smoothing_params = None
+    def compute_embeddings_through_time(self, X_init = None, tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
+        """Computes embeddings through time without smoothing, starting from the deepest time point and going down, initializing each solution with the one before it
+
+        Args:
+            X_init (_type_, optional): _description_. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
         X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
         total_loss = 0
         if X_init is not None:
@@ -131,7 +129,7 @@ class LatentSpaceEmbeddings:
             R_t = R_t[extant_samples,:,]
             R_t = R_t[:,extant_samples,]
             X_t = X_t[extant_samples, :]
-            X_t, loss = optimize_timepoint(X_t, X, R_t, self.N_min, self.stderr*self.multiplier, smoothing_params,time_idx, max_iter, tol)
+            X_t, loss = optimize_timepoint(X_t, R_t, self.N_min, self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
             if k==0:
                 X_t -= X_t.mean(axis=0)
             X[extant_samples,:,time_idx] = X_t
@@ -141,10 +139,10 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         return X, total_loss
     
-    def compute_embeddings_coordinate_descent(self, X_init = None, max_iter=MAX_ITER, tol=TOLERANCE, num_epochs=10):
+    def compute_embeddings_coordinate_descent(self, X_init = None, num_epochs=10):
         if X_init is None:
             X_init = np.random.rand(self.num_samples, self.n_components)
-            X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=max_iter, tol=tol)
+            X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=MAX_ITER, tol=TIMEPOINT_TOL)
             X_init = np.repeat(X_init[:, :, np.newaxis], self.num_timepoints, axis=2)
         else:
             assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
@@ -155,7 +153,7 @@ class LatentSpaceEmbeddings:
             for i in tqdm(range(self.num_samples)):
                 X_i = X[i,:,:]
                 R_i = self.R[i,:,:]
-                X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.stderr, self.smoothing_params, max_iter, tol)
+                X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.N_max, self.smoothing_params, max_iter=MAX_ITER, tol=SMOOTHING_TOL)
                 X[i,:,:] = X_i_opt
                 X = X - np.mean(X, axis=0, keepdims=True)  # Centering step to remove translation indeterminacy
                 total_loss += X_i_loss
@@ -163,9 +161,9 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         return X, total_loss
     
-    def compute_embeddings_two_pass(self, max_iter=MAX_ITER, tol=TOLERANCE):
-        X,loss = self.compute_embeddings_through_time(max_iter = max_iter, tol = tol, smooth=False)
-        X,loss = self.compute_embeddings_coordinate_descent(X_init=X, max_iter = max_iter, tol = tol, num_epochs=1)
+    def compute_embeddings_two_pass(self):
+        X,loss = self.compute_embeddings_through_time(smooth=False)
+        X,loss = self.compute_embeddings_coordinate_descent(X_init=X, num_epochs=1)
         return X, loss
 
     def get_embeddings_df(self):

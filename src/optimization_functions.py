@@ -7,9 +7,6 @@ Loss and gradient can be computed for:
 3. All samples over all time slices
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
-TIMEPOINT_TOL = 1e-20
-SMOOTHING_TOL = 1e-12
-MAX_ITER = 2000
 
 import numpy as np
 from scipy.optimize import minimize
@@ -185,6 +182,7 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilo
     Returns:
         tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the t-th time point.
     """
+    R_t = R_t.copy()
     R_t += 1/N_max
     n,_ = R_t.shape
     X_t = X_t_flat.reshape((n, -1))
@@ -235,7 +233,7 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilo
 
 #     return loss, grad.ravel()
 
-def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon = None, max_iter = MAX_ITER, tol = TIMEPOINT_TOL):
+def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol):
     """A single coordinate descent step.
     For a given time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization.
 
