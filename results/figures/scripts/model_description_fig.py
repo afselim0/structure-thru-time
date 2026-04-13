@@ -11,8 +11,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import msprime
-import os
 import sys
 from PIL import Image
 
