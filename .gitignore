@@ -9,11 +9,12 @@ job_logs/
 ## Output files
 *.parquet
 *.html
-*.png
 *.pdf
 *.txt
 *.log
 *.mp4
+results/empirical
+results/simulations
 
 pop_colors.csv
 pop_labels.csv
