@@ -232,30 +232,30 @@ def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, poly_de
     rates[rates<min_rate] = 0
     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
     return rates_df
-# %%
-pdf_df = pd.read_parquet("../results/simulations/outputs/zigzag/sim/data/coal_pdf.V1.FS1.0.maxT40000.nT4000.parquet")
-true_rates = pd.read_parquet("../results/simulations/outputs/zigzag/sim/data/rates_true.parquet").mean()
-minimum_window_size = 1
-maximum_window_size = 0
-poly_deg = 1
-rates = compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, poly_deg, min_rate = MIN_RATE)
-mean_rates = rates.mean()
-# %%
-import matplotlib.pyplot as plt
-plt.plot(times, true_rates, label="True")
-plt.plot(times, mean_rates, label="Estimated")
-plt.legend()
-plt.xlabel("Time")
-plt.ylabel("Coalescence Rate")
-plt.xscale("log")
-# %%
-for row in rates.itertuples():
-    plt.plot(times, row[1:], alpha=0.1)
-plt.plot(times, true_rates, label="True", color="black", linewidth=2)
-plt.xscale("log")
-plt.xlabel("Time")
-plt.ylabel("Coalescence Rate")
-# %%
-plt.plot(rates.iloc[0,:])
-plt.xscale("log")
-# %%
+# # %%
+# pdf_df = pd.read_parquet("../results/simulations/outputs/zigzag/sim/data/coal_pdf.V1.FS1.0.maxT40000.nT4000.parquet")
+# true_rates = pd.read_parquet("../results/simulations/outputs/zigzag/sim/data/rates_true.parquet").mean()
+# minimum_window_size = 1
+# maximum_window_size = 0
+# poly_deg = 1
+# rates = compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, poly_deg, min_rate = MIN_RATE)
+# mean_rates = rates.mean()
+# # %%
+# import matplotlib.pyplot as plt
+# plt.plot(times, true_rates, label="True")
+# plt.plot(times, mean_rates, label="Estimated")
+# plt.legend()
+# plt.xlabel("Time")
+# plt.ylabel("Coalescence Rate")
+# plt.xscale("log")
+# # %%
+# for row in rates.itertuples():
+#     plt.plot(times, row[1:], alpha=0.1)
+# plt.plot(times, true_rates, label="True", color="black", linewidth=2)
+# plt.xscale("log")
+# plt.xlabel("Time")
+# plt.ylabel("Coalescence Rate")
+# # %%
+# plt.plot(rates.iloc[0,:])
+# plt.xscale("log")
+# # %%

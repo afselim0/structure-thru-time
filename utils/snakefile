@@ -36,12 +36,13 @@ vcf_dir                           = read_config("vcf_dir", default=tree_output_p
 fraction_samples                  = read_config("fraction_samples", default = 1.0)   # Fraction of samples taken into account in pdf computation at each contig
 min_window_size                   = read_config("min_window_size", default = 50)    # Window size for local linear regression at t=0
 max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
+poly                              = read_config("poly", default = 3) # Degree of polynomial fit for local rate estimation
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 max_rate_plot                     = read_config("max_rate_plot", default = 1/1000)
 
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
-RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
+RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}.poly{poly}" + PDF_TAG
 
 # STT Parameters 
 N_min                             = read_config("N_min", default = 1)
@@ -456,7 +457,8 @@ rule compute_rates:
         outdir = data_output_path,
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
-        max_window_size = max_window_size
+        max_window_size = max_window_size,
+        poly = poly
     shell:
         """
         mkdir -p {params.outdir}
@@ -465,7 +467,8 @@ rule compute_rates:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --minimum_window_size {params.min_window_size} \
-            --maximum_window_size {params.max_window_size}
+            --maximum_window_size {params.max_window_size} \
+            --poly {params.poly}
         """
 
 rule plot_rates:
