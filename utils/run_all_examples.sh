@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PATH_TO_CONFIG_FILES=../data/demes/main_config
+PATH_TO_CONFIG_FILES=../data/demes/main_1_config
 PARENT_OUTPUT_DIR=../results/simulations/outputs
 INFER_METHOD=tsinfer
 

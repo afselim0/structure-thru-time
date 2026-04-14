@@ -1,0 +1,26 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: Ancestral
+  epochs:
+  - {end_time: 40000, start_size: 10000.0}
+- name: A
+  ancestors: [Ancestral]
+  epochs:
+  - {end_time: 34133.318528, start_size: 7156.0}
+  - {end_time: 8533.329632, start_size: 999.9944099615919, end_size: 9999.952382801823}
+  - {end_time: 2133.3352704, start_size: 9999.952382801823, end_size: 999.999959837986}
+  - {end_time: 533.33324512, start_size: 999.999959837986, end_size: 10000.030294609354}
+  - {end_time: 133.3334544, start_size: 10000.030294609354, end_size: 1000.0040871713421}
+  - {end_time: 33.333334976, start_size: 1000.0040871713421, end_size: 10000.0}
+  - {end_time: 0, start_size: 10000.0}
+- name: B
+  ancestors: [Ancestral]
+  epochs:
+  - {end_time: 34133.318528, start_size: 7156.0}
+  - {end_time: 8533.329632, start_size: 999.9944099615919, end_size: 9999.952382801823}
+  - {end_time: 2133.3352704, start_size: 9999.952382801823, end_size: 999.999959837986}
+  - {end_time: 533.33324512, start_size: 999.999959837986, end_size: 10000.030294609354}
+  - {end_time: 133.3334544, start_size: 10000.030294609354, end_size: 1000.0040871713421}
+  - {end_time: 33.333334976, start_size: 1000.0040871713421, end_size: 10000.0}
+  - {end_time: 0, start_size: 10000.0}

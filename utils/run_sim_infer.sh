@@ -42,3 +42,7 @@ snakemake sim_STT --configfile "$configfile" \
 snakemake infer_STT --configfile "$configfile" \
   --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
   --cores all
+
+
+## Example
+### ./run_sim_infer.sh -o ../results/simulations/outputs/split -i tsinfer -p ../data/demes/main_1_config/split_config.yaml

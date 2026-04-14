@@ -1,0 +1,30 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: ABCD
+  epochs:
+  - {end_time: 2644.0842904143947, start_size: 10000.0}
+- name: D
+  ancestors: [ABCD]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: ABC
+  ancestors: [ABCD]
+  epochs:
+  - {end_time: 1644.0842904143947, start_size: 10000.0}
+- name: C
+  ancestors: [ABC]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: AB
+  ancestors: [ABC]
+  epochs:
+  - {end_time: 1000.0, start_size: 10000.0}
+- name: A
+  ancestors: [AB]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: B
+  ancestors: [AB]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
