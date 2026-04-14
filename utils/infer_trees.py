@@ -11,9 +11,9 @@ from pathos.multiprocessing import Pool
 import subprocess
 import zarr
 import shutil
-
 from time import time
 from tqdm import tqdm
+import msprime
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(script_dir)
@@ -29,27 +29,29 @@ def find_Ne(sim_ts_dir):
         Ne.append(ts.diversity(mode="branch")/4)
     return np.mean(Ne)
 
-def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8):
+def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8, from_TreeSequence = True):
     vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
     contig_id = os.path.basename(vcf_path_prefix)
     output_prefix = os.path.join(output_path, contig_id)
-    vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {output_prefix}.icf --force"
-    icf_to_vcz_command = f"vcf2zarr encode {output_prefix}.icf {output_prefix}.vcz --force"
-    with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
-        subprocess.run(vcf_to_icf_command, shell=True, stdout = f, stderr = f)
-        subprocess.run(icf_to_vcz_command, shell=True, stdout = f, stderr = f)
-
-    vcz_path = os.path.join(output_prefix + ".vcz")
-    vcf_zarr = zarr.load(vcz_path)
-    vdata = tsinfer.VariantData(vcz_path, ancestral_state=vcf_zarr["variant_allele"][:, 0])
+    if from_TreeSequence:
+        ts = tskit.load(os.path.join(vcf_file_path,contig_id) + ".trees")
+        ts_mutated = msprime.sim_mutations(ts,rate=mu,random_seed=int(contig_id) + 42)
+        vdata = tsinfer.SampleData.from_tree_sequence(ts_mutated)
+    else:
+        vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {output_prefix}.icf --force"
+        icf_to_vcz_command = f"vcf2zarr encode {output_prefix}.icf {output_prefix}.vcz --force"
+        with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
+            subprocess.run(vcf_to_icf_command, shell=True, stdout = f, stderr = f)
+            subprocess.run(icf_to_vcz_command, shell=True, stdout = f, stderr = f)
+        vcz_path = os.path.join(output_prefix + ".vcz")
+        vcf_zarr = zarr.load(vcz_path)
+        vdata = tsinfer.VariantData(vcz_path, ancestral_state=vcf_zarr["variant_allele"][:, 0])
     inferred_ts = tsinfer.infer(vdata, recombination_rate=r)
     inferred_ts = inferred_ts.simplify()
-    try:
-        dated_ts = tsdate.date(inferred_ts, mutation_rate=mu)
-        dated_ts.dump(os.path.join(output_path, f"{contig_id}.trees"))
-        shutil.rmtree(f"{output_prefix}.icf")
-        shutil.rmtree(f"{output_prefix}.vcz")
-    except:
+    dated_ts = tsdate.date(inferred_ts, mutation_rate=mu)
+    dated_ts.dump(os.path.join(output_path, f"{contig_id}.trees"))
+
+    if not from_TreeSequence:
         shutil.rmtree(f"{output_prefix}.icf")
         shutil.rmtree(f"{output_prefix}.vcz")
     return
@@ -173,3 +175,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# %%
