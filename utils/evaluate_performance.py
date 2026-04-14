@@ -28,8 +28,7 @@ def reconstruct_rates(embeddings, N_min, N_max):
     .unstack("time"))
 
     reconstructed_rates,_ = compute_f(D_df, N_min)
-    # reconstructed_rates -= 1/N_max
-    return reconstructed_rates
+    return reconstructed_rates, D_df
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
     input_rates += 1/N_max
@@ -151,7 +150,8 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
-    reconstructed_rates = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
+    reconstructed_rates,D_df = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
+    D_df.to_parquet(f"{args.data_output_path}/{args.data_output_name}_pairwise_distances.parquet", index=True)
 
     print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
     # True vs Reconstructed rates across all time points
@@ -161,48 +161,6 @@ def main():
     # Percent error in reconstructed rates
     error = find_percent_error(rates, reconstructed_rates, N_max)
     error.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
-
-    # # Subsetting labels_df and colors_df to active samples only
-    # active_pairs = error.index.values
-    # active_samples = np.unique([item for sublist in active_pairs for item in sublist])
-    # pop_labels = pop_labels[pop_labels['sample_id'].isin(active_samples)]
-    # populations = pop_labels['population'].unique()
-    # pop_colors = pop_colors[pop_colors['population'].isin(populations)]
-    
-    # out_png = f"{args.plot_output_path}/{args.plot_output_name}"
-    # os.makedirs(args.plot_output_path, exist_ok=True)
-    
-    # if len(pop_colors) < 10:
-    #     fig = plot_rates(error, pop_colors, pop_labels, ylabel = "Relative Error in Normalized Rates")
-    #     fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500)
-     
-    #     # Draft of an extra plot that would plot True vs Reconstructed Rate
-    #     tvsrplot = False
-    #     if tvsrplot:         
-    #         fig,ax = plt.subplots(figsize = (6,4))
-    #         ax.plot(rates.iloc[5,:],alpha=0.5, label="True Rates")
-    #         ax.plot(reconstructed_rates.iloc[5,:],alpha=0.5, label="Reconstructed Rates")
-    #         ax.set_xscale("log")
-    #         ax.set_xlabel("Rate index")          # or whatever x represents
-    #         ax.set_ylabel("Rate value")          # adjust as needed
-    #         ax.legend()
-    #         fig.tight_layout()
-    #         fig.savefig(f"{args.plot_output_path}/TvsR{args.plot_output_name}", dpi=500,bbox_inches="tight")
-            
-        
-    
-    # else:
-    # # Make a small placeholder file so Snakemake sees the expected output, othrewise cluster job will fail
-    #     fig = plt.figure(figsize=(6, 2))
-    #     plt.text(
-    #         0.01, 0.5,
-    #         f"Performance plot skipped: {len(pop_colors)} populations (threshold < 10).",
-    #         va="center"
-    #     )
-    #     plt.axis("off")
-    #     fig.savefig(out_png, dpi=150, bbox_inches="tight")
-
-    #     plt.close(fig)
 
 if __name__ == "__main__":
     main()
