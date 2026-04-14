@@ -27,7 +27,7 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ploidy=2,
             random_seed=42+i
         )
-        ts_mutated = msprime.sim_mutations(ts,rate=mutation_rate,random_seed=52+i)
+        ts_mutated = msprime.sim_mutations(ts,rate=mutation_rate,random_seed=i + 42)
         vcf = ts_mutated.as_vcf(contig_id=str(i),allow_position_zero=True)
         return i, ts, vcf
     
