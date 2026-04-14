@@ -34,8 +34,8 @@ def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8, 
     contig_id = os.path.basename(vcf_path_prefix)
     output_prefix = os.path.join(output_path, contig_id)
     if from_TreeSequence:
-        ts = tskit.load(os.path.join(vcf_file_path,contig_id) + ".trees")
-        ts_mutated = msprime.sim_mutations(ts,rate=mu,random_seed=int(contig_id) + 42)
+        ts = tskit.load(vcf_path_prefix + ".trees")
+        ts_mutated = msprime.sim_mutations(ts,rate=mu,random_seed=int(contig_id.split("_")[-1]) + 42)
         vdata = tsinfer.SampleData.from_tree_sequence(ts_mutated)
     else:
         vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {output_prefix}.icf --force"
