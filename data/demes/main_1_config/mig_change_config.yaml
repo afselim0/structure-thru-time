@@ -1,5 +1,5 @@
 demography: mig_change
-demes_file_path: ../data/demes/main/mig_change.yaml
+demes_file_path: ../data/demes/main_1/mig_change.yaml
 version: 1
 num_threads: 12
 

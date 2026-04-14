@@ -1,5 +1,5 @@
 demography: split_sawtooth
-demes_file_path: ../data/demes/main/split_sawtooth.yaml
+demes_file_path: ../data/demes/main_1/split_sawtooth.yaml
 version: 1
 num_threads: 12
 

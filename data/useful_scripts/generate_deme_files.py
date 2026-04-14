@@ -107,7 +107,6 @@ def recent_mig_change(N,t_split,t_change,m1,m2):
     demography.add_population(name="A", initial_size= N, default_sampling_time = 0)
     demography.add_population(name="B", initial_size= N, default_sampling_time = 0)
     demography.add_population(name="C", initial_size= N, default_sampling_time = 0)
-    demography.add_population(name="temp_pop", initial_size= N)
 
     demography.add_population_split(time=t_split, derived=["A", "B", "C"], ancestral="Ancestral")
 
@@ -163,7 +162,7 @@ Nm = 0.1
 N0 = 2*Ne
 N1 = 1*Ne
 N2 = 0.5*Ne
-t_split = Ne
+t_split = Ne / 5
 t_mig = Ne/2
 mig_duration = Ne/2
 m = Nm / Ne
@@ -181,8 +180,8 @@ demes.dump(graph, main_demes_dir_1 + "split_sawtooth.yaml")
 # 4- mig_change
 t_split = 2000
 t_change = 200
-m1 = 1e-3
-m2 = 1e-4
+m1 = 1e-4
+m2 = 1e-3
 
 demography = recent_mig_change(Ne,t_split,t_change,m1,m2)
 graph = demography.to_demes()

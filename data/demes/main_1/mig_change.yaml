@@ -4,9 +4,6 @@ demes:
 - name: Ancestral
   epochs:
   - {end_time: 2000, start_size: 10000.0}
-- name: temp_pop
-  epochs:
-  - {end_time: 0, start_size: 10000.0}
 - name: A
   ancestors: [Ancestral]
   epochs:
@@ -21,8 +18,8 @@ demes:
   - {end_time: 0, start_size: 10000.0}
 migrations:
 - demes: [A, B]
-  rate: 0.0001
+  rate: 0.001
   end_time: 200.0
 - demes: [B, C]
-  rate: 0.001
+  rate: 0.0001
   start_time: 200.0
