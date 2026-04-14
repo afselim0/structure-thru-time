@@ -362,9 +362,8 @@ class PlotEmbeddings:
         if self.fig is None:
             raise RuntimeError("Call init_plot() before saving.")
         self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
-        fig = self.fig.copy()
-        fig.update_layout(showlegend=False)
-        pio.write_image(fig=fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
+        self.fig.update_layout(showlegend=False)
+        pio.write_image(fig=self.fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
         if crop_white:
             assert format in ["png", "jpg", "jpeg"], "Cropping is only supported for raster formats like PNG or JPEG."
             with Image.open(f"{filename}.{format}") as img:
@@ -387,7 +386,8 @@ class PlotEmbeddings:
                 # else:
                 cropped_img.save(f"{filename}.{format}")
 
-
+        self.fig.update_layout(showlegend=True)  # restore legend for interactive use if needed
+            
     # ------------------------- core layers --------------------------------
 
     def add_legend(self, *, marker_size: int = 10) -> None:
