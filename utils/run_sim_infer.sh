@@ -46,3 +46,4 @@ snakemake infer_STT --configfile "$configfile" \
 
 ## Example
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/split -i tsinfer -p ../data/demes/main_1_config/split_config.yaml
+# ./run_sim_infer.sh -o ../results/simulations/outputs/complex_4_pops -i tsinfer -p ../data/demes/main_1_config/complex_4_pops_config.yaml

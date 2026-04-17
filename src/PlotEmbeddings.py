@@ -363,6 +363,7 @@ class PlotEmbeddings:
             raise RuntimeError("Call init_plot() before saving.")
         self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
         self.fig.update_layout(showlegend=False)
+        self.fig.update_layout(scene=dict(zaxis=dict(title="")))
         pio.write_image(fig=self.fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
         if crop_white:
             assert format in ["png", "jpg", "jpeg"], "Cropping is only supported for raster formats like PNG or JPEG."
@@ -387,6 +388,7 @@ class PlotEmbeddings:
                 cropped_img.save(f"{filename}.{format}")
 
         self.fig.update_layout(showlegend=True)  # restore legend for interactive use if needed
+        self.fig.update_layout(scene=dict(zaxis=dict(title="Time (generations ago)" if self.generation_time is None else "Time (years ago)")))  # restore z-axis title
             
     # ------------------------- core layers --------------------------------
 

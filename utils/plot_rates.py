@@ -126,16 +126,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# # %%
-# rates_df = pd.read_parquet("../results/empirical/DeManuel/all_chroms_all_samples_deep_time/data/rates.minWS500.maxWS5000.V1.FS1.0.maxT100000.nT5000.parquet")
-# pop_colors = pd.read_csv("../data/metadata/DeManuel_pop_colors.csv")
-# pop_labels = pd.read_csv("../data/metadata/DeManuel_pop_labels.csv")
-# min_time = 250
-# max_rate_plot = 0.0002
-
-# rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot)
-# rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
-
-# rates_fig.savefig("../results/empirical/DeManuel/all_chroms_all_samples_deep_time/plots/rates.minT.250minWS500.maxWS5000.V1.FS1.0.maxT100000.nT5000.png", dpi=500)
-# rates_fig_single.savefig("../results/empirical/DeManuel/all_chroms_all_samples_deep_time/plots/single_rates.minT.250minWS500.maxWS5000.V1.FS1.0.maxT100000.nT5000.png", dpi=500)
-# # %%

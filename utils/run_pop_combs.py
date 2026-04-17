@@ -84,16 +84,16 @@ def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_m
 # if __name__ == "__main__":
 #     main()
 # %%
-data_dir = "/project/jnovembre/afselim/structure-thru-time/data/trees/DeManuel/all_chopped"
-plots_dir = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/combs/plots"
-data_dir = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/combs/data"
-pop_colors = pd.read_csv("/project/jnovembre/afselim/structure-thru-time/data/metadata/DeManuel_pop_colors.csv")
-pop_labels = pd.read_csv("/project/jnovembre/afselim/structure-thru-time/data/metadata/DeManuel_pop_labels.csv")
-rates_file = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/data/rates.minWS500.maxWS5000.V1.FS1.0.maxT100000.nT5000.parquet"
-rates = pd.read_parquet(rates_file)
-N_min = 100
-N_max = 10000000
-min_time = 250
-lims = None
-run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_min, N_max, min_time, lims)
-# %%
+# data_dir = "/project/jnovembre/afselim/structure-thru-time/data/trees/DeManuel/all_chopped"
+# plots_dir = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/combs/plots"
+# data_dir = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/combs/data"
+# pop_colors = pd.read_csv("/project/jnovembre/afselim/structure-thru-time/data/metadata/DeManuel_pop_colors.csv")
+# pop_labels = pd.read_csv("/project/jnovembre/afselim/structure-thru-time/data/metadata/DeManuel_pop_labels.csv")
+# rates_file = "/project/jnovembre/afselim/structure-thru-time/results/empirical/DeManuel/all_chroms_all_samples_deep_time/data/rates.minWS500.maxWS5000.V1.FS1.0.maxT100000.nT5000.parquet"
+# rates = pd.read_parquet(rates_file)
+# N_min = 100
+# N_max = 10000000
+# min_time = 250
+# lims = None
+# run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_min, N_max, min_time, lims)
+# # %%
