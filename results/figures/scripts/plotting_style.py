@@ -47,8 +47,9 @@ def setup_plotting_style():
     # ---------------------------
     # Fonts (LaTeX-consistent)
     # ---------------------------
-    rcParams['text.usetex'] = True   # <-- requires LaTeX installed
+    # rcParams['text.usetex'] = False   # <-- requires LaTeX installed
     rcParams['font.family'] = 'serif'
+    rcParams['mathtext.fontset'] = 'cm'
 
     # Match typical LaTeX document scaling
     rcParams['font.size'] = 9
