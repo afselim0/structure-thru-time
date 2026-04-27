@@ -1,6 +1,6 @@
 #%%
 import matplotlib.pyplot as plt
-from plotting_style import *
+from results.figures.misc_scripts.plotting_style import *
 import numpy as np
 import pandas as pd
 import os

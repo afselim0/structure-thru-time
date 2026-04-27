@@ -6,7 +6,7 @@ import pandas as pd
 import sys
 
 import tqdm
-from plotting_style import *
+from results.figures.misc_scripts.plotting_style import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 
 

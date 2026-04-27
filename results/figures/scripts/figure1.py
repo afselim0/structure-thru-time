@@ -7,6 +7,7 @@ c) 3D embeddings at all time points
 d) distance between embeddings at different time points
 """
 import numpy as np
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -15,9 +16,12 @@ from PIL import Image
 from plotly import graph_objects as go
 from matplotlib.lines import Line2D
 
-from plotting_style import *
 sys.path.append("../../../src")
 sys.path.append("../../../utils")
+os.chdir(os.path.dirname(__file__))
+sys.path.append("../misc_scripts")
+file_name = os.path.basename(__file__).split(".")[0]
+from plotting_style import *
 from compute_rates_true import compute_true_rates, expand_true_rates
 from preprocess_demography import preprocess_demography
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
@@ -79,10 +83,10 @@ CENTER_PLOT_RATIO = 0.5 # The ratio of the center plot (3D embeddings) width to 
 xy_lims = 200000
 
 # Choices of colors for plotting
-plotly_static_name = "model_description_3d"
+plotly_static_name = f"../misc_figs/{file_name}c"
 t1_color = "blue"
 t2_color = "deepskyblue"
-rates_color = "red"
+rates_color = "maroon"
 distances_color = "magenta"
 
 # Time points to highlight in the plots
@@ -147,14 +151,26 @@ ax_a.yaxis.set_ticks_position('right')
 ax_a.yaxis.set_label_position('right')
 ax_a.spines['left'].set_visible(False)
 ax_a.spines['right'].set_visible(True)
-ax_a.set_xticks([])                     # Remove x ticks
-ax_a.set_yticklabels([])                     # Remove y tick labels
+x_ticks = [5e-5,5e-6]
+x_ticks_labels = [r"$5 \times 10^{-5}$", r"$5 \times 10^{-6}$"]
+y_ticks = [t1, t2]
+y_labels = [r"$t_1$", r"$t_2$"]
+
+# ax_a.set_xticks(x_ticks)                     # Remove x ticks
+# ax_a.set_xticklabels(x_ticks_labels)
+ax_a.set_yticks(y_ticks)                     # Remove y ticks
+ax_a.set_yticklabels(y_labels)                # Remove y tick labels
+ytick_labels = ax_a.get_yticklabels() 
+ytick_labels[0].set_color(t1_color)
+ytick_labels[1].set_color(t2_color)
+
 # ax_a.set_yticks([])                     # Remove y ticks
 # ax_a.yaxis.set_minor_locator(plt.NullLocator())
 ax_a.set_ylabel('')                     # Remove x axis label (if any)
-ax_a.set_xlabel(r"$\lambda_{ij}(t)$", size=10, c = rates_color)
+ax_a.set_xlabel(r"$\lambda_{ij}(t)$")
 ax_a.axhline(x[t1_idx], color = t1_color, linestyle = "--")
 ax_a.axhline(x[t2_idx], color = t2_color, linestyle = "--")
+# ax_a.set_ylabel("Time (generations ago)")
 
 # b): Embeddings at two representative time points
 ax_b = fig.add_subplot(gs[0, 1])
@@ -166,14 +182,20 @@ ax_b.set_yticks([])
 ax_b.set_xlim(-xy_lims, xy_lims)
 ax_b.set_ylim(-xy_lims, xy_lims)
 
+ax_b.spines['left'].set_visible(True)
+ax_b.spines['bottom'].set_visible(True)
 ax_b.spines['left'].set_position('center')
 ax_b.spines['bottom'].set_position('center')
 ax_b.spines['right'].set_color('none')
 ax_b.spines['top'].set_color('none')
 
-ax_b.set_xlabel(r"$X_1$", size=8, loc = "right", color = t2_color)
-ax_b.set_ylabel(r"$X_2$", size=8 , loc = "top", color = t2_color)
+ax_b.set_xlabel(r"$X_1$", loc = "right")
+ax_b.set_ylabel(r"$X_2$" , loc = "top", rotation = 360, labelpad= -10)
 ax_b.plot([X[i,0,t2_idx], X[j,0,t2_idx]], [X[i,1,t2_idx], X[j,1,t2_idx]], color = t2_color, ls = "--", lw = 1)
+
+pos = ax_b.get_position()
+new_pos = [pos.x0 + 0.012, pos.y0, pos.width, pos.height]
+ax_b.set_position(new_pos)
 
 
 ax_c = fig.add_subplot(gs[1, 1])
@@ -183,6 +205,8 @@ ax_c.scatter(X[j,0,t1_idx], X[j,1,t1_idx], color = "#000000", label = "focal", s
 ax_c.set_xticks([])  
 ax_c.set_yticks([])
 
+ax_c.spines['left'].set_visible(True)
+ax_c.spines['bottom'].set_visible(True)
 ax_c.spines['left'].set_position('center')
 ax_c.spines['bottom'].set_position('center')
 ax_c.spines['right'].set_color('none')
@@ -190,20 +214,23 @@ ax_c.spines['top'].set_color('none')
 
 ax_c.set_xlim(-xy_lims, xy_lims)
 ax_c.set_ylim(-xy_lims, xy_lims)
-ax_c.set_xlabel(r"$X_1$", size=8, loc = "right", color = t1_color)
-ax_c.set_ylabel(r"$X_2$", size=8 , loc = "top", color = t1_color)
+ax_c.set_xlabel(r"$X_1$", loc = "right")
+ax_c.set_ylabel(r"$X_2$", loc = "top", rotation = 360, labelpad= -10)
 
 ax_c.plot([X[i,0,t1_idx], X[j,0,t1_idx]], [X[i,1,t1_idx], X[j,1,t1_idx]], color = t1_color, ls = "--", lw = 1)
+pos = ax_c.get_position()
+new_pos = [pos.x0 + 0.012, pos.y0, pos.width, pos.height]
+ax_c.set_position(new_pos)
 
 
 
 # c) 3D embeddings at all time points
-plotter.save_static("fig1c", format = "png", width = 0.5*PLOT_HEIGHT*DPI, height = 0.5*PLOT_HEIGHT*DPI)
+plotter.save_static(plotly_static_name, format = "png", width = 0.5*PLOT_HEIGHT*DPI, height = 0.5*PLOT_HEIGHT*DPI)
 ax_d = fig.add_subplot(gs[:, 2])
 ax_d.axis("off")
 # for spine in ax_d.spines.values():
 #     spine.set_visible(False)
-img = Image.open("fig1c.png")
+img = Image.open(plotly_static_name + ".png")
 ax_d.imshow(img, aspect = "equal")
 
 # pos = ax_d.get_position()
@@ -230,12 +257,15 @@ ax_e.yaxis.set_ticks_position('right')
 ax_e.yaxis.set_label_position('right')
 ax_e.spines['left'].set_visible(False)
 ax_e.spines['right'].set_visible(True)
-ax_e.tick_params(axis='y', labelsize=10)  # Choose your desired font size
-ax_e.set_xticks([])                     # Remove x ticks
-ax_e.set_xlabel(r"$\Vert X_i(t) - X_j(t) \Vert$", size=10)
+ax_e.tick_params(axis='y')  # Choose your desired font size
+x_ticks = [2e4,2e5]
+x_ticks_labels = [r"$2 \times 10^{4}$", r"$2 \times 10^{5}$"]
+# ax_e.set_xticks(x_ticks)                     # Remove x ticks
+# ax_e.set_xticklabels(x_ticks_labels)
+ax_e.set_xlabel(r"$\Vert X_i(t) - X_j(t) \Vert$")
 ax_e.axhline(x[t1_idx], color = t1_color, linestyle = "--")
 ax_e.axhline(x[t2_idx], color = t2_color, linestyle = "--")
-ax_e.set_ylabel("Time (generations ago)", size = 10)
+ax_e.set_ylabel("Time (generations ago)", rotation=270, labelpad=15)
 # ax_e.legend(fontsize=8, loc = [0,-0.4], frameon=False)
 
 
@@ -247,15 +277,15 @@ for k, ax in enumerate(fig.axes):
     x_center = (bbox.x0 + bbox.x1) / 2
     x_centers.append(x_center)
 
-fig.text(x_starts[0] + 0.01, 0.95, "a)", fontsize=10, fontweight='black', va='top', ha='right')
-fig.text(x_starts[1] + 0.01, 0.95, "b)", fontsize=10, fontweight='black', va='top', ha='right')
-fig.text(x_starts[3] + 0.01, 0.95, "c)", fontsize=10, fontweight='black', va='top', ha='right')
-fig.text(x_starts[4] + 0.01, 0.95, "d)", fontsize=10, fontweight='black', va='top', ha='right')
+fig.text(x_starts[0] + 0.01, 0.95, "a)", fontweight='black', va='top', ha='right')
+fig.text(x_starts[1] + 0.01, 0.95, "b)", fontweight='black', va='top', ha='right')
+fig.text(x_starts[3] + 0.01, 0.95, "c)", fontweight='black', va='top', ha='right')
+fig.text(x_starts[4] + 0.01, 0.95, "d)", fontweight='black', va='top', ha='right')
 
 # Add arrows between panels
 ax_a.annotate(
     '',
-    xy=(x_starts[0]+0.07, 0.7), xytext=(x_starts[0]+0.02, 0.7),
+    xy=(x_starts[0]+0.04, 0.75), xytext=(x_starts[0]+0.004, 0.75),
     xycoords='figure fraction',
     arrowprops=dict(arrowstyle='->', linewidth=2),
     zorder=10
@@ -263,7 +293,7 @@ ax_a.annotate(
 
 ax_a.annotate(
     '',
-    xy=(x_starts[1]+0.06, 0.7), xytext=(x_starts[1]+0.01, 0.7),
+    xy=(x_starts[1]+0.04, 0.75), xytext=(x_starts[1]+0.004, 0.75),
     xycoords='figure fraction',
     arrowprops=dict(arrowstyle='->', linewidth=2),
     zorder=10
@@ -273,9 +303,9 @@ ax_a.annotate(
 rate_handle = Line2D([], [], color=rates_color, linestyle='-')
 rate_label = r'$\lambda_{ij}(t)$'
 t1_handle = Line2D([], [], color=t1_color, linestyle='--', marker='o', markersize=5)
-t1_label = f't={t1} generations'
+t1_label = rf'$t_1$={t1} generations'
 t2_handle = Line2D([], [], color=t2_color, linestyle='--', marker='o', markersize=5)
-t2_label = f't={t2} generations'
+t2_label = rf'$t_2$={t2} generations'
 focal_pair_handle = Line2D([], [], color='black', linestyle='-', marker='o', markersize=5)
 focal_pair_label = 'focal pair'
 Ne_handle = Line2D([], [], color=rates_color, linestyle='--')
@@ -285,7 +315,7 @@ average_d_label = 'average distances'
 
 handles = [rate_handle,focal_pair_handle, t1_handle, t2_handle, Ne_handle, average_d_handle]
 labels  = [rate_label, focal_pair_label, t1_label, t2_label, Ne_label, average_d_label]
-fig.legend(handles, labels,loc='lower center', bbox_to_anchor=(0.55, -0.2), fontsize=10, frameon=False, ncol=3)
+fig.legend(handles, labels,loc='lower center', bbox_to_anchor=(0.55, -0.2), frameon=False, ncol=3)
 
-fig.savefig("../outputs/model_description.png", dpi=DPI)
+fig.savefig(f"../outputs/{file_name}.png", dpi=DPI)
 # %%
