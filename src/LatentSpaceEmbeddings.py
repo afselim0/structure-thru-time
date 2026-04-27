@@ -106,14 +106,17 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         return X, loss
 
-    def compute_embeddings_through_time(self, X_init = None, tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
-        """Computes embeddings through time without smoothing, starting from the deepest time point and going down, initializing each solution with the one before it
+    def compute_embeddings_through_time(self, X_init = None, direction = "backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
+        """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
 
         Args:
-            X_init (_type_, optional): _description_. Defaults to None.
+            X_init (np.ndarray, optional): initial solution for first time slice. Defaults to None.
+            direction (str, optional): "backward" or "forward", determines the order of optimization. Defaults to "backward".
+            tol (float, optional): tolerance for convergence. Defaults to TIMEPOINT_TOL.
+            max_iter (int, optional): maximum number of iterations. Defaults to MAX_ITER.
 
         Returns:
-            _type_: _description_
+            np.ndarray, float: (nxn_componentsxtimepoints) array of embeddings, total loss across all time points
         """
         X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
         total_loss = 0
@@ -122,8 +125,10 @@ class LatentSpaceEmbeddings:
         else:
             X_t = np.random.rand(self.num_samples,self.n_components)
         for k in tqdm(range(self.num_timepoints)):
-            time_idx = len(self.time_points) - k - 1
-            # time_idx = k
+            if direction == "backward":
+                time_idx = len(self.time_points) - k - 1
+            elif direction == "forward":
+                time_idx = k
             R_t = self.R[:,:,time_idx]
             extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
             R_t = R_t[extant_samples,:,]
