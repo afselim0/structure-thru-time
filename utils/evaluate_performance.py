@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 from scipy.stats import spearmanr
+from plot_rates import plot_rates_multi_figs, plot_rates_single_fig
 
 sys.path.append("../../src")
 sys.path.append("../src")
@@ -140,6 +141,8 @@ def main():
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--data_output_name", type=str, required=True, help="Name of the output file")
     argparser.add_argument("--plot_output_name", type=str, required=True, help="Name of the output file")
+    argparser.add_argument("--min_time", type=float, default=0, help="Minimum time for plotting")
+    argparser.add_argument("--max_rate_plot", type=float, default=None, help="Maximum rate for plotting")
     args = argparser.parse_args()
 
     # Loading data
@@ -151,7 +154,7 @@ def main():
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
     reconstructed_rates,D_df = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
-    D_df.to_parquet(f"{args.data_output_path}/{args.data_output_name}_pairwise_distances.parquet", index=True)
+    reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
     # True vs Reconstructed rates across all time points
@@ -159,8 +162,15 @@ def main():
     tvr_fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500, bbox_inches="tight")
 
     # Percent error in reconstructed rates
-    error = find_percent_error(rates, reconstructed_rates, N_max)
-    error.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
+    # error = find_percent_error(rates, reconstructed_rates, N_max)
+    # error.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
+
+    # Plotting reconstructed rates over time
+    rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, ylabel="Coalescence Rate")
+    rates_fig_single = plot_rates_single_fig(reconstructed_rates, min_time = args.min_time, max_rate_plot = args.max_rate_plot, ylabel="Coalescence Rate")
+
+    rates_fig.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates")), dpi=500, bbox_inches="tight")
+    rates_fig_single.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates_single")), dpi=500, bbox_inches="tight")
 
 if __name__ == "__main__":
     main()
