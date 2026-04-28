@@ -103,6 +103,8 @@ rates_true_file_name              = "rates_true.parquet"
 rates_true_plot_file_name         = "rates_true.png"
 embeddings_true_file_name         = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.parquet"
 embeddings_true_plot_file_name    = f"embeddings_true.Nmin{N_min}.Nmax{N_max}.html"
+performance_true_file_name        = f"reconstructed_rates_true.Nmin{N_min}.Nmax{N_max}.parquet"
+performance_true_plot_file_name   = f"performance_true.Nmin{N_min}.Nmax{N_max}.png"
 sim_finished_file_name            = f"sim_trees_ready{SIM_TAG}.txt"
 infer_finished_file_name          = f"infer_trees_ready{SIM_TAG}.txt"
 
@@ -122,7 +124,7 @@ rates_plot_file_name              = f"rates{RATES_TAG}.png"
 
 embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
 embeddings_plot_file_name         = f"embeddings{PLOT_TAG}.html"
-performance_data_file_name        = f"performance{STT_TAG}.parquet"
+performance_data_file_name        = f"reconstructed_rates{STT_TAG}.parquet"
 performance_plot_file_name        = f"performance{STT_TAG}.png"
 
 # Target file paths
@@ -132,6 +134,8 @@ rates_true                        = os.path.join(data_output_path, rates_true_fi
 rates_true_plot                   = os.path.join(plot_output_path, rates_true_plot_file_name)
 embeddings_true                   = os.path.join(data_output_path, embeddings_true_file_name)
 embeddings_true_plot              = os.path.join(plot_output_path, embeddings_true_plot_file_name)
+performance_true_data             = os.path.join(data_output_path, performance_true_file_name)
+performance_true_plot             = os.path.join(plot_output_path, performance_true_plot_file_name)
 sim_finished                      = os.path.join(tree_output_path, sim_finished_file_name)
 infer_finished                    = os.path.join(tree_output_path, infer_finished_file_name)
 
@@ -157,6 +161,7 @@ sim_targets = [
     pop_labels,pop_colors,pca_plot,demography_plot,
     rates_true,rates_true_plot, 
     embeddings_true,embeddings_true_plot,
+    performance_true_data,performance_true_plot,
     sim_finished
     ]
 
@@ -341,6 +346,42 @@ rule plot_embeddings_true:
             --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time}
+        """
+
+rule evaluate_performance_true:
+    input:
+        embeddings = embeddings_true,
+        rates = rates_true,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = evaluate_performance_script
+    output:
+        performance_true_data,
+        performance_true_plot
+    params:
+        N_min = N_min,
+        N_max = N_max,
+        data_output_path = data_output_path,
+        plot_output_path = plot_output_path,
+        data_output_name = performance_true_file_name,
+        plot_output_name = performance_true_plot_file_name, 
+        min_time = min_time,
+        max_rate_plot = max_rate_plot
+    shell:
+        """
+        python {input.script} \
+            --embeddings {input.embeddings} \
+            --rates {input.rates} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --data_output_path {params.data_output_path} \
+            --plot_output_path {params.plot_output_path} \
+            --data_output_name {params.data_output_name} \
+            --plot_output_name {params.plot_output_name} \
+            --min_time {params.min_time} \
+            --max_rate_plot {params.max_rate_plot}
         """
 
 rule simulate_trees:
@@ -568,7 +609,9 @@ rule evaluate_performance:
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
         data_output_name = performance_data_file_name,
-        plot_output_name = performance_plot_file_name
+        plot_output_name = performance_plot_file_name, 
+        min_time = min_time,
+        max_rate_plot = max_rate_plot
     shell:
         """
         python {input.script} \
@@ -581,7 +624,9 @@ rule evaluate_performance:
             --data_output_path {params.data_output_path} \
             --plot_output_path {params.plot_output_path} \
             --data_output_name {params.data_output_name} \
-            --plot_output_name {params.plot_output_name}
+            --plot_output_name {params.plot_output_name} \
+            --min_time {params.min_time} \
+            --max_rate_plot {params.max_rate_plot}
         """
 
 rule STT_pop_combs:
