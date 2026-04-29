@@ -153,7 +153,7 @@ snakemake STT --config \
     N_max=10000000 \
     num_threads=4 \
     max_rate_plot=0.0002 \
-    embeddings_plot_lims=8000000 \
+    embeddings_plot_lims=8000 \
     embeddings_max_time=4000 \
     --cores all 
 
