@@ -1,12 +1,11 @@
 # General Tasks
 - **Smoothing the Embeddings**
 - **Performance Evaluation**
-- **Finalize choice of ARG inference method**
 - **Finalize Empirical Analyses**
-
 
 # Specific Tasks
 - **Smoothing the Embeddings**
+    - Implement a forward backward pass with no explicit smoother
     - track loss function 
     - Determine a standard level of smoothing given standard error of rate estimates
     - Add necessary parameters and changes to snakemake
@@ -15,31 +14,27 @@
         - Any additional outputs for additionally specified smoothing parameters
 
 - **Performance Evaluation**
-    - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
-        - d=2, d=10
-    - Special: Do admixed individuals pull their sources too much? [medium]
     - Look more into highlighting outliers
-
-- **Finalize choice of ARG inference method**
-    - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
-    - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
-    - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
-    - Follow up with Yan about new tsinfer/tsdate + new Wohns data
-
-- **Finalyzing Empirical Analyses** *(If we decide to move forward with SINGER)*
-    - Finalize inference strategy (SINGER on 1 Mb regions of the genome) [medium]
+    - Sanity check the error in reconstructed rates with a constant pop
+    - What's going on with split + tsinfer
+    - Understanding the pulses in reconstruction error (does it go away by just increasing maximum window size?)
+    - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
+        - d=2, d=10, d=n-1
+        - True rates (from model) vs reconstructed rates or vanilla from our rate estimate
+    - Special: Do admixed individuals pull their sources too much? [medium]
+    - Add an option of multiple outputs from diff inits
+    
+- **Finalyzing Empirical Analyses**
     - Preparing datasets [medium]
-        - Reinfer Wohns with SINGER
-        - Reinfer Chimps after identifying proper singer parameters to use
-        - Infer HPRC trees
+        - Reinfer Wohns with tsinfer+tsdate
+            - with and without archiacs
+        - Reinfer Chimps with tsinfer+tsdate
 
 # Minor Tasks
 - Embeddings for individuals rather than haplotypes [high]
-- Config files to save parameters used in runs [high]
 - Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
-- Set up syncronization so that overleaf has access to fig outputs directory(ies)
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
 - Outputs to log files... 
 
@@ -95,6 +90,11 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - DONE Add the sample-based coordinate descent to the LatentSpaceEmbeddings.py script 
 - Done Rerun chimps asap to identify what's gone awry since the 2025 set of results 
 - DONE reconstructed rates vs input rates [high]
+- DONE **Finalize choice of ARG inference method: Use tsinfer + new tsdate**
+    - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
+    - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
+    - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
+    - Follow up with Yan about new tsinfer/tsdate + new Wohns data
 
 ### Archived discussion points
 - Wohns et al and Chimp et al for UCLA talk 
