@@ -12,12 +12,13 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 
-def compute_f(D, N_min, link="inverse_distance"): 
+def compute_f(D, N_min, link="inverse_sq_distance"): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
     Args:
         D (np.ndarray): Distance matrix between pairs of samples.
-        N_min (float): Maxmimum rate that could be modelled, where samples with rate = 1/N_min or higher will have zero distances between them.
+        N_min (float): Minimum rate that could be modelled, where samples with rate = 1/N_min or higher will have zero distances between them.
+        N_max (float): Maximum rate that could be modelled, where samples with rate = N_max or lower will have infinite distances between them.
         link (str, optional): Type of link function to compute. Defaults to "inverse_distance".
 
     Returns:
@@ -35,6 +36,7 @@ def compute_f(D, N_min, link="inverse_distance"):
         D_sq = D**2
         f = (1/N_min)*np.exp(-D_sq)
         f_prime = -2*D*f
+    
     return f,f_prime
 
 def compute_M(f,f_prime,D,R,valid_mask):
