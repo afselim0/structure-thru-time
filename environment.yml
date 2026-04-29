@@ -27,9 +27,9 @@ dependencies:
     - demesdraw
     - hsluv
     - kaleido
-    - snakemake=9.14.5
+    - snakemake==9.14.5
     - tsinfer
     - tsdate
     - pulp==3.3.0
-    - tsunzip
+    - tszip
     - bio2zarr
