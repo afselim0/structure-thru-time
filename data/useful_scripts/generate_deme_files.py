@@ -182,6 +182,27 @@ def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_r
     demography.sort_events()
     return demography
 
+def coor(index,K):
+    x=index%K
+    y=index//K
+    return x,y
+
+def Stepping_Stones_2d(N,K,m):
+    #N: Ne of each deme
+    #K: Number of demes per side (total number of demes is K*K)
+    #m: probability of obtaining the new individual from a nearby deme (backward migration rate)
+    #n: sample size drawn from each deme
+    demography = msprime.Demography.isolated_model(initial_size = [N]*(K**2))
+    M = demography.migration_matrix
+    for i in range(K**2):
+        for j in range(K**2):
+            x1,y1 = coor(i,K)
+            x2,y2 = coor(j,K)
+            if (abs(x1-x2)==1 and abs(y1-y2)==0) or (abs(y1-y2)==1 and abs(x1-x2)==0):
+                M[i,j] = m/4
+    return demography
+
+
 #%%
 Ne=1e4
 
@@ -247,4 +268,12 @@ C_recent_growth_stop_time = 30
 demography = complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, distant_split_branch_length)
 graph = demography.to_demes()
 demes.dump(graph, main_demes_dir_1 + "complex_4_pops.yaml")
+# %%
+# 7- Stepping Stones 2D
+N = 100
+m = 0.0001
+K = 10
+demography = Stepping_Stones_2d(N,K,m)
+graph = demography.to_demes()
+demes.dump(graph, main_demes_dir_1 + "stepping_stones_2d.yaml")
 # %%
