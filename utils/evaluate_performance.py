@@ -143,6 +143,7 @@ def main():
     argparser.add_argument("--plot_output_name", type=str, required=True, help="Name of the output file")
     argparser.add_argument("--min_time", type=float, default=0, help="Minimum time for plotting")
     argparser.add_argument("--max_rate_plot", type=float, default=None, help="Maximum rate for plotting")
+    argparser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
     args = argparser.parse_args()
 
     # Loading data
@@ -166,11 +167,12 @@ def main():
     # error.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     # Plotting reconstructed rates over time
-    rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, ylabel="Coalescence Rate")
-    rates_fig_single = plot_rates_single_fig(reconstructed_rates, min_time = args.min_time, max_rate_plot = args.max_rate_plot, ylabel="Coalescence Rate")
+    if len(pop_labels["population"].unique()) < 10: # only plot if there are less than 10 populations for better visualization
+        rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate")
+        rates_fig_single = plot_rates_single_fig(reconstructed_rates, min_time = args.min_time, max_rate_plot = args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate")
 
-    rates_fig.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates")), dpi=500, bbox_inches="tight")
-    rates_fig_single.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates_single")), dpi=500, bbox_inches="tight")
+        rates_fig.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates")), dpi=500, bbox_inches="tight")
+        rates_fig_single.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates_single")), dpi=500, bbox_inches="tight")
 
 if __name__ == "__main__":
     main()

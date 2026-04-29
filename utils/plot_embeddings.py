@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--max_time", type=float,help="Maximum time for plotting")
     parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
+    parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
 
     args = parser.parse_args()
     embeddings_df = pd.read_parquet(args.input)
@@ -48,7 +49,7 @@ def main():
 
     # embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
     plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-    plotter.init_plot(time_scale="linear",xy_lims=lims, min_time=min_time, max_time=max_time)
+    plotter.init_plot(time_scale=args.time_scale,xy_lims=lims, min_time=min_time, max_time=max_time)
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()
@@ -62,14 +63,14 @@ def main():
         plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
 
         plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-        plotter.init_plot(time_scale="log",xy_lims=lims, min_time=min_time, max_time=max_time)
+        plotter.init_plot(time_scale=args.time_scale,xy_lims=lims, min_time=min_time, max_time=max_time)
         plotter.add_support_tube()
         plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
     
     print("Creating MP4 animation...")
     make_mp4(
     parquet_path = args.input,
-    out_mp4 = f"{output_path}/{output_name.rstrip('.html')}",
+    out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
     fps = 20,
     bounce = True,
     point_size = 10.0,

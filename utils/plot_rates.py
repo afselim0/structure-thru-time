@@ -15,7 +15,7 @@ INDIVIDUAL_LINE_ALPHA = 0.2
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
-def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate"):
+def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear"):
     setup_plotting_style()
     populations = pop_labels['population'].unique()
 
@@ -30,7 +30,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
             ax = [ax]
         ax[i].set_xlabel("Time (generations ago)")
         ax[i].set_title(f"{populations[i]}")
-        ax[i].set_xscale("log")
+        ax[i].set_xscale(time_scale)
         if max_rate_plot is not None:
             ax[i].set_ylim(top=max_rate_plot)
         ax[i].set_xlim(float(min_time), times.max())
@@ -69,13 +69,13 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
 
     return fig
 
-def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="Coalescence Rate"):
+def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear"):
     setup_plotting_style()
     times = rates_df.columns.astype(float)
     fig, ax = plt.subplots(figsize=(6,4))
     ax.set_xlabel("Time (generations ago)")
     ax.set_ylabel(ylabel)
-    ax.set_xscale("log")
+    ax.set_xscale(time_scale)
     if max_rate_plot is not None:
         ax.set_ylim(top=max_rate_plot)
     ax.set_xlim(float(min_time), times.max())
@@ -94,6 +94,7 @@ def main():
     parser.add_argument("--labels", required=True, help="Path to population labels parquet file")
     parser.add_argument("--min_time", type=float, required=True, help="Minimum time for plotting")
     parser.add_argument("--max_rate_plot", type=float, required=True, help="Maximum rate for plotting")
+    parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
     
@@ -116,11 +117,11 @@ def main():
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
     if len(populations) <= 6 and len(populations) > 1:
-        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot)
-        rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
+        rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
         rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:
-        rates_fig = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot)
+        rates_fig = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
     rates_fig.savefig(os.path.join(output_path, output_name), dpi=500)
 
 

@@ -8,7 +8,7 @@ import demes
 import demesdraw
 import matplotlib.pyplot as plt
 
-def plot_demography(demes_file_path, pop_colors, max_time, min_time):
+def plot_demography(demes_file_path, pop_colors, max_time, min_time, log_time=True):
     setup_plotting_style()
     graph = demes.load(demes_file_path)
     pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
@@ -18,7 +18,7 @@ def plot_demography(demes_file_path, pop_colors, max_time, min_time):
         ax=ax,
         colours=pop_colors_dict,
         max_time=max_time,
-        log_time=True
+        log_time=log_time
     )
     ax.set_ylim(bottom=min_time)
     return fig
@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--output_path", required=True, help="Output directory for preprocessed demography data", type=str)
     parser.add_argument("--max_time", required=True, help="Maximum time for demography plot", type=int)
     parser.add_argument("--min_time", required=True, help="Minimum time for demography plot", type=int)
+    parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
 
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
@@ -37,8 +38,9 @@ def main():
     output_path = args.output_path
     max_time = args.max_time
     min_time = args.min_time
+    time_scale = args.time_scale
     pop_colors = pd.read_csv(colors)
-    demes_fig = plot_demography(demes_file_path, pop_colors, max_time, min_time)
+    demes_fig = plot_demography(demes_file_path, pop_colors, max_time, min_time, log_time=(time_scale == "log"))
 
     demes_fig.savefig(os.path.join(output_path, "demography.png"), dpi=500)
 

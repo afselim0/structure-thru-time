@@ -5,7 +5,7 @@ from optimization_functions import *
 from tqdm import tqdm
 
 STDERR_ROLLING_WINDOW= 10
-TIMEPOINT_TOL = 1e-20
+TIMEPOINT_TOL = 1e-12
 SMOOTHING_TOL = 1e-12
 MAX_ITER = 6000
 
