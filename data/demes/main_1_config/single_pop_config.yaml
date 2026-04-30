@@ -23,7 +23,7 @@ poly: 1
 # Embeddings estimation parameters
 N_min: 1
 N_max: 1000000
-n_components: 10
+n_components: 2
 # l1: [1e-3, 1e-2]
 # l2: [1e-2]
 
