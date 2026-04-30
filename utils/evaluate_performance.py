@@ -17,19 +17,33 @@ import argparse
 import matplotlib.pyplot as plt
 import os
 
-def reconstruct_rates(embeddings, N_min, N_max):
-    embeddings_pairs = embeddings.merge(embeddings, on="time", suffixes=("_1", "_2"))
-    embeddings_pairs = embeddings_pairs[embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]]
-    embeddings_pairs["distance"] = np.sqrt(
-    (embeddings_pairs["X1_1"] - embeddings_pairs["X1_2"])**2 +
-    (embeddings_pairs["X2_1"] - embeddings_pairs["X2_2"])**2)
+def compute_distance_df(embeddings):
+    x_cols = [col for col in embeddings.columns if col.startswith("X")]
 
-    D_df = (embeddings_pairs
-    .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
-    .unstack("time"))
+    embeddings_pairs = embeddings.merge(
+        embeddings, on="time", suffixes=("_1", "_2")
+    )
 
+    embeddings_pairs = embeddings_pairs[
+        embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]
+    ]
+
+    X1 = embeddings_pairs[[f"{c}_1" for c in x_cols]].values
+    X2 = embeddings_pairs[[f"{c}_2" for c in x_cols]].values
+
+    embeddings_pairs["distance"] = np.linalg.norm(X1 - X2, axis=1)
+
+    D_df = (
+        embeddings_pairs
+        .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
+        .unstack("time")
+    )
+
+    return D_df
+
+def reconstruct_rates(D_df, N_min):
     reconstructed_rates,_ = compute_f(D_df, N_min)
-    return reconstructed_rates, D_df
+    return reconstructed_rates
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
     input_rates += 1/N_max
@@ -50,7 +64,7 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
         ax.scatter(
             input_rates.iloc[:, t],
             reconstructed_rates.iloc[:, t],
-            alpha=0.4,
+            alpha=0.1,
             s=1,
             color=cmap(norm(time))
         )
@@ -102,7 +116,7 @@ def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, po
         ax.scatter(
             filtered_input_rates[i, :],
             filtered_reconstructed_rates[i, :],
-            alpha=0.4,
+            alpha=0.1,
             s=1,
             color=other_sample_colors[i]
         )
@@ -154,7 +168,9 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
-    reconstructed_rates,D_df = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
+
+    D_df = compute_distance_df(embeddings)
+    reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
     reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
@@ -176,3 +192,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+# %%
+embeddings = pd.read_parquet("../results/simulations/outputs/single_pop/sim/data/embeddings_true.d10.Nmin1.Nmax1000000.d10.Nmin1.Nmax1000000.L1[None].L2[None].minWS100.maxWS200.V1.FS1.0.maxT10000.nT100.parquet")
+# %%

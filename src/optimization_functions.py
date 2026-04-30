@@ -12,6 +12,10 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 
+##############################
+# Helper Functions
+##############################
+
 def compute_f(D, N_min, link="inverse_sq_distance"): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
@@ -32,10 +36,9 @@ def compute_f(D, N_min, link="inverse_sq_distance"):
         inverse_distance_sq = 1/(D**2 + N_min)
         f = inverse_distance_sq
         f_prime = -2*D*inverse_distance_sq**2
-    elif link == "exponential":                     # f = 1/N_min * exp(-D^2)
-        D_sq = D**2
-        f = (1/N_min)*np.exp(-D_sq)
-        f_prime = -2*D*f
+    elif link == "exponential":                     # f = 1/N_min * exp(-D)
+        f = (1/N_min)*np.exp(-D)
+        f_prime = -f
     
     return f,f_prime
 
@@ -74,26 +77,6 @@ def compute_unpenalized_loss(f,R,valid_mask):
     loss_values = f[valid_mask] - R[valid_mask] * np.log(f[valid_mask])
     return 0.5*np.nansum(loss_values)
 
-def compute_unpenalized_gradient_sample(X_i,X,f_i,f_i_prime,D_i,R_i,valid_mask_i):
-    """Computes the contribution to the gradient for a given sample from the unpenalized term in the loss function.
-
-    Args:
-        X_i (np.ndarray): Array of coordinates for the i-th sample. (dxT)
-        X (np.ndarray): Array of coordinates for all samples. (nxdxT)
-        f_i (np.ndarray): Array of function values for the i-th sample. (nxT)
-        f_i_prime (np.ndarray): Array of function derivatives for the i-th sample. (nxT)
-        D_i (np.ndarray): Distance matrix between the i-th sample and all other samples over all time points. (nxT)
-        R_i (np.ndarray): Rates matrix between the i-th sample and all other samples over all time points. (nxT)
-        valid_mask_i (np.ndarray): Boolean mask indicating valid entries for the i-th sample. (nxT)
-    """
-    M = compute_M(f_i,f_i_prime,D_i,R_i,valid_mask_i)
-    M_sum = np.sum(M, axis=0)  # (T,)
-    term_1 = M_sum * X_i  # (d, T)
-    term_2 = (X * M[:,None,:]).sum(axis=0)  # (d, T) = sum_i (X_i * M_i) where M_i is (T,) and X_i is (d, T)
-    # term_2 =  np.einsum("it,ipt -> pt", M, X) # (Equivilent)
-    grad = term_1 - term_2
-    return grad
-
 def compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask_t):
     """Computes the contribution to the gradient for a given time point from the unpenalized term in the loss function.
 
@@ -111,6 +94,36 @@ def compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask_
     M = compute_M(f_t,f_prime_t,D_t,R_t,valid_mask_t)
     grad = (np.sum(M, axis=1)[:, np.newaxis] * X_t - M @ X_t)
     return grad
+
+def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilon = None):
+    """Wrapper function to to compute both loss and gradient for minimization for a given time point
+
+    Args:
+        X_t_flat (np.ndarray): Flattened array of coordinates for all samples at the t-th time point. (n*d,)
+        R_t (np.ndarray): Rates matrix between pairs of samples at the t-th time point. (nxn)
+        N_min (float): Minimum value for the function computation.
+        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
+        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
+            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
+
+    Returns:
+        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the t-th time point.
+    """
+    R_t = R_t.copy()
+    R_t += 1/N_max
+    n,_ = R_t.shape
+    X_t = X_t_flat.reshape((n, -1))
+    valid_mask = ~np.isnan(R_t)
+    D_t = squareform(pdist(X_t, 'euclidean'))
+    f_t, f_prime_t = compute_f(D_t, N_min)
+    loss = compute_unpenalized_loss(f_t, R_t, valid_mask)
+    grad = compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask)
+
+    if epsilon is not None:
+        loss /= epsilon
+        grad /= epsilon
+
+    return loss, grad.ravel()
 
 def compute_penalty_loss_gradient(X,smoothing_params):
     """Computes the contribution to the loss and the gradient from the penalty term that encourages smoothing.
@@ -135,6 +148,26 @@ def compute_penalty_loss_gradient(X,smoothing_params):
         grad += l1 * np.sign(DX) @ D + 2 * l2 * DX @ D
     
     return loss, grad
+
+def compute_unpenalized_gradient_sample(X_i,X,f_i,f_i_prime,D_i,R_i,valid_mask_i):
+    """Computes the contribution to the gradient for a given sample from the unpenalized term in the loss function.
+
+    Args:
+        X_i (np.ndarray): Array of coordinates for the i-th sample. (dxT)
+        X (np.ndarray): Array of coordinates for all samples. (nxdxT)
+        f_i (np.ndarray): Array of function values for the i-th sample. (nxT)
+        f_i_prime (np.ndarray): Array of function derivatives for the i-th sample. (nxT)
+        D_i (np.ndarray): Distance matrix between the i-th sample and all other samples over all time points. (nxT)
+        R_i (np.ndarray): Rates matrix between the i-th sample and all other samples over all time points. (nxT)
+        valid_mask_i (np.ndarray): Boolean mask indicating valid entries for the i-th sample. (nxT)
+    """
+    M = compute_M(f_i,f_i_prime,D_i,R_i,valid_mask_i)
+    M_sum = np.sum(M, axis=0)  # (T,)
+    term_1 = M_sum * X_i  # (d, T)
+    term_2 = (X * M[:,None,:]).sum(axis=0)  # (d, T) = sum_i (X_i * M_i) where M_i is (T,) and X_i is (d, T)
+    # term_2 =  np.einsum("it,ipt -> pt", M, X) # (Equivilent)
+    grad = term_1 - term_2
+    return grad
 
 def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_params=None):
     """Wrapper function to to compute both loss and gradient for minimization for a given sample
@@ -170,35 +203,6 @@ def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_
 
     return loss, grad.ravel()
 
-def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilon = None):
-    """Wrapper function to to compute both loss and gradient for minimization for a given time point
-
-    Args:
-        X_t_flat (np.ndarray): Flattened array of coordinates for all samples at the t-th time point. (n*d,)
-        R_t (np.ndarray): Rates matrix between pairs of samples at the t-th time point. (nxn)
-        N_min (float): Minimum value for the function computation.
-        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
-            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
-
-    Returns:
-        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the t-th time point.
-    """
-    R_t = R_t.copy()
-    R_t += 1/N_max
-    n,_ = R_t.shape
-    X_t = X_t_flat.reshape((n, -1))
-    valid_mask = ~np.isnan(R_t)
-    D_t = squareform(pdist(X_t, 'euclidean'))
-    f_t, f_prime_t = compute_f(D_t, N_min)
-    loss = compute_unpenalized_loss(f_t, R_t, valid_mask)
-    grad = compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask)
-
-    if epsilon is not None:
-        loss /= epsilon
-        grad /= epsilon
-
-    return loss, grad.ravel()
 
 # def compute_loss_gradient_all(X_flat, R, N_min, epsilon = None, smoothing_params=None):
 #     """Wrapper function to compute both loss and gradient for minimization for all time points

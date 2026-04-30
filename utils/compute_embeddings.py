@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
+    parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
     # parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
     # parser.add_argument("--tol", type=float, default=1e-16, help="Tolerance for convergence in optimization")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
@@ -39,7 +40,7 @@ def main():
 
     print(f"computing embeddings for {input}")
     rates_df = pd.read_parquet(input)
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=2, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
     output_path = args.output_path 
     if "tsinfer" in output_path or "singer" in output_path or "relate" in output_path:
         try:
