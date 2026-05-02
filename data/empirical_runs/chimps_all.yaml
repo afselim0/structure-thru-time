@@ -1,5 +1,5 @@
 version: 1
-num_threads: 12
+num_threads: 36
 
 # file paths
 output_path: ../results/empirical/DeManuel/all_chroms_all_samples_deep_time
