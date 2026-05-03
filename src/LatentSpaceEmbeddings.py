@@ -172,17 +172,24 @@ class LatentSpaceEmbeddings:
         return X, loss
 
     def get_embeddings_df(self):
-        assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
-        sample_ids = [self.idx_sample_map[i] for i in np.arange(self.num_samples)]
-        times = np.tile(self.time_points, self.num_samples)
-        X1_flat = self.embeddings[:,0,:].flatten()
-        X2_flat = self.embeddings[:,1,:].flatten()
+        assert self.embeddings is not None, (
+            "Embeddings have not been computed yet. "
+            "Please run compute_embeddings_through_time() first."
+        )
 
-        # Create the DataFrame
+        n, d, T = self.embeddings.shape
+
+        sample_ids = [self.idx_sample_map[i] for i in range(n)]
+        times = np.tile(self.time_points, n)
+
+        # Base dataframe
         df = pd.DataFrame({
-            "sample_id": np.repeat(sample_ids, self.num_timepoints),
+            "sample_id": np.repeat(sample_ids, T),
             "time": times,
-            "X1": X1_flat,
-            "X2": X2_flat
         })
+
+        # Add each embedding dimension
+        for dim in range(d):
+            df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
+
         return df

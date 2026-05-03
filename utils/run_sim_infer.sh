@@ -35,17 +35,24 @@ if [[ -z "$output_path" ]] || [[ -z "$infer_method" ]] || [[ -z "$configfile" ]]
   exit 1
 fi
 
-snakemake sim_STT --configfile "$configfile" \
-  --config output_path="$output_path"/sim\
-  --cores all --rerun-incomplete
+
+#snakemake STT_true --configfile "$configfile" \
+#   --config output_path="$output_path"/sim\
+#   --cores all --rerun-incomplete
 
 
-# snakemake infer_STT --configfile "$configfile" \
-#   --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
-#   --cores all
+# snakemake sim_STT --configfile "$configfile" \
+#   --config output_path="$output_path"/sim\
+#   --cores all --rerun-incomplete
+
+
+snakemake infer_STT --configfile "$configfile" \
+  --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
+  --cores all
 
 
 ## Example
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/split -i tsinfer -p ../data/demes/main_1_config/split_config.yaml
+# ./run_sim_infer.sh -o ../results/simulations/outputs/single_pop -i tsinfer -p ../data/demes/main_1_config/single_pop_config.yaml
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/complex_4_pops -i tsinfer -p ../data/demes/main_1_config/complex_4_pops_config.yaml
-# ./run_sim_infer.sh -o ../results/simulations/outputs/stepping_stones_2d -i tsinfer -p ../data/demes/main_1_config/stepping_stones_2d.yaml
+# ./run_sim_infer.sh -o ../results/simulations/outputs/stepping_stones_2d -i tsinfer -p ../data/demes/main_1_config/stepping_stones_2d_config.yaml
