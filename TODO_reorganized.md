@@ -16,7 +16,7 @@
 - **Performance Evaluation**
     - Look more into highlighting outliers
     - Sanity check the error in reconstructed rates with a constant pop
-    - Understanding the pulses in reconstruction error (does it go away by just increasing maximum window size?)
+    - Understanding the pulses in reconstruction error of complex 4 pop (does it go away by just increasing maximum window size?)
     - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
         - d=2, d=10, d=n-1
         - True rates (from model) vs reconstructed rates or vanilla from our rate estimate
