@@ -33,3 +33,5 @@ dependencies:
     - pulp==3.3.0
     - tszip
     - bio2zarr
+    - imageio
+    - imageio-ffmpeg
