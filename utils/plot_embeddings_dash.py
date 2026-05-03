@@ -338,11 +338,165 @@ def make_3d_base_figure(
     return fig, n_pop_traces
 
 
+def load_rates(
+    rates_path: str,
+    reconstructed_rates_path: str,
+    N_max: float,
+    labels_path: str,
+    colors_path: str,
+    cross_pop_color: str = "#808080",
+) -> dict:
+    """Load input and reconstructed rate parquets and precompute per-pair metadata."""
+    input_rates = pd.read_parquet(rates_path)
+    reconstructed_rates = pd.read_parquet(reconstructed_rates_path)
+
+    input_rates.columns = input_rates.columns.astype(float)
+    reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
+    input_rates = input_rates + 1.0 / float(N_max)
+
+    labels_df = pd.read_csv(labels_path)
+    colors_df = pd.read_csv(colors_path)
+    pop_map = dict(zip(labels_df["sample_id"].astype(str), labels_df["population"].astype(str)))
+    pop_color_map = dict(zip(colors_df["population"].astype(str), colors_df["color"].astype(str)))
+
+    sid1 = input_rates.index.get_level_values(0).astype(str)
+    sid2 = input_rates.index.get_level_values(1).astype(str)
+    pop1 = np.array([pop_map.get(s, "UNK") for s in sid1])
+    pop2 = np.array([pop_map.get(s, "UNK") for s in sid2])
+    pair_colors = np.where(
+        pop1 == pop2,
+        np.array([pop_color_map.get(p, cross_pop_color) for p in pop1]),
+        cross_pop_color,
+    )
+    pair_pop_label = np.array([
+        f"{p1} × {p2}" if p1 != p2 else p1
+        for p1, p2 in zip(pop1, pop2)
+    ])
+    pair_ids = np.array([f"{s1} × {s2}" for s1, s2 in zip(sid1, sid2)])
+
+    # Per-population median groups (same-pop pairs only)
+    unique_same_pops = sorted({p for p, q in zip(pop1, pop2) if p == q})
+    same_pop_colors = [pop_color_map.get(p, cross_pop_color) for p in unique_same_pops]
+    same_pop_indices = {
+        p: np.where((pop1 == p) & (pop2 == p))[0]
+        for p in unique_same_pops
+    }
+
+    all_vals = np.concatenate([input_rates.values.ravel(), reconstructed_rates.values.ravel()])
+    valid = np.isfinite(all_vals) & (all_vals > 0)
+    rate_min = float(np.min(all_vals[valid]))
+    rate_max = float(np.max(all_vals[valid]))
+
+    return dict(
+        input=input_rates,
+        reconstructed=reconstructed_rates,
+        input_times=input_rates.columns.values,
+        reconstructed_times=reconstructed_rates.columns.values,
+        pair_colors=pair_colors,
+        pair_pop_label=pair_pop_label,
+        pair_ids=pair_ids,
+        unique_same_pops=unique_same_pops,
+        same_pop_colors=same_pop_colors,
+        same_pop_indices=same_pop_indices,
+        rate_min=rate_min,
+        rate_max=rate_max,
+    )
+
+
+def _pop_medians(x_vals: np.ndarray, y_vals: np.ndarray,
+                 valid: np.ndarray, rates_data: dict):
+    """Return (med_x, med_y) lists aligned to rates_data['unique_same_pops']."""
+    med_x, med_y = [], []
+    for p in rates_data["unique_same_pops"]:
+        idxs = rates_data["same_pop_indices"][p]
+        ok = valid[idxs]
+        if ok.sum() == 0:
+            med_x.append(None)
+            med_y.append(None)
+        else:
+            med_x.append(float(np.median(x_vals[idxs[ok]])))
+            med_y.append(float(np.median(y_vals[idxs[ok]])))
+    return med_x, med_y
+
+
+def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
+    """Log-log scatter of input vs reconstructed rates for the nearest time slice."""
+    import math
+    in_col_idx  = int(np.argmin(np.abs(rates_data["input_times"]         - float(time_val))))
+    rec_col_idx = int(np.argmin(np.abs(rates_data["reconstructed_times"] - float(time_val))))
+    t_actual = float(rates_data["input_times"][in_col_idx])
+
+    x_vals = rates_data["input"].iloc[:, in_col_idx].values
+    y_vals = rates_data["reconstructed"].iloc[:, rec_col_idx].values
+    valid = np.isfinite(x_vals) & np.isfinite(y_vals) & (x_vals > 0) & (y_vals > 0)
+
+    rate_min = rates_data["rate_min"]
+    rate_max = rates_data["rate_max"]
+    log_range = [math.log10(rate_min), math.log10(rate_max)]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=[rate_min, rate_max],
+        y=[rate_min, rate_max],
+        mode="lines",
+        line=dict(color="black", dash="dash", width=1),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scattergl(
+        x=x_vals[valid].tolist(),
+        y=y_vals[valid].tolist(),
+        mode="markers",
+        marker=dict(size=4, color=rates_data["pair_colors"][valid].tolist(), opacity=0.6),
+        customdata=np.column_stack([
+            rates_data["pair_ids"][valid],
+            rates_data["pair_pop_label"][valid],
+        ]),
+        hovertemplate=(
+            "pair: %{customdata[0]}<br>"
+            "pop: %{customdata[1]}<br>"
+            "input: %{x:.3e}<br>"
+            "reconstructed: %{y:.3e}<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    med_x, med_y = _pop_medians(x_vals, y_vals, valid, rates_data)
+    fig.add_trace(go.Scatter(
+        x=med_x,
+        y=med_y,
+        mode="markers+text",
+        marker=dict(
+            size=14,
+            color=rates_data["same_pop_colors"],
+            symbol="diamond",
+            line=dict(color="white", width=1.5),
+        ),
+        text=rates_data["unique_same_pops"],
+        textposition="top center",
+        textfont=dict(size=9),
+        customdata=[[p] for p in rates_data["unique_same_pops"]],
+        hovertemplate=(
+            "pop: %{customdata[0]}<br>"
+            "median input: %{x:.3e}<br>"
+            "median reconstructed: %{y:.3e}<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        title=f"Rate comparison (t ≈ {t_actual:.2f})",
+        margin=dict(l=50, r=20, t=40, b=50),
+        xaxis=dict(title="Input rate + 1/N_max", type="log", range=log_range),
+        yaxis=dict(title="Reconstructed rate", type="log", range=log_range),
+    )
+    return fig
+
+
 def make_app(
     data: dict,
     time_scale: str = "linear",
     time_stride: int = 1,
     xy_lims: float | None = None,
+    rates_data: dict | None = None,
 ):
     app = Dash(__name__)
     times = data["times"]
@@ -355,6 +509,11 @@ def make_app(
     plane_trace_idx = n_pop_traces + 1
 
     z_for_time = np.array([_z_from_time(t, time_scale) for t in times])
+
+    fig_rates_base = (
+        make_rates_figure(float(times[0]), rates_data)
+        if rates_data is not None else go.Figure()
+    )
 
     app.layout = html.Div(
         style={"maxWidth": "1600px", "margin": "0 auto", "fontFamily": "system-ui"},
@@ -405,6 +564,14 @@ def make_app(
                         value=["yes"],
                         style={"whiteSpace": "nowrap"},
                     ),
+                    dcc.Checklist(
+                        id="show_rates",
+                        options=[{"label": " Rate panel", "value": "yes",
+                                  "disabled": rates_data is None}],
+                        value=[],
+                        style={"whiteSpace": "nowrap",
+                               "display": "inline" if rates_data is not None else "none"},
+                    ),
                     html.Div(
                         style={"display": "flex", "flexDirection": "column", "alignItems": "center",
                                "minWidth": "140px"},
@@ -421,6 +588,14 @@ def make_app(
                     ),
                     html.Button("Fit axes (this frame)", id="fit_axes", n_clicks=0),
                     html.Button("Reset axes (global)", id="reset_axes", n_clicks=0),
+                ],
+            ),
+
+            html.Div(
+                id="rates_panel",
+                style={"display": "none", "marginTop": "8px"},
+                children=[
+                    dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "400px"}),
                 ],
             ),
         ],
@@ -504,6 +679,53 @@ def make_app(
 
         return fig_2d, patched
 
+    @app.callback(
+        Output("rates_panel", "style"),
+        Input("show_rates", "value"),
+    )
+    def toggle_rates_panel(show_rates_val):
+        if "yes" in (show_rates_val or []):
+            return {"display": "block", "marginTop": "8px"}
+        return {"display": "none", "marginTop": "8px"}
+
+    @app.callback(
+        Output("graph_rates", "figure"),
+        Input("t_idx", "value"),
+        Input("show_rates", "value"),
+    )
+    def update_rates(t_idx, show_rates_val):
+        if rates_data is None or "yes" not in (show_rates_val or []):
+            return no_update
+
+        t_val = float(times[int(t_idx)])
+
+        # Full rebuild only when the panel is first toggled on; Patch for every tick.
+        if ctx.triggered_id == "show_rates":
+            return make_rates_figure(t_val, rates_data)
+
+        in_col_idx  = int(np.argmin(np.abs(rates_data["input_times"]         - t_val)))
+        rec_col_idx = int(np.argmin(np.abs(rates_data["reconstructed_times"] - t_val)))
+        t_actual = float(rates_data["input_times"][in_col_idx])
+
+        x_vals = rates_data["input"].iloc[:, in_col_idx].values
+        y_vals = rates_data["reconstructed"].iloc[:, rec_col_idx].values
+        valid = np.isfinite(x_vals) & np.isfinite(y_vals) & (x_vals > 0) & (y_vals > 0)
+
+        med_x, med_y = _pop_medians(x_vals, y_vals, valid, rates_data)
+
+        patched = Patch()
+        patched["data"][1]["x"] = x_vals[valid].tolist()
+        patched["data"][1]["y"] = y_vals[valid].tolist()
+        patched["data"][1]["marker"]["color"] = rates_data["pair_colors"][valid].tolist()
+        patched["data"][1]["customdata"] = np.column_stack([
+            rates_data["pair_ids"][valid],
+            rates_data["pair_pop_label"][valid],
+        ]).tolist()
+        patched["data"][2]["x"] = med_x
+        patched["data"][2]["y"] = med_y
+        patched["layout"]["title"]["text"] = f"Rate comparison (t ≈ {t_actual:.2f})"
+        return patched
+
     return app
 
 
@@ -528,6 +750,12 @@ if __name__ == "__main__":
                    help="Symmetric XY axis limit (both views), or 'None'")
     p.add_argument("--generation_time", type=float, default=None,
                    help="Generation time in years; scales time axis")
+    p.add_argument("--rates", type=str, default=None,
+                   help="Path to input rates parquet (enables rate panel)")
+    p.add_argument("--reconstructed_rates", type=str, default=None,
+                   help="Path to reconstructed rates parquet (enables rate panel)")
+    p.add_argument("--N_max", type=float, default=None,
+                   help="N_max used during embedding (required with --rates)")
     p.add_argument("--port", type=int, default=8050)
     args = p.parse_args()
 
@@ -544,10 +772,23 @@ if __name__ == "__main__":
         generation_time=args.generation_time,
     )
 
+    rates_data = None
+    if args.rates and args.reconstructed_rates:
+        if args.N_max is None:
+            raise ValueError("--N_max is required when --rates and --reconstructed_rates are provided")
+        rates_data = load_rates(
+            rates_path=args.rates,
+            reconstructed_rates_path=args.reconstructed_rates,
+            N_max=args.N_max,
+            labels_path=args.labels,
+            colors_path=args.colors,
+        )
+
     app = make_app(
         data,
         time_scale=args.time_scale,
         time_stride=args.time_stride,
         xy_lims=lims,
+        rates_data=rates_data,
     )
     app.run(debug=False, port=args.port)
