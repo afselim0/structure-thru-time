@@ -331,7 +331,7 @@ def make_3d_base_figure(
             aspectmode="manual",
             aspectratio=dict(x=1, y=1, z=1.2),
         ),
-        margin=dict(l=0, r=0, t=40, b=0),
+        margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.7)"),
         title=f"3D Trajectories (t = {times[0]:.2f})",
     )
@@ -484,9 +484,11 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
     ))
     fig.update_layout(
         title=f"Rate comparison (t ≈ {t_actual:.2f})",
-        margin=dict(l=50, r=20, t=40, b=50),
-        xaxis=dict(title="Input rate + 1/N_max", type="log", range=log_range),
-        yaxis=dict(title="Reconstructed rate", type="log", range=log_range),
+        margin=dict(l=50, r=20, t=30, b=40),
+        xaxis=dict(title="Input rate + 1/N_max", type="log", range=log_range,
+                   exponentformat="e"),
+        yaxis=dict(title="Reconstructed rate", type="log", range=log_range,
+                   exponentformat="e"),
     )
     return fig
 
@@ -516,22 +518,24 @@ def make_app(
     )
 
     app.layout = html.Div(
-        style={"maxWidth": "1600px", "margin": "0 auto", "fontFamily": "system-ui"},
+        style={"maxWidth": "1400px", "margin": "0 auto", "fontFamily": "system-ui",
+               "padding": "0 8px"},
         children=[
-            html.H3("Structure Through Time — 3D + 2D Linked View"),
+            html.H3("Structure Through Time — 3D + 2D Linked View",
+                    style={"margin": "6px 0 4px 0"}),
 
             html.Div(
-                style={"display": "flex", "gap": "8px"},
+                style={"display": "flex", "gap": "4px"},
                 children=[
                     dcc.Graph(
                         id="graph3d",
                         figure=fig_3d,
-                        style={"flex": "1", "height": "700px"},
+                        style={"flex": "1", "height": "400px"},
                     ),
                     dcc.Graph(
                         id="graph2d",
                         figure=make_figure(0, data),
-                        style={"flex": "1", "height": "700px"},
+                        style={"flex": "1", "height": "400px"},
                     ),
                 ],
             ),
@@ -540,7 +544,7 @@ def make_app(
             dcc.Interval(id="play_interval", interval=200, disabled=True, n_intervals=0),
 
             html.Div(
-                style={"display": "flex", "gap": "16px", "alignItems": "center", "marginTop": "8px"},
+                style={"display": "flex", "gap": "16px", "alignItems": "center", "marginTop": "4px"},
                 children=[
                     html.Button("▶ Play", id="play_pause_btn", n_clicks=0,
                                 style={"whiteSpace": "nowrap", "fontWeight": "bold"}),
@@ -593,9 +597,9 @@ def make_app(
 
             html.Div(
                 id="rates_panel",
-                style={"display": "none", "marginTop": "8px"},
+                style={"display": "none", "marginTop": "4px"},
                 children=[
-                    dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "400px"}),
+                    dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "260px"}),
                 ],
             ),
         ],
