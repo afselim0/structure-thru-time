@@ -1,5 +1,6 @@
 #%%
 #!/usr/bin/env python3
+import math
 import numpy as np
 import pandas as pd
 import sys
@@ -156,6 +157,12 @@ def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_lab
     flat_indices = np.argsort(flat_z, axis=None)[-top_k:][::-1]
     pair_indices, time_indices = np.unravel_index(flat_indices, z_scores.shape)
 
+    # Capture full-data axis limits before subsetting (matches static plot autoscale)
+    all_vals = np.concatenate([input_rates.values.ravel(), reconstructed_rates.values.ravel()])
+    all_vals = all_vals[np.isfinite(all_vals) & (all_vals > 0)]
+    rate_min = float(all_vals.min())
+    rate_max = float(all_vals.max())
+
     pop_map = pop_labels.set_index("sample_id")["population"]
     df = pd.DataFrame({
         "sample_1": [pairs[i][0] for i in pair_indices],
@@ -167,9 +174,6 @@ def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_lab
     })
     df["pop_1"] = df["sample_1"].map(pop_map).fillna("unknown")
     df["pop_2"] = df["sample_2"].map(pop_map).fillna("unknown")
-
-    rate_min = min(df["input_rate"].min(), df["reconstructed_rate"].min())
-    rate_max = max(df["input_rate"].max(), df["reconstructed_rate"].max())
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -202,8 +206,8 @@ def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_lab
         name=f"Top-{top_k} outliers",
     ))
     fig.update_layout(
-        xaxis=dict(title="Input rate + 1/N_max", type="log"),
-        yaxis=dict(title="Reconstructed rate", type="log"),
+        xaxis=dict(title="Input rate + 1/N_max", type="log", range=[math.log10(rate_min), math.log10(rate_max)]),
+        yaxis=dict(title="Reconstructed rate",   type="log", range=[math.log10(rate_min), math.log10(rate_max)]),
         title=f"Top-{top_k} outlier (pair × time) points by within-timepoint z-score",
     )
     return fig
