@@ -28,11 +28,11 @@ dependencies:
     - hsluv
     - kaleido
     - snakemake==9.14.5
-    - tsinfer
-    - tsdate
+    - tsinfer==0.5.1
+    - tsdate==0.2.6
     - pulp==3.3.0
     - tszip
-    - bio2zarr
+    - bio2zarr[vcf]
     - imageio
     - imageio-ffmpeg
     - pyvista
