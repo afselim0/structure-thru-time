@@ -54,33 +54,36 @@ def main():
     # plotter.add_population_medians()
     plotter.add_legend()
     plotter.fig.show()
-    plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
-    plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
     plotter.fig.update_layout(title_text=output_basename)
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
-    if len(populations) <=5:
-        plotter.add_support_tube()
-        plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
+    plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+    plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
+    # if len(populations) <=5:
+    #     plotter.add_support_tube()
+    #     plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
 
-        plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-        plotter.init_plot(time_scale=args.time_scale,xy_lims=lims, min_time=min_time, max_time=max_time)
-        plotter.add_support_tube()
-        plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
+    #     plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
+    #     plotter.init_plot(time_scale=args.time_scale,xy_lims=lims, min_time=min_time, max_time=max_time)
+    #     plotter.add_support_tube()
+    #     plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
     
     print("Creating MP4 animation...")
-    make_mp4(
-    parquet_path = args.input,
-    out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
-    fps = 20,
-    bounce = True,
-    point_size = 10.0,
-    alpha = 0.8,
-    dpi = 120,
-    min_time = args.min_time,
-    max_time = args.max_time,
-    colors_path = args.colors,
-    labels_path = args.labels,
-    )
+    try:
+        make_mp4(
+            parquet_path = args.input,
+            out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
+            fps = 20,
+            bounce = True,
+            point_size = 10.0,
+            alpha = 0.8,
+            dpi = 120,
+            min_time = args.min_time,
+            max_time = args.max_time,
+            colors_path = args.colors,
+            labels_path = args.labels,
+        )
+    except Exception as e:
+        print(f"Warning: MP4 animation failed: {e}")
 
 if __name__ == "__main__":
     main()
