@@ -433,6 +433,9 @@ class PlotEmbeddings:
         if max_samples is not None:
             samples = samples[: int(max_samples)]
 
+        rng = np.random.default_rng(seed=0)
+        samples = rng.permutation(samples)
+
         for sample in samples:
             sample_data = df[df[self.sample_id_col] == sample]
             if sample_data.empty:

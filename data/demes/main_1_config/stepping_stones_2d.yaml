@@ -11,11 +11,11 @@ mutation_rate: 1.2e-7
 recombination_rate: 1.2e-7
 
 # coal time pdf estimation
-max_time: 100000
-n_timepoints: 2000
+max_time: 20000
+n_timepoints: 5000
 
 # rate estimation parameters
-min_window_size: 200
+min_window_size: 100
 max_window_size: 5000
 
 # Embeddings estimation parameters
@@ -28,4 +28,3 @@ N_max: 100000000
 min_time: 50
 max_rate_plot: 0.001
 embeddings_plot_lims: 500
-time_scale: log

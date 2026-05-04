@@ -15,7 +15,7 @@
 
 - **Performance Evaluation**
     - Look more into highlighting outliers
-    - What's going on with split + tsinfer
+    - Sanity check the error in reconstructed rates with a constant pop
     - Understanding the pulses in reconstruction error of complex 4 pop (does it go away by just increasing maximum window size?)
     - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
         - d=2, d=10, d=n-1
@@ -63,6 +63,7 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 
 ## Archive
 #### Done
+- DONE What's going on with split + tsinfer - it was an issue of ylimit on the plot 
 - DONE Parent directories in /project/jnovembre to keep track of results
 
 - DONE 2-D plots wuold help (also for showing admixture) (HT Amy G)

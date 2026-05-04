@@ -42,7 +42,9 @@ N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
-n_components                      = read_config("n_components", default = 2)# # For plotting purposes only 
+if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
+if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
+n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -71,6 +73,7 @@ COMPUTE_RATES_SCRIPT              = "../src/compute_coal_rates.py"
 COMPUTE_EMBEDDINGS_SCRIPT         = "../src/LatentSpaceEmbeddings.py"
 OPTIMIZATION_FUNCTIONS_SCRIPT         = "../src/optimization_functions.py"
 PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
+PLOT_EMBEDDINGS_PYVISTA_SCRIPT    = "../src/PlotEmbeddingsPyVista.py"
 
 # Util Scripts
 preprocess_demography_script      = "preprocess_demography.py"
@@ -82,8 +85,9 @@ infer_trees_script                = "infer_trees.py"
 compute_pdf_wrapper_script        = "compute_pdf.py"
 compute_rates_wrapper_script      = "compute_rates.py"
 plot_rates_script                 = "plot_rates.py"
-compute_embeddings_wrapper_script = "compute_embeddings.py"
-plot_embeddings_wrapper_script    = "plot_embeddings.py"
+compute_embeddings_wrapper_script      = "compute_embeddings.py"
+plot_embeddings_wrapper_script         = "plot_embeddings.py"
+plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
 evaluate_performance_script       = "evaluate_performance.py"
 run_population_combs_script       = "run_pop_combs.py"
 
@@ -100,10 +104,11 @@ pca_plot_file_name                = "pca.png"
 demography_plot_file_name         = "demography.png"
 rates_true_file_name              = "rates_true.parquet"
 rates_true_plot_file_name         = "rates_true.png"
-embeddings_true_file_name         = f"embeddings_true{TRUE_TAG}.parquet"
-embeddings_true_plot_file_name    = f"embeddings_true{TRUE_TAG}.html"
-performance_true_file_name        = f"reconstructed_rates_true{TRUE_TAG}.parquet"
-performance_true_plot_file_name   = f"performance_true{TRUE_TAG}.png"
+embeddings_true_file_name              = f"embeddings_true{TRUE_TAG}.parquet"
+embeddings_true_plot_file_name         = f"embeddings_true{TRUE_TAG}.html"
+performance_true_file_name             = f"reconstructed_rates_true{TRUE_TAG}.parquet"
+performance_true_plot_file_name        = f"performance_true{TRUE_TAG}.png"
+performance_true_interactive_file_name = f"performance_true{TRUE_TAG}.html"
 sim_finished_file_name            = f"sim_trees_ready{SIM_TAG}.txt"
 infer_finished_file_name          = f"infer_trees_ready{SIM_TAG}.txt"
 
@@ -123,8 +128,12 @@ rates_plot_file_name              = f"rates{RATES_TAG}.png"
 
 embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
 embeddings_plot_file_name         = f"embeddings{PLOT_TAG}.html"
-performance_data_file_name        = f"reconstructed_rates{STT_TAG}.parquet"
-performance_plot_file_name        = f"performance{STT_TAG}.png"
+performance_data_file_name             = f"reconstructed_rates{STT_TAG}.parquet"
+performance_plot_file_name             = f"performance{STT_TAG}.png"
+performance_interactive_file_name      = f"performance{STT_TAG}.html"
+embeddings_pyvista_plot_file_name      = f"embeddings_pyvista{PLOT_TAG}.html"
+dash_launch_file_name                  = f"launch_dash{STT_TAG}.sh"
+dash_launch_true_file_name             = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
 
 # Target file paths
 pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
@@ -135,6 +144,7 @@ embeddings_true                   = os.path.join(data_output_path, embeddings_tr
 embeddings_true_plot              = os.path.join(plot_output_path, embeddings_true_plot_file_name)
 performance_true_data             = os.path.join(data_output_path, performance_true_file_name)
 performance_true_plot             = os.path.join(plot_output_path, performance_true_plot_file_name)
+performance_true_interactive      = os.path.join(plot_output_path, performance_true_interactive_file_name)
 sim_finished                      = os.path.join(tree_output_path, sim_finished_file_name)
 infer_finished                    = os.path.join(tree_output_path, infer_finished_file_name)
 
@@ -146,6 +156,10 @@ embeddings_data                   = os.path.join(data_output_path, embeddings_da
 embeddings_plot                   = os.path.join(plot_output_path, embeddings_plot_file_name)
 performance_data                  = os.path.join(data_output_path, performance_data_file_name)
 performance_plot                  = os.path.join(plot_output_path, performance_plot_file_name)
+performance_interactive           = os.path.join(plot_output_path, performance_interactive_file_name)
+embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
+dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
+dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
 
 combs_data_dir                    = os.path.join(output_path, "combs/data")
 combs_plot_dir                    = os.path.join(output_path, "combs/plots")
@@ -158,9 +172,9 @@ if trees_dir != tree_output_path and not os.path.exists(trees_ready): # In the c
 # =====================================================
 sim_targets = [
     pop_labels,pop_colors,pca_plot,demography_plot,
-    rates_true,rates_true_plot, 
+    rates_true,rates_true_plot,
     embeddings_true,embeddings_true_plot,
-    performance_true_data,performance_true_plot,
+    performance_true_data,performance_true_plot,performance_true_interactive,
     sim_finished
     ]
 
@@ -168,13 +182,22 @@ STT_targets = [
     pdf_data,
     rates_data, rates_plot,
     embeddings_data, embeddings_plot,
-    performance_plot, performance_data
+    performance_plot, performance_data, performance_interactive,
+    dash_launch,
     ]
-    
+
+true_targets = [
+    pop_labels, pop_colors,
+    rates_true, rates_true_plot,
+    embeddings_true, embeddings_true_plot,
+    performance_true_data, performance_true_plot, performance_true_interactive,
+    dash_launch_true,
+    ]
+
 # =====================================================
 # General Rules
 # =====================================================
-rule sim: # Only simulate the trees 
+rule sim: # Only simulate the trees
     input: sim_targets
 rule sim_STT: # Simulate and run STT on simulated trees
     input: sim_targets, STT_targets
@@ -186,6 +209,10 @@ rule infer_STT: # Infer and run STT on inferred trees
 
 rule STT: # Run STT
     input: STT_targets
+
+# Compute true rates, embeddings, and performance without simulating trees
+rule STT_true:
+    input: true_targets
 
 # =====================================================
 # Specific Rules
@@ -334,14 +361,18 @@ rule plot_embeddings_true:
         script = plot_embeddings_wrapper_script,
         main_script = PLOT_EMBEDDINGS_SCRIPT
     output:
-        embeddings_true_plot
+        embeddings_true_plot,
+        dash_script = dash_launch_true,
     params:
         outdir = plot_output_path,
         output_name = embeddings_true_plot_file_name,
         min_time = min_time,
         embeddings_plot_lims = embeddings_plot_lims,
         embeddings_max_time = embeddings_max_time,
-        time_scale = time_scale
+        time_scale = time_scale,
+        N_max = N_max,
+        rates_path = rates_true,
+        reconstructed_rates_path = performance_true_data,
     shell:
         """
         mkdir -p {params.outdir}
@@ -355,6 +386,21 @@ rule plot_embeddings_true:
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
             --time_scale {params.time_scale}
+        cat > {output.dash_script} << 'DASHEOF'
+#!/bin/bash
+# Run from the utils/ directory
+python plot_embeddings_dash.py \\
+    {input.embeddings} \\
+    --labels {input.pop_labels} \\
+    --colors {input.pop_colors} \\
+    --rates {params.rates_path} \\
+    --reconstructed_rates {params.reconstructed_rates_path} \\
+    --N_max {params.N_max} \\
+    --time_scale {params.time_scale} \\
+    --min_time {params.min_time} \\
+    --max_time {params.embeddings_max_time}
+DASHEOF
+        chmod +x {output.dash_script}
         """
 
 rule evaluate_performance_true:
@@ -366,7 +412,8 @@ rule evaluate_performance_true:
         script = evaluate_performance_script
     output:
         performance_true_data,
-        performance_true_plot
+        performance_true_plot,
+        performance_true_interactive
     params:
         N_min = N_min,
         N_max = N_max,
@@ -588,11 +635,61 @@ rule plot_embeddings:
         script = plot_embeddings_wrapper_script,
         main_script = PLOT_EMBEDDINGS_SCRIPT
     output:
-        embeddings_plot
+        embeddings_plot,
+        dash_script = dash_launch,
     params:
         outdir = plot_output_path,
         output_name = embeddings_plot_file_name,
-        min_time=min_time,
+        min_time = min_time,
+        embeddings_plot_lims = embeddings_plot_lims,
+        embeddings_max_time = embeddings_max_time,
+        time_scale = time_scale,
+        N_max = N_max,
+        rates_path = rates_data,
+        reconstructed_rates_path = performance_data,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --lims {params.embeddings_plot_lims} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --time_scale {params.time_scale}
+        cat > {output.dash_script} << 'DASHEOF'
+#!/bin/bash
+# Run from the utils/ directory
+python plot_embeddings_dash.py \\
+    {input.embeddings} \\
+    --labels {input.pop_labels} \\
+    --colors {input.pop_colors} \\
+    --rates {params.rates_path} \\
+    --reconstructed_rates {params.reconstructed_rates_path} \\
+    --N_max {params.N_max} \\
+    --time_scale {params.time_scale} \\
+    --min_time {params.min_time} \\
+    --max_time {params.embeddings_max_time}
+DASHEOF
+        chmod +x {output.dash_script}
+        """
+# Not in STT_targets yet — run explicitly with: snakemake plot_embeddings_pyvista
+rule plot_embeddings_pyvista:
+    input:
+        embeddings = embeddings_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_embeddings_pyvista_wrapper_script,
+        main_script = PLOT_EMBEDDINGS_PYVISTA_SCRIPT
+    output:
+        embeddings_pyvista_plot
+    params:
+        outdir = plot_output_path,
+        output_name = embeddings_pyvista_plot_file_name,
+        min_time = min_time,
         embeddings_plot_lims = embeddings_plot_lims,
         embeddings_max_time = embeddings_max_time,
         time_scale = time_scale
@@ -619,7 +716,8 @@ rule evaluate_performance:
         script = evaluate_performance_script
     output:
         performance_data,
-        performance_plot
+        performance_plot,
+        performance_interactive
     params:
         N_min = N_min,
         N_max = N_max,

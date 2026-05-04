@@ -1,5 +1,6 @@
 #%%
 #!/usr/bin/env python3
+import math
 import numpy as np
 import pandas as pd
 import sys
@@ -17,33 +18,19 @@ import argparse
 import matplotlib.pyplot as plt
 import os
 
-def compute_distance_df(embeddings):
-    x_cols = [col for col in embeddings.columns if col.startswith("X")]
+def reconstruct_rates(embeddings, N_min, N_max):
+    embeddings_pairs = embeddings.merge(embeddings, on="time", suffixes=("_1", "_2"))
+    embeddings_pairs = embeddings_pairs[embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]]
+    embeddings_pairs["distance"] = np.sqrt(
+    (embeddings_pairs["X1_1"] - embeddings_pairs["X1_2"])**2 +
+    (embeddings_pairs["X2_1"] - embeddings_pairs["X2_2"])**2)
 
-    embeddings_pairs = embeddings.merge(
-        embeddings, on="time", suffixes=("_1", "_2")
-    )
+    D_df = (embeddings_pairs
+    .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
+    .unstack("time"))
 
-    embeddings_pairs = embeddings_pairs[
-        embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]
-    ]
-
-    X1 = embeddings_pairs[[f"{c}_1" for c in x_cols]].values
-    X2 = embeddings_pairs[[f"{c}_2" for c in x_cols]].values
-
-    embeddings_pairs["distance"] = np.linalg.norm(X1 - X2, axis=1)
-
-    D_df = (
-        embeddings_pairs
-        .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
-        .unstack("time")
-    )
-
-    return D_df
-
-def reconstruct_rates(D_df, N_min):
     reconstructed_rates,_ = compute_f(D_df, N_min)
-    return reconstructed_rates
+    return reconstructed_rates, D_df
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
     input_rates += 1/N_max
@@ -64,7 +51,7 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
         ax.scatter(
             input_rates.iloc[:, t],
             reconstructed_rates.iloc[:, t],
-            alpha=0.1,
+            alpha=0.4,
             s=1,
             color=cmap(norm(time))
         )
@@ -85,10 +72,13 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, N_max):
     ## Add r^2 value to the plot
     input_rate_values = input_rates.values.flatten()
     reconstructed_rate_values = reconstructed_rates.values.flatten()
-    r_squared = np.corrcoef(input_rate_values, reconstructed_rate_values)[0, 1] ** 2
-    corr, p_value = spearmanr(input_rate_values, reconstructed_rate_values)
+    valid = np.isfinite(input_rate_values) & np.isfinite(reconstructed_rate_values) & (input_rate_values > 0) & (reconstructed_rate_values > 0)
+    r_squared     = np.corrcoef(input_rate_values[valid], reconstructed_rate_values[valid])[0, 1] ** 2
+    log_r_squared = np.corrcoef(np.log(input_rate_values[valid]), np.log(reconstructed_rate_values[valid]))[0, 1] ** 2
+    corr, p_value = spearmanr(input_rate_values[valid], reconstructed_rate_values[valid])
     ax.text(0.05, 0.95, f"$r^2$ = {r_squared:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
-    ax.text(0.05, 0.90, f"Spearman $\\rho$ = {corr:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+    ax.text(0.05, 0.90, f"$r^2$ (log) = {log_r_squared:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
+    ax.text(0.05, 0.85, f"Spearman $\\rho$ = {corr:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
 
     return fig
 
@@ -116,7 +106,7 @@ def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, po
         ax.scatter(
             filtered_input_rates[i, :],
             filtered_reconstructed_rates[i, :],
-            alpha=0.1,
+            alpha=0.4,
             s=1,
             color=other_sample_colors[i]
         )
@@ -136,6 +126,92 @@ def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, po
     ax.text(0.05, 0.90, f"Spearman $\\rho$ = {corr:.3f}", transform=ax.transAxes, fontsize=10, verticalalignment='top')
 
     return fig
+
+def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, top_k=2000, min_pairs_per_slice=10):
+    input_rates = input_rates.copy()
+    input_rates += 1/N_max
+    input_rates.columns = input_rates.columns.astype(float)
+    reconstructed_rates = reconstructed_rates.copy()
+    reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
+
+    pairs = input_rates.index
+    times = input_rates.columns.values
+
+    log_ratio = np.abs(np.log(reconstructed_rates.values / input_rates.values))
+
+    # Z-score within each time slice; skip slices with too few valid pairs
+    z_scores = np.full_like(log_ratio, np.nan)
+    for t_idx in range(len(times)):
+        col = log_ratio[:, t_idx]
+        valid = np.isfinite(col)
+        if valid.sum() < min_pairs_per_slice:
+            continue
+        std_t = col[valid].std()
+        if std_t < 1e-12:
+            continue
+        z_scores[valid, t_idx] = (col[valid] - col[valid].mean()) / std_t
+
+    # Select top K by z-score
+    flat_z = z_scores.copy()
+    flat_z[~np.isfinite(flat_z)] = -np.inf
+    flat_indices = np.argsort(flat_z, axis=None)[-top_k:][::-1]
+    pair_indices, time_indices = np.unravel_index(flat_indices, z_scores.shape)
+
+    # Capture full-data axis limits before subsetting (matches static plot autoscale)
+    all_vals = np.concatenate([input_rates.values.ravel(), reconstructed_rates.values.ravel()])
+    all_vals = all_vals[np.isfinite(all_vals) & (all_vals > 0)]
+    rate_min = float(all_vals.min())
+    rate_max = float(all_vals.max())
+
+    pop_map = pop_labels.set_index("sample_id")["population"]
+    df = pd.DataFrame({
+        "sample_1": [pairs[i][0] for i in pair_indices],
+        "sample_2": [pairs[i][1] for i in pair_indices],
+        "time":               times[time_indices],
+        "input_rate":         input_rates.values[pair_indices, time_indices],
+        "reconstructed_rate": reconstructed_rates.values[pair_indices, time_indices],
+        "z_score":            z_scores[pair_indices, time_indices],
+    })
+    df["pop_1"] = df["sample_1"].map(pop_map).fillna("unknown")
+    df["pop_2"] = df["sample_2"].map(pop_map).fillna("unknown")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=[rate_min, rate_max], y=[rate_min, rate_max],
+        mode="lines", line=dict(color="black", dash="dash", width=2),
+        name="y = x", showlegend=True,
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["input_rate"],
+        y=df["reconstructed_rate"],
+        mode="markers",
+        marker=dict(
+            size=5, color=df["time"], colorscale="Viridis",
+            showscale=True, colorbar=dict(title="Time"), opacity=0.7,
+        ),
+        customdata=np.stack([
+            df["sample_1"].astype(str), df["sample_2"].astype(str),
+            df["pop_1"].astype(str),    df["pop_2"].astype(str),
+            df["time"].values,          df["z_score"].values,
+        ], axis=1),
+        hovertemplate=(
+            "<b>%{customdata[2]} — %{customdata[3]}</b><br>"
+            "Samples: %{customdata[0]} / %{customdata[1]}<br>"
+            "Time: %{customdata[4]:.1f}<br>"
+            "Input rate: %{x:.3e}<br>"
+            "Reconstructed rate: %{y:.3e}<br>"
+            "Z-score: %{customdata[5]:.2f}"
+            "<extra></extra>"
+        ),
+        name=f"Top-{top_k} outliers",
+    ))
+    fig.update_layout(
+        xaxis=dict(title="Input rate + 1/N_max", type="log", range=[math.log10(rate_min), math.log10(rate_max)]),
+        yaxis=dict(title="Reconstructed rate",   type="log", range=[math.log10(rate_min), math.log10(rate_max)]),
+        title=f"Top-{top_k} outlier (pair × time) points by within-timepoint z-score",
+    )
+    return fig
+
 
 def find_percent_error(input_rates, reconstructed_rates, N_max):
     input_rates += 1/N_max
@@ -168,12 +244,16 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
-
-    D_df = compute_distance_df(embeddings)
-    reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
+    reconstructed_rates,D_df = reconstruct_rates(embeddings, N_min=N_min, N_max=N_max)
     reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
+
+    # Interactive outlier plot (must run before reconstructed_vs_input_all_times, which modifies rates in-place)
+    fig_interactive = reconstructed_vs_input_interactive(rates, reconstructed_rates, pop_labels, pop_colors, N_max)
+    interactive_output_name = args.plot_output_name.replace(".png", ".html")
+    fig_interactive.write_html(f"{args.plot_output_path}/{interactive_output_name}")
+
     # True vs Reconstructed rates across all time points
     tvr_fig = reconstructed_vs_input_all_times(rates, reconstructed_rates, N_max)
     tvr_fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500, bbox_inches="tight")
@@ -192,6 +272,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# %%
-embeddings = pd.read_parquet("../results/simulations/outputs/single_pop/sim/data/embeddings_true.d10.Nmin1.Nmax1000000.d10.Nmin1.Nmax1000000.L1[None].L2[None].minWS100.maxWS200.V1.FS1.0.maxT10000.nT100.parquet")
-# %%
