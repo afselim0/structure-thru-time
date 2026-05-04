@@ -26,6 +26,15 @@ CLI flags
 - --time-scale  log|linear  (default log)
 - --time-stride N           subsample time points for 3D trajectories (default 5)
 - --lims        float       symmetric XY axis limit (both views)
+
+Example run: 
+python plot_embeddings_dash.py \
+  "../results/empirical/all.npp.2/data/embeddings.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --labels "../data/metadata/wohns_pop_labels.csv" \
+  --colors "../data/metadata/wohns_pop_colors.csv" \
+  --rates "../results/empirical/all.npp.2/data/rates.minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --reconstructed_rates "../results/empirical/all.npp.2/data/reconstructed_rates.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --N_max 10000000
 """
 
 import numpy as np
@@ -236,12 +245,7 @@ def make_3d_base_figure(
 
     z_vals = np.array([_z_from_time(t, time_scale) for t in times_sub])
 
-    seen: set = set()
-    unique_pops: list = []
-    for p in pops:
-        if p not in seen:
-            unique_pops.append(p)
-            seen.add(p)
+    unique_pops: list = sorted(set(pops))
 
     pop_color_map: dict = {}
     for p, c in zip(pops, colors):
@@ -306,8 +310,8 @@ def make_3d_base_figure(
         i=[0, 0],
         j=[1, 2],
         k=[2, 3],
-        opacity=0.15,
-        color="lightblue",
+        opacity=0.35,
+        color="steelblue",
         showscale=False,
         showlegend=False,
         name="time_plane",
@@ -461,7 +465,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
         showlegend=False,
     ))
     med_x, med_y = _pop_medians(x_vals, y_vals, valid, rates_data)
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=med_x,
         y=med_y,
         mode="markers+text",
@@ -469,7 +473,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
             size=14,
             color=rates_data["same_pop_colors"],
             symbol="diamond",
-            line=dict(color="white", width=1.5),
+            line=dict(color="black", width=1.5),
         ),
         text=rates_data["unique_same_pops"],
         textposition="top center",
@@ -485,7 +489,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
     fig.update_layout(
         title=f"Rate comparison (t ≈ {t_actual:.2f})",
         margin=dict(l=50, r=20, t=30, b=40),
-        xaxis=dict(title="Input rate + 1/N_max", type="log", range=log_range,
+        xaxis=dict(title="True / Input Rate", type="log", range=log_range,
                    exponentformat="e"),
         yaxis=dict(title="Reconstructed rate", type="log", range=log_range,
                    exponentformat="e"),
@@ -585,7 +589,7 @@ def make_app(
                                 id="speed_slider",
                                 min=0, max=4, step=None,
                                 value=2,
-                                marks={0: "0.25×", 1: "0.5×", 2: "1×", 3: "2×", 4: "20×"},
+                                marks={0: "1×", 1: "2×", 2: "10×", 3: "20×", 4: "30×"},
                                 updatemode="mouseup",
                             ),
                         ],
@@ -633,7 +637,7 @@ def make_app(
             return False, "⏸ Pause"
         return True, "▶ Play"
 
-    _SPEED_MS = {0: 800, 1: 400, 2: 200, 3: 100, 4: 10}
+    _SPEED_MS = {0: 200, 1: 100, 2: 20, 3: 10, 4: 7}
 
     @app.callback(
         Output("play_interval", "interval"),
