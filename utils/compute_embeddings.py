@@ -41,11 +41,11 @@ def main():
     print(f"computing embeddings for {input}")
     rates_df = pd.read_parquet(input)
     rates_df.columns = rates_df.columns.astype(float)
-    unique_times = sorted(rates_df['time'].unique())
+    unique_times = sorted(rates_df.columns.tolist())
     if args.n_timepoints_emb < len(unique_times):
         idx = np.round(np.linspace(0, len(unique_times) - 1, args.n_timepoints_emb)).astype(int)
-        selected_times = set(unique_times[i] for i in idx)
-        rates_df = rates_df[rates_df['time'].isin(selected_times)]
+        selected_times = [unique_times[i] for i in idx]
+        rates_df = rates_df[selected_times]
         print(f"subsampled to {len(selected_times)} timepoints (requested {args.n_timepoints_emb} of {len(unique_times)})")
     if args.sample_times:
         samples_in_rates = set(rates_df.index.get_level_values(0)).union(set(rates_df.index.get_level_values(1)))

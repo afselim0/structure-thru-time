@@ -356,6 +356,11 @@ def main():
         reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
         reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
+    # Align to common timepoints (embeddings may have been subsampled)
+    common_times = sorted(set(rates.columns) & set(reconstructed_rates.columns))
+    rates = rates[common_times]
+    reconstructed_rates = reconstructed_rates[common_times]
+
     print(f"Evaluating performance: {args.rates}")
 
     fig_interactive = reconstructed_vs_input_interactive(rates, reconstructed_rates, pop_labels, pop_colors, N_max)
