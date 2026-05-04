@@ -45,6 +45,7 @@ l2_penalties                      = read_config("l2", default = "None")# # For p
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
 if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
 n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
+n_timepoints_emb                  = read_config("n_timepoints_emb", default = 400)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -63,7 +64,7 @@ pop_labels                        = read_config("pop_labels", os.path.join(outpu
 SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
-STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}]" + RATES_TAG
+STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
 
@@ -340,7 +341,8 @@ rule compute_embeddings_true:
         output_name = embeddings_true_file_name,
         N_min = N_min,
         N_max = N_max,
-        n_components = n_components
+        n_components = n_components,
+        n_timepoints_emb = n_timepoints_emb
     shell:
         """
         mkdir -p {params.outdir}
@@ -350,7 +352,8 @@ rule compute_embeddings_true:
             --output_name {params.output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --n_components {params.n_components} 
+            --n_components {params.n_components} \
+            --n_timepoints_emb {params.n_timepoints_emb}
         """
 
 rule plot_embeddings_true:
@@ -613,7 +616,8 @@ rule compute_embeddings:
         l2_penalties = l2_penalties,
         outdir = data_output_path,
         output_name = embeddings_data_file_name,
-        n_components = n_components
+        n_components = n_components,
+        n_timepoints_emb = n_timepoints_emb
     shell:
         """
         mkdir -p {params.outdir}
@@ -625,7 +629,8 @@ rule compute_embeddings:
             --N_max {params.N_max} \
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
-            --n_components {params.n_components} 
+            --n_components {params.n_components} \
+            --n_timepoints_emb {params.n_timepoints_emb}
         """
 rule plot_embeddings:
     input:

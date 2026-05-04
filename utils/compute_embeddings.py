@@ -22,7 +22,7 @@ def main():
     # parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
     # parser.add_argument("--tol", type=float, default=1e-16, help="Tolerance for convergence in optimization")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
-    parser.add_argument("--n_components", type=int, default=2, help="Number of dimensions for the latent space embeddings")
+    parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     
     args = parser.parse_args()
     input = args.input
@@ -41,6 +41,12 @@ def main():
 
     print(f"computing embeddings for {input}")
     rates_df = pd.read_parquet(input)
+    unique_times = sorted(rates_df['time'].unique())
+    if args.n_timepoints_emb < len(unique_times):
+        idx = np.round(np.linspace(0, len(unique_times) - 1, args.n_timepoints_emb)).astype(int)
+        selected_times = set(unique_times[i] for i in idx)
+        rates_df = rates_df[rates_df['time'].isin(selected_times)]
+        print(f"subsampled to {len(selected_times)} timepoints (requested {args.n_timepoints_emb} of {len(unique_times)})")
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
     output_path = args.output_path 
     if "tsinfer" in output_path or "singer" in output_path or "relate" in output_path:
