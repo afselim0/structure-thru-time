@@ -22,6 +22,7 @@ def main():
     # parser.add_argument("--max_iter", type=int, default=1000, help="Maximum number of iterations for optimization")
     # parser.add_argument("--tol", type=float, default=1e-16, help="Tolerance for convergence in optimization")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
+    parser.add_argument("--n_components", type=int, default=2, help="Number of dimensions for the latent space embeddings")
     
     args = parser.parse_args()
     input = args.input

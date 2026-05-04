@@ -53,6 +53,6 @@ snakemake infer_STT --configfile "$configfile" \
 
 ## Example
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/split -i tsinfer -p ../data/demes/main_1_config/split_config.yaml
-# ./run_sim_infer.sh -o ../results/simulations/outputs/single_pop -i tsinfer -p ../data/demes/main_1_config/single_pop_config.yaml
+# ./run_sim_infer.sh -o ../results/simulations/outputs/split_sawtooth -i tsinfer -p ../data/demes/main_1_config/split_sawtooth_config.yaml
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/complex_4_pops -i tsinfer -p ../data/demes/main_1_config/complex_4_pops_config.yaml
 # ./run_sim_infer.sh -o ../results/simulations/outputs/stepping_stones_2d -i tsinfer -p ../data/demes/main_1_config/stepping_stones_2d_config.yaml

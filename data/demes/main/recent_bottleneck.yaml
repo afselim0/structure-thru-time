@@ -1,0 +1,30 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: main
+  epochs:
+  - {end_time: 1700, start_size: 20000}
+- name: temp_1
+  ancestors: [main]
+  epochs:
+  - {end_time: 700, start_size: 20000}
+- name: D
+  ancestors: [main]
+  epochs:
+  - {end_time: 0, start_size: 20000}
+- name: temp_2
+  ancestors: [temp_1]
+  epochs:
+  - {end_time: 20, start_size: 20000}
+- name: C
+  ancestors: [temp_1]
+  epochs:
+  - {end_time: 0, start_size: 20000}
+- name: A
+  ancestors: [temp_2]
+  epochs:
+  - {end_time: 0, start_size: 200}
+- name: B
+  ancestors: [temp_2]
+  epochs:
+  - {end_time: 0, start_size: 20000}
