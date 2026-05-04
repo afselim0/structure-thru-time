@@ -7,6 +7,7 @@ import sys
 import plotly.graph_objects as go
 import matplotlib.cm as cm
 import matplotlib.colors as colors
+from matplotlib.lines import Line2D
 from scipy.stats import spearmanr
 from plot_rates import plot_rates_multi_figs, plot_rates_single_fig
 
@@ -94,8 +95,9 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
     ax.scatter(x_v[order], y_v[order], facecolors=fc_v[order], edgecolors=ec_v[order],
                linewidths=lw_v[order], alpha=0.15, s=2, zorder=1)
 
-    # Median diamonds per pair type (one diamond per time slice, drawn on top)
+    # Median diamonds — collect all groups, shuffle, single scatter to avoid biased overprinting
     unique_keys = list(dict.fromkeys(tuple(sorted([p1, p2])) for p1, p2 in zip(pop1, pop2)))
+    med_xs, med_ys, med_fcs, med_ecs, med_lws, legend_handles = [], [], [], [], [], []
     for key in unique_keys:
         mask  = np.array([tuple(sorted([p1, p2])) == key for p1, p2 in zip(pop1, pop2)])
         med_x = np.nanmedian(input_rates.values[mask], axis=0)
@@ -105,15 +107,25 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
         cb    = color_map.get(key[1], "#808080")
         lw    = 0.0 if key[0] == key[1] else 1.0
         label = key[0] if key[0] == key[1] else f"{key[0]}–{key[1]}"
-        ax.scatter(med_x[vt], med_y[vt], facecolors=ca, edgecolors=cb, linewidths=lw,
-                   s=30, marker='D', zorder=5, label=label)
+        n = int(vt.sum())
+        med_xs.extend(med_x[vt]);  med_ys.extend(med_y[vt])
+        med_fcs.extend([ca] * n);  med_ecs.extend([cb] * n);  med_lws.extend([lw] * n)
+        legend_handles.append(Line2D([0], [0], marker='D', linestyle='none',
+                                     markerfacecolor=ca, markeredgecolor=cb,
+                                     markeredgewidth=lw, markersize=5, label=label))
+
+    med_order = np.random.default_rng(seed=1).permutation(len(med_xs))
+    ax.scatter(np.array(med_xs)[med_order], np.array(med_ys)[med_order],
+               facecolors=np.array(med_fcs)[med_order], edgecolors=np.array(med_ecs)[med_order],
+               linewidths=np.array(med_lws)[med_order], s=30, marker='D', zorder=5)
 
     ax.set_xlabel("input rates + 1/N_max")
     ax.set_ylabel("reconstructed rates")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=7, markerscale=1.5, handlelength=1.2, borderpad=0.5)
+    ax.legend(handles=legend_handles, fontsize=7, markerscale=1.5,
+              handlelength=1.2, borderpad=0.5, loc="lower right")
 
     r2     = np.corrcoef(x_v, y_v)[0, 1] ** 2
     log_r2 = np.corrcoef(np.log(x_v), np.log(y_v))[0, 1] ** 2
@@ -308,8 +320,9 @@ def find_percent_error(input_rates, reconstructed_rates, N_max):
     
 def main():
     argparser = argparse.ArgumentParser(description="Evaluate performance of rate reconstruction from embeddings")
-    argparser.add_argument("--embeddings", type=str, required=True, help="Path to embeddings parquet file")
+    argparser.add_argument("--embeddings", type=str, default=None, help="Path to embeddings parquet file (not needed if --reconstructed_rates provided)")
     argparser.add_argument("--rates", type=str, required=True, help="Path to true rates parquet file")
+    argparser.add_argument("--reconstructed_rates", type=str, default=None, help="Path to precomputed reconstructed rates parquet (skips recomputation)")
     argparser.add_argument("--colors", type=str, required=True, help="Path to population colors csv file")
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
@@ -326,17 +339,24 @@ def main():
     # Loading data
     N_min = args.N_min
     N_max = args.N_max
-    embeddings = pd.read_parquet(args.embeddings)
     rates = pd.read_parquet(args.rates)
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
 
-    D_df = compute_distance_df(embeddings)
-    reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
-    reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
+    if args.reconstructed_rates is not None:
+        reconstructed_rates = pd.read_parquet(args.reconstructed_rates)
+        reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
+        print(f"Loaded precomputed reconstructed rates from {args.reconstructed_rates}")
+    else:
+        if args.embeddings is None:
+            raise ValueError("Either --embeddings or --reconstructed_rates must be provided")
+        embeddings = pd.read_parquet(args.embeddings)
+        D_df = compute_distance_df(embeddings)
+        reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
+        reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
-    print(f"Evaluating performance of rate reconstruction from embeddings: {args.embeddings} and {args.rates}")
+    print(f"Evaluating performance: {args.rates}")
 
     fig_interactive = reconstructed_vs_input_interactive(rates, reconstructed_rates, pop_labels, pop_colors, N_max)
     interactive_output_name = args.plot_output_name.replace(".png", ".html")

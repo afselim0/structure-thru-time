@@ -27,4 +27,4 @@ N_max: 1000000
 # Plotting parameters
 min_time: 1
 max_rate_plot: 0.0001
-embeddings_plot_lims: 1000000
+embeddings_plot_lims: 5000
