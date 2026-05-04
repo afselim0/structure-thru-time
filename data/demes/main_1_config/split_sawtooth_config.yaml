@@ -16,7 +16,7 @@ n_timepoints: 5000
 
 # rate estimation parameters
 min_window_size: 80
-max_window_size: 500
+max_window_size: 1500
 poly: 3
 
 # Embeddings estimation parameters
@@ -29,3 +29,4 @@ N_max: 1000000
 min_time: 1
 max_rate_plot: 0.0001
 embeddings_plot_lims: 2000
+time_scale: log
