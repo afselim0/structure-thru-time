@@ -50,9 +50,12 @@ class LatentSpaceEmbeddings:
         self.N_max = N_max
     
         if sample_times is None:
-            self.sample_times = np.array([0]*self.num_samples)
+            self.sample_times = np.zeros(self.num_samples, dtype=float)
         else:
             self.sample_times = sample_times
+            print(f"Number of sample times provided: {len(self.sample_times)}")
+            print(f"Number of samples: {self.num_samples}")
+
 
         self.embeddings = None
 
@@ -104,7 +107,21 @@ class LatentSpaceEmbeddings:
         X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
         X = procrustes_alignment(X)
         self.embeddings = X
-        return X, loss
+
+    def compute_embeddings(self, X_init, time_idx):
+        R = self.R[:, :, time_idx]
+
+        extant = np.where(self.sampled_by_time[:, time_idx])[0]
+        R_sub = R[np.ix_(extant, extant)]
+
+        X0 = X_init[extant, :]
+        X_sub, loss = compute_embeddings(X0, R_sub, self.N0)
+
+        # Re-expand to full size
+        X_full = np.full_like(X_init, np.nan, dtype=float)
+        X_full[extant, :] = X_sub
+
+        return X_full, loss
 
     def compute_embeddings_through_time(self, X_init = None, direction = "backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
         """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
@@ -172,17 +189,24 @@ class LatentSpaceEmbeddings:
         return X, loss
 
     def get_embeddings_df(self):
-        assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
-        sample_ids = [self.idx_sample_map[i] for i in np.arange(self.num_samples)]
-        times = np.tile(self.time_points, self.num_samples)
-        X1_flat = self.embeddings[:,0,:].flatten()
-        X2_flat = self.embeddings[:,1,:].flatten()
+        assert self.embeddings is not None, (
+            "Embeddings have not been computed yet. "
+            "Please run compute_embeddings_through_time() first."
+        )
 
-        # Create the DataFrame
+        n, d, T = self.embeddings.shape
+
+        sample_ids = [self.idx_sample_map[i] for i in range(n)]
+        times = np.tile(self.time_points, n)
+
+        # Base dataframe
         df = pd.DataFrame({
-            "sample_id": np.repeat(sample_ids, self.num_timepoints),
+            "sample_id": np.repeat(sample_ids, T),
             "time": times,
-            "X1": X1_flat,
-            "X2": X2_flat
         })
+
+        # Add each embedding dimension
+        for dim in range(d):
+            df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
+
         return df
