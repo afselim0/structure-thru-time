@@ -381,7 +381,7 @@ def optimize_timepoints_sequentially(
     X_init=None,
     sampled_by_time=None,
     start_direction="backward",
-    n_epochs=3):
+    n_epochs=1):
     """ Repeatedly performs coordinate descent optimization over time slices.
     """
     loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
@@ -575,3 +575,5 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
 #                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
 #     X_opt = result.x.reshape(X_init.shape)
 #     return X_opt, result.fun
+
+# %%

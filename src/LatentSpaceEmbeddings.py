@@ -102,18 +102,17 @@ class LatentSpaceEmbeddings:
     def compute_embeddings_through_time(self,
                                         X_init = None,
                                         start_direction = "backward",
-                                        n_epochs = 3):
+                                        n_epochs = 1):
         """Compute embeddings by coordinate descent over time points
 
         Args:
             X_init (_type_, optional): initial solution over all time points. Defaults to None.
             start_direction (str, optional): whether to start from the beginning or end of the time series. Defaults to "backward".
-            n_epochs (int, optional): number of cycles to pass over timepoints. Defaults to 3.
+            n_epochs (int, optional): number of cycles to pass over timepoints. Defaults to 1.
 
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
-        
         X, loss_df = optimize_timepoints_sequentially(R = self.R,N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init,sampled_by_time = self.sampled_by_time,start_direction = start_direction,n_epochs = n_epochs)
         # X = procrustes_alignment(X)
         self.embeddings = X

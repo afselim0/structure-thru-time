@@ -41,7 +41,7 @@ fi
 #   --cores all --rerun-incomplete
 
 
-snakemake sim_STT --configfile "$configfile" \
+snakemake STT_true --configfile "$configfile" \
   --config output_path="$output_path"/sim\
   --cores all --rerun-incomplete
 

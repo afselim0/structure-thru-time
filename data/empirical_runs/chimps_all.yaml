@@ -3,7 +3,8 @@ num_threads: 36
 
 # file paths
 output_path: ../results/empirical/DeManuel/all_chroms_all_samples_deep_time_050426
-trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/DeManuel/all_chopped
+# trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/DeManuel/all_chopped
+trees_dir: ../data/trees/DeManuel/chr21_chopped
 pop_colors: ../data/metadata/DeManuel_pop_colors.csv
 pop_labels: ../data/metadata/DeManuel_pop_labels.csv
 num_posterior_samples: 100
@@ -20,10 +21,12 @@ poly: 1
 # Embeddings estimation parameters
 N_min: 100
 N_max: 10000000
+n_timepoints_emb: 1000
 # l1: [1e-3, 1e-2]
 # l2: [1e-2]
 
 # Plotting parameters
 min_time: 250
 max_rate_plot: 0.0002
-embeddings_plot_lims: 5000
+embeddings_plot_lims: 2000
+time_scale: log

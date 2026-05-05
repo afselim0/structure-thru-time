@@ -78,7 +78,8 @@ def main():
     #     compute_uncertainty=args.compute_uncertainty,
     #     n_observations=args.n_observations,
     # )
-    X, loss_df = LSE.compute_embeddings_through_time(start_direction="forward",X_init=X_init)
+    X, loss_df = LSE.compute_embeddings_through_time(start_direction="backward",X_init=X_init, n_epochs=4)
+
 
 
     embeddings_df = LSE.get_embeddings_df()
