@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from optimization_functions import *
+from itertools import product as iterproduct
 from tqdm import tqdm
 
 STDERR_ROLLING_WINDOW= 10
@@ -58,6 +59,7 @@ class LatentSpaceEmbeddings:
 
 
         self.embeddings = None
+        self.covariances = None
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
@@ -123,7 +125,8 @@ class LatentSpaceEmbeddings:
 
         return X_full, loss
 
-    def compute_embeddings_through_time(self, X_init = None, direction = "backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
+    def compute_embeddings_through_time(self, X_init=None, direction="backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER,
+                                         compute_uncertainty=False, n_observations=None):
         """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
 
         Args:
@@ -131,34 +134,66 @@ class LatentSpaceEmbeddings:
             direction (str, optional): "backward" or "forward", determines the order of optimization. Defaults to "backward".
             tol (float, optional): tolerance for convergence. Defaults to TIMEPOINT_TOL.
             max_iter (int, optional): maximum number of iterations. Defaults to MAX_ITER.
+            compute_uncertainty (bool): if True, compute per-sample Laplace covariances via the L-BFGS inverse Hessian.
+            n_observations (float, optional): effective number of independent coalescence observations per rate estimate.
+                Scales the posterior covariance by 1/n_observations. Without this the covariances reflect 1 Poisson
+                observation per rate, which is typically far too uncertain.
 
         Returns:
-            np.ndarray, float: (nxn_componentsxtimepoints) array of embeddings, total loss across all time points
+            np.ndarray, float: (n x n_components x T) embeddings, total loss
         """
-        X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
+        X = np.full((self.num_samples, self.n_components, self.num_timepoints), np.nan)
         total_loss = 0
         if X_init is not None:
             X_t = X_init
         else:
-            X_t = np.random.rand(self.num_samples,self.n_components)
+            X_t = np.random.rand(self.num_samples, self.n_components)
+
+        if compute_uncertainty:
+            covariances = np.full(
+                (self.num_samples, self.n_components, self.n_components, self.num_timepoints), np.nan
+            )
+
         for k in tqdm(range(self.num_timepoints)):
             if direction == "backward":
                 time_idx = len(self.time_points) - k - 1
             elif direction == "forward":
                 time_idx = k
-            R_t = self.R[:,:,time_idx]
-            extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
-            R_t = R_t[extant_samples,:,]
-            R_t = R_t[:,extant_samples,]
+            R_t = self.R[:, :, time_idx]
+            extant_samples = np.where(self.sampled_by_time[:, time_idx])[0]
+            R_t = R_t[np.ix_(extant_samples, extant_samples)]
             X_t = X_t[extant_samples, :]
-            X_t, loss = optimize_timepoint(X_t, R_t, self.N_min, self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
-            if k==0:
+
+            if compute_uncertainty:
+                X_t, loss, hess_inv = optimize_timepoint(
+                    X_t, R_t, self.N_min, self.N_max, epsilon=self.multiplier,
+                    tol=tol, max_iter=max_iter, return_hess_inv=True,
+                )
+                try:
+                    covs = extract_sample_covariances(hess_inv, len(extant_samples), self.n_components)
+                    if n_observations is not None:
+                        # Each rate has n_observations independent Poisson observations → Hessian
+                        # is n_observations× larger → covariance is n_observations× smaller.
+                        covs = covs / (n_observations * self.multiplier)
+                    covariances[extant_samples, :, :, time_idx] = covs
+                except Exception:
+                    pass  # leave NaN on Hessian failure
+            else:
+                X_t, loss = optimize_timepoint(
+                    X_t, R_t, self.N_min, self.N_max, epsilon=self.multiplier,
+                    tol=tol, max_iter=max_iter,
+                )
+
+            if k == 0:
                 X_t -= X_t.mean(axis=0)
-            X[extant_samples,:,time_idx] = X_t
-            X_t = X[:,:,time_idx]
+            X[extant_samples, :, time_idx] = X_t
+            X_t = X[:, :, time_idx]
             total_loss += loss
+
         X = procrustes_alignment(X)
         self.embeddings = X
+        if compute_uncertainty:
+            self.covariances = covariances
         return X, total_loss
     
     def compute_embeddings_coordinate_descent(self, X_init = None, num_epochs=10):
@@ -208,5 +243,24 @@ class LatentSpaceEmbeddings:
         # Add each embedding dimension
         for dim in range(d):
             df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
+
+        return df
+
+    def get_covariances_df(self):
+        assert self.covariances is not None, (
+            "Covariances have not been computed. "
+            "Run compute_embeddings_through_time(compute_uncertainty=True) first."
+        )
+
+        n, d, _, T = self.covariances.shape
+        sample_ids = [self.idx_sample_map[i] for i in range(n)]
+
+        df = pd.DataFrame({
+            "sample_id": np.repeat(sample_ids, T),
+            "time": np.tile(self.time_points, n),
+        })
+
+        for i, j in iterproduct(range(d), range(d)):
+            df[f"C{i+1}{j+1}"] = self.covariances[:, i, j, :].flatten()
 
         return df

@@ -40,9 +40,69 @@ python plot_embeddings_dash.py \
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from scipy.stats import chi2
 
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, ctx, Patch, no_update
+
+
+def ellipse_points(mu: np.ndarray, cov: np.ndarray, level: float = 0.68, n_pts: int = 50):
+    """Return (x, y) arrays tracing a confidence ellipse.
+
+    Args:
+        mu: (2,) centre
+        cov: (2, 2) covariance matrix
+        level: confidence level, e.g. 0.68 or 0.95
+        n_pts: number of points on the ellipse
+
+    Returns:
+        (x, y) arrays of length n_pts
+    """
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    eigvals = np.maximum(eigvals, 0.0)  # guard against tiny negatives from floating point
+    scale = np.sqrt(chi2.ppf(level, df=2))
+    theta = np.linspace(0, 2 * np.pi, n_pts, endpoint=False)
+    circle = np.column_stack([np.cos(theta), np.sin(theta)])
+    pts = scale * (circle * np.sqrt(eigvals)) @ eigvecs.T + mu
+    return pts[:, 0], pts[:, 1]
+
+
+def load_covariances(
+    cov_path: str,
+    times: np.ndarray,
+    sample_order: np.ndarray,
+    time_step: float,
+) -> np.ndarray:
+    """Load a covariances parquet and pack into a (T, N, 2, 2) float64 array.
+
+    Args:
+        cov_path: path to covariances parquet (columns: sample_id, time, C11, C12, C21, C22)
+        times: 1-D array of binned time values (same as data['times'])
+        sample_order: 1-D array of sample_id strings (same as data['sample_ids'])
+        time_step: time bin width used to quantise time values
+
+    Returns:
+        np.ndarray shape (T, N, 2, 2), NaN where data is absent
+    """
+    df = pd.read_parquet(cov_path)
+    df["time_bin"] = (
+        np.round(df["time"].to_numpy(dtype=float) / time_step) * time_step
+    ).astype(float)
+
+    T = len(times)
+    N = len(sample_order)
+    covariances = np.full((T, N, 2, 2), np.nan, dtype=np.float64)
+
+    t_codes = pd.Categorical(df["time_bin"], categories=times, ordered=True).codes
+    s_codes = pd.Index(sample_order).get_indexer(df["sample_id"].astype(str).to_numpy())
+
+    valid = (t_codes >= 0) & (s_codes >= 0)
+    tc = t_codes[valid]
+    sc = s_codes[valid]
+    for (ri, rj), col in [((0, 0), "C11"), ((0, 1), "C12"), ((1, 0), "C21"), ((1, 1), "C22")]:
+        covariances[tc, sc, ri, rj] = df[col].to_numpy()[valid]
+
+    return covariances
 
 
 def load_and_pack(
@@ -54,6 +114,7 @@ def load_and_pack(
     time_step: float = 0.01,
     quantize_xy_to_int: bool = True,
     generation_time: float | None = None,
+    covariances_path: str | None = None,
 ):
     parquet_path = Path(parquet_path)
     df = pd.read_parquet(parquet_path)
@@ -85,6 +146,9 @@ def load_and_pack(
     xy[t_codes, s_codes, 0] = df[x_col].to_numpy(dtype=np.float32)
     xy[t_codes, s_codes, 1] = df[y_col].to_numpy(dtype=np.float32)
 
+    # Always keep full-precision copy for ellipse centres before any quantisation
+    xy_float = xy.copy().astype(np.float64)
+
     if quantize_xy_to_int:
         xy = np.rint(xy).astype(np.float32)
 
@@ -113,15 +177,24 @@ def load_and_pack(
     xlo, xhi = float(xmin - pad * dx), float(xmax + pad * dx)
     ylo, yhi = float(ymin - pad * dy), float(ymax + pad * dy)
 
+    covariances = None
+    if covariances_path is not None:
+        try:
+            covariances = load_covariances(covariances_path, times, sample_ids, time_step)
+        except Exception as e:
+            print(f"Warning: could not load covariances from {covariances_path}: {e}")
+
     return dict(
         times=times,
         xy=xy,
+        xy_float=xy_float,
         sample_ids=sample_ids,
         pop=pops,
         pop3=pop3,
         color=colors,
         xlo=xlo, xhi=xhi, ylo=ylo, yhi=yhi,
         generation_time=generation_time,
+        covariances=covariances,
     )
 
 
@@ -164,6 +237,8 @@ def make_figure(
     point_size: float = 8.0,
     alpha: float = 0.85,
     axis_override: dict | None = None,
+    show_ellipses: bool = False,
+    confidence_level: float = 0.68,
 ):
     times = data["times"]
     xy = data["xy"]
@@ -186,6 +261,34 @@ def make_figure(
     t = times[frame_idx]
 
     traces = []
+
+    # Ellipses trace (always added so trace index is stable; empty when not shown)
+    ellipse_x: list = []
+    ellipse_y: list = []
+    if show_ellipses and data.get("covariances") is not None:
+        xy_f = data["xy_float"][frame_idx]     # (N, 2) full-precision centres
+        covs = data["covariances"][frame_idx]  # (N, 2, 2)
+        for i in range(len(xy_f)):
+            mu = xy_f[i]
+            cov = covs[i]
+            if np.any(np.isnan(mu)) or np.any(np.isnan(cov)):
+                continue
+            ex, ey = ellipse_points(mu, cov, level=confidence_level)
+            ellipse_x.extend(ex.tolist() + [None])
+            ellipse_y.extend(ey.tolist() + [None])
+
+    traces.append(
+        go.Scattergl(
+            x=ellipse_x,
+            y=ellipse_y,
+            mode="lines",
+            line=dict(width=1, color="rgba(80,80,80,0.4)"),
+            hoverinfo="skip",
+            showlegend=False,
+            name="uncertainty_ellipses",
+        )
+    )
+
     traces.append(
         go.Scattergl(
             x=x,
@@ -503,6 +606,7 @@ def make_app(
     time_stride: int = 1,
     xy_lims: float | None = None,
     rates_data: dict | None = None,
+    confidence_level: float = 0.68,
 ):
     app = Dash(__name__)
     times = data["times"]
@@ -515,6 +619,8 @@ def make_app(
     plane_trace_idx = n_pop_traces + 1
 
     z_for_time = np.array([_z_from_time(t, time_scale) for t in times])
+
+    has_covariances = data.get("covariances") is not None
 
     fig_rates_base = (
         make_rates_figure(float(times[0]), rates_data)
@@ -538,7 +644,7 @@ def make_app(
                     ),
                     dcc.Graph(
                         id="graph2d",
-                        figure=make_figure(0, data),
+                        figure=make_figure(0, data, confidence_level=confidence_level),
                         style={"flex": "1", "height": "400px"},
                     ),
                 ],
@@ -571,6 +677,34 @@ def make_app(
                         options=[{"label": " Show labels", "value": "yes"}],
                         value=["yes"],
                         style={"whiteSpace": "nowrap"},
+                    ),
+                    dcc.Checklist(
+                        id="show_ellipses",
+                        options=[{"label": " Ellipses", "value": "yes",
+                                  "disabled": not has_covariances}],
+                        value=[],
+                        style={"whiteSpace": "nowrap",
+                               "display": "inline" if has_covariances else "none"},
+                    ),
+                    html.Div(
+                        id="conf_level_container",
+                        style={"display": "flex" if has_covariances else "none",
+                               "flexDirection": "column", "alignItems": "center",
+                               "minWidth": "90px"},
+                        children=[
+                            html.Label("Conf. level", style={"fontSize": "12px", "marginBottom": "2px"}),
+                            dcc.Dropdown(
+                                id="confidence_level_dropdown",
+                                options=[
+                                    {"label": "68%", "value": 0.68},
+                                    {"label": "90%", "value": 0.90},
+                                    {"label": "95%", "value": 0.95},
+                                ],
+                                value=confidence_level,
+                                clearable=False,
+                                style={"width": "70px", "fontSize": "12px"},
+                            ),
+                        ],
                     ),
                     dcc.Checklist(
                         id="show_rates",
@@ -666,13 +800,23 @@ def make_app(
         Input("t_idx", "value"),
         Input("show_labels", "value"),
         Input("axis_store", "data"),
+        Input("show_ellipses", "value"),
+        Input("confidence_level_dropdown", "value"),
     )
-    def update_figs(t_idx, show_labels_val, axis_store):
+    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val, conf_level):
         t_idx = int(t_idx)
         show = "yes" in (show_labels_val or [])
+        ellipses = "yes" in (show_ellipses_val or [])
+        level = float(conf_level) if conf_level is not None else confidence_level
         t_val = float(times[t_idx])
 
-        fig_2d = make_figure(t_idx, data, show_labels=show, axis_override=axis_store)
+        fig_2d = make_figure(
+            t_idx, data,
+            show_labels=show,
+            axis_override=axis_store,
+            show_ellipses=ellipses,
+            confidence_level=level,
+        )
 
         z0 = float(z_for_time[t_idx])
         pts_x = _to_list_none(data["xy"][t_idx, :, 0])
@@ -764,6 +908,10 @@ if __name__ == "__main__":
                    help="Path to reconstructed rates parquet (enables rate panel)")
     p.add_argument("--N_max", type=float, default=None,
                    help="N_max used during embedding (required with --rates)")
+    p.add_argument("--covariances", type=str, default=None,
+                   help="Path to covariances parquet (enables uncertainty ellipses)")
+    p.add_argument("--confidence_level", type=float, default=0.68,
+                   help="Confidence level for ellipses: 0.68, 0.90, or 0.95 (default 0.68)")
     p.add_argument("--port", type=int, default=8050)
     args = p.parse_args()
 
@@ -778,6 +926,7 @@ if __name__ == "__main__":
         time_step=args.time_step,
         quantize_xy_to_int=(not args.no_quantize),
         generation_time=args.generation_time,
+        covariances_path=args.covariances,
     )
 
     rates_data = None
@@ -798,5 +947,6 @@ if __name__ == "__main__":
         time_stride=args.time_stride,
         xy_lims=lims,
         rates_data=rates_data,
+        confidence_level=args.confidence_level,
     )
     app.run(debug=False, port=args.port)

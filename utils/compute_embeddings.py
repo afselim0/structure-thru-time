@@ -22,7 +22,9 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--sample_times", type=str, required=False, help="Path to sample times CSV file for ancient samples")
-    
+    parser.add_argument("--compute_uncertainty", action="store_true", help="Compute Laplace uncertainty (per-sample covariance via L-BFGS inverse Hessian)")
+    parser.add_argument("--n_observations", type=float, default=None, help="Effective number of independent coalescence observations per rate estimate; scales posterior covariances by 1/n_observations")
+
     args = parser.parse_args()
     input = args.input
     l1_penalties = args.l1_penalties
@@ -72,8 +74,10 @@ def main():
             print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
     else:
         X_init = None
-    X, loss = LSE.compute_embeddings_through_time()
-
+    X, loss = LSE.compute_embeddings_through_time(
+        compute_uncertainty=args.compute_uncertainty,
+        n_observations=args.n_observations,
+    )
 
     embeddings_df = LSE.get_embeddings_df()
     embeddings_df.columns = embeddings_df.columns.astype(str)
@@ -86,6 +90,13 @@ def main():
     else:
         print("No ancient samples detected.")
     embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
+
+    if args.compute_uncertainty:
+        covariances_df = LSE.get_covariances_df()
+        covariances_df.columns = covariances_df.columns.astype(str)
+        cov_name = args.output_name.removesuffix(".parquet").replace("embeddings", "covariances") + ".parquet"
+        covariances_df.to_parquet(f"{args.output_path}/{cov_name}")
+        print(f"Saved covariances to {args.output_path}/{cov_name}")
 
 
 if __name__ == "__main__":
