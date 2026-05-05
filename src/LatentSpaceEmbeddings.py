@@ -2,12 +2,10 @@
 import numpy as np
 import pandas as pd
 from optimization_functions import *
+from itertools import product as iterproduct
 from tqdm import tqdm
 
 STDERR_ROLLING_WINDOW= 10
-TIMEPOINT_TOL = 1e-12
-SMOOTHING_TOL = 1e-12
-MAX_ITER = 6000
 
 
 class LatentSpaceEmbeddings:
@@ -50,11 +48,16 @@ class LatentSpaceEmbeddings:
         self.N_max = N_max
     
         if sample_times is None:
-            self.sample_times = np.array([0]*self.num_samples)
+            self.sample_times = np.zeros(self.num_samples, dtype=float)
         else:
             self.sample_times = sample_times
+            print(f"number of ancient samples: {(self.sample_times != 0).sum()}/{len(self.sample_times)}")
+            # print(f"Number of sample times provided: {len(self.sample_times)}")
+            # print(f"Number of samples: {self.num_samples}")
+
 
         self.embeddings = None
+        self.covariances = None
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
@@ -96,93 +99,136 @@ class LatentSpaceEmbeddings:
         else:
             self.smoothing_params = None
 
-    def compute_embeddings_jointly(self, X_init=None):
-        if X_init is None:
-            X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        else:
-            assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
-        X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
-        X = procrustes_alignment(X)
-        self.embeddings = X
-        return X, loss
-
-    def compute_embeddings_through_time(self, X_init = None, direction = "backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
-        """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
+    def compute_embeddings_through_time(self,
+                                        X_init = None,
+                                        start_direction = "backward",
+                                        n_epochs = 3):
+        """Compute embeddings by coordinate descent over time points
 
         Args:
-            X_init (np.ndarray, optional): initial solution for first time slice. Defaults to None.
-            direction (str, optional): "backward" or "forward", determines the order of optimization. Defaults to "backward".
-            tol (float, optional): tolerance for convergence. Defaults to TIMEPOINT_TOL.
-            max_iter (int, optional): maximum number of iterations. Defaults to MAX_ITER.
+            X_init (_type_, optional): initial solution over all time points. Defaults to None.
+            start_direction (str, optional): whether to start from the beginning or end of the time series. Defaults to "backward".
+            n_epochs (int, optional): number of cycles to pass over timepoints. Defaults to 3.
 
         Returns:
-            np.ndarray, float: (nxn_componentsxtimepoints) array of embeddings, total loss across all time points
+            np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
-        X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
-        total_loss = 0
-        if X_init is not None:
-            X_t = X_init
-        else:
-            X_t = np.random.rand(self.num_samples,self.n_components)
-        for k in tqdm(range(self.num_timepoints)):
-            if direction == "backward":
-                time_idx = len(self.time_points) - k - 1
-            elif direction == "forward":
-                time_idx = k
-            R_t = self.R[:,:,time_idx]
-            extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
-            R_t = R_t[extant_samples,:,]
-            R_t = R_t[:,extant_samples,]
-            X_t = X_t[extant_samples, :]
-            X_t, loss = optimize_timepoint(X_t, R_t, self.N_min, self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
-            if k==0:
-                X_t -= X_t.mean(axis=0)
-            X[extant_samples,:,time_idx] = X_t
-            X_t = X[:,:,time_idx]
-            total_loss += loss
-        X = procrustes_alignment(X)
-        self.embeddings = X
-        return X, total_loss
-    
-    def compute_embeddings_coordinate_descent(self, X_init = None, num_epochs=10):
-        if X_init is None:
-            X_init = np.random.rand(self.num_samples, self.n_components)
-            X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=MAX_ITER, tol=TIMEPOINT_TOL)
-            X_init = np.repeat(X_init[:, :, np.newaxis], self.num_timepoints, axis=2)
-        else:
-            assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
         
-        X = X_init.copy()
-        for _ in range(num_epochs):
-            total_loss = 0
-            for i in tqdm(range(self.num_samples)):
-                X_i = X[i,:,:]
-                R_i = self.R[i,:,:]
-                X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.N_max, self.smoothing_params, max_iter=MAX_ITER, tol=SMOOTHING_TOL)
-                X[i,:,:] = X_i_opt
-                X = X - np.mean(X, axis=0, keepdims=True)  # Centering step to remove translation indeterminacy
-                total_loss += X_i_loss
+        X, loss_df = optimize_timepoints_sequentially(R = self.R,N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init,sampled_by_time = self.sampled_by_time,start_direction = start_direction,n_epochs = n_epochs)
         # X = procrustes_alignment(X)
         self.embeddings = X
-        return X, total_loss
+        return X, loss_df          
+                                
+
+    # def compute_embeddings_through_time(self, X_init = None, direction = "backward"):
+    #     """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
+
+    #     Args:
+    #         X_init (np.ndarray, optional): initial solution for all time points. Defaults to None.
+    #         direction (str, optional): "backward" or "forward", determines the order of optimization. Defaults to "backward".
+    #         gtol (float, optional): tolerance for the gradient. Defaults to TIMEPOINT_Gtol.
+    #         ftol (float, optional): tolerance for the function value. Defaults to TIMEPOINT_Ftol.
+    #         max_iter (int, optional): maximum number of iterations. Defaults to MAX_ITER.
+
+    #     Returns:
+    #         np.ndarray, float: (nxn_componentsxtimepoints) array of embeddings, total loss across all time points
+    #     """
+    #     X = np.full((self.num_samples,self.n_components,self.num_timepoints),np.nan)
+    #     total_loss = 0
+    #     if X_init is not None:
+    #         X_t = X_init
+    #     else:
+    #         X_t = np.random.rand(self.num_samples,self.n_components)
+    #     for k in tqdm(range(self.num_timepoints)):
+    #         if direction == "backward":
+    #             time_idx = len(self.time_points) - k - 1
+    #         elif direction == "forward":
+    #             time_idx = k
+    #         R_t = self.R[:,:,time_idx]
+    #         extant_samples = np.where(self.sampled_by_time[:,time_idx])[0]
+    #         R_t = R_t[extant_samples,:,]
+    #         R_t = R_t[:,extant_samples,]
+    #         X_t = X_t[extant_samples, :]
+    #         X_t, loss_after, n_iterations, message = optimize_timepoint(X_t_init = X_t, R_t = R_t, N_min = self.N_min, N_max = self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
+    #         if k==0:
+    #             X_t -= X_t.mean(axis=0)
+    #         X[extant_samples,:,time_idx] = X_t
+    #         X_t = X[:,:,time_idx]
+    #         total_loss += loss_after
+    #     # X = procrustes_alignment(X)
+    #     self.embeddings = X
+    #     return X, total_loss
     
-    def compute_embeddings_two_pass(self):
-        X,loss = self.compute_embeddings_through_time(smooth=False)
-        X,loss = self.compute_embeddings_coordinate_descent(X_init=X, num_epochs=1)
-        return X, loss
+    # def compute_embeddings_coordinate_descent(self, X_init = None, num_epochs=10):
+    #     if X_init is None:
+    #         X_init = np.random.rand(self.num_samples, self.n_components)
+    #         X_init, _ = optimize_timepoint(X_init, X = None, R_t=self.R[:, :, -1], N_min= self.N_min, epsilon= self.stderr, smoothing_params= None, max_iter=MAX_ITER, tol=TIMEPOINT_TOL)
+    #         X_init = np.repeat(X_init[:, :, np.newaxis], self.num_timepoints, axis=2)
+    #     else:
+    #         assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
+        
+    #     X = X_init.copy()
+    #     for _ in range(num_epochs):
+    #         total_loss = 0
+    #         for i in tqdm(range(self.num_samples)):
+    #             X_i = X[i,:,:]
+    #             R_i = self.R[i,:,:]
+    #             X_i_opt,X_i_loss = optimize_sample(X_i, X, R_i, self.N_min, self.N_max, self.smoothing_params, max_iter=MAX_ITER, tol=SMOOTHING_TOL)
+    #             X[i,:,:] = X_i_opt
+    #             X = X - np.mean(X, axis=0, keepdims=True)  # Centering step to remove translation indeterminacy
+    #             total_loss += X_i_loss
+    #     # X = procrustes_alignment(X)
+    #     self.embeddings = X
+    #     return X, total_loss
+    
+    # def compute_embeddings_two_pass(self):
+    #     X,loss = self.compute_embeddings_through_time(smooth=False)
+    #     X,loss = self.compute_embeddings_coordinate_descent(X_init=X, num_epochs=1)
+    #     return X, loss
 
     def get_embeddings_df(self):
-        assert self.embeddings is not None, "Embeddings have not been computed yet. Please run compute_embeddings_through_time() first."
-        sample_ids = [self.idx_sample_map[i] for i in np.arange(self.num_samples)]
-        times = np.tile(self.time_points, self.num_samples)
-        X1_flat = self.embeddings[:,0,:].flatten()
-        X2_flat = self.embeddings[:,1,:].flatten()
+        assert self.embeddings is not None, (
+            "Embeddings have not been computed yet. "
+            "Please run compute_embeddings_through_time() first."
+        )
 
-        # Create the DataFrame
+        n, d, T = self.embeddings.shape
+
+        sample_ids = [self.idx_sample_map[i] for i in range(n)]
+        times = np.tile(self.time_points, n)
+
+        # Base dataframe
         df = pd.DataFrame({
-            "sample_id": np.repeat(sample_ids, self.num_timepoints),
+            "sample_id": np.repeat(sample_ids, T),
             "time": times,
-            "X1": X1_flat,
-            "X2": X2_flat
         })
+
+        # Add each embedding dimension
+        for dim in range(d):
+            df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
+
         return df
+    
+# def compute_embeddings_jointly(self, X_init=None):
+#     if X_init is None:
+#         X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
+#     else:
+#         assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
+#     X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
+#     X = procrustes_alignment(X)
+#     self.embeddings = X
+
+# def compute_embeddings(self, X_init, time_idx):
+#     R = self.R[:, :, time_idx]
+
+#     extant = np.where(self.sampled_by_time[:, time_idx])[0]
+#     R_sub = R[np.ix_(extant, extant)]
+
+#     X0 = X_init[extant, :]
+#     X_sub, loss = compute_embeddings(X0, R_sub, self.N0)
+
+#     # Re-expand to full size
+#     X_full = np.full_like(X_init, np.nan, dtype=float)
+#     X_full[extant, :] = X_sub
+
+#     return X_full, loss

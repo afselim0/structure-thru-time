@@ -26,14 +26,83 @@ CLI flags
 - --time-scale  log|linear  (default log)
 - --time-stride N           subsample time points for 3D trajectories (default 5)
 - --lims        float       symmetric XY axis limit (both views)
+
+Example run: 
+python plot_embeddings_dash.py \
+  "../results/empirical/all.npp.2/data/embeddings.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --labels "../data/metadata/wohns_pop_labels.csv" \
+  --colors "../data/metadata/wohns_pop_colors.csv" \
+  --rates "../results/empirical/all.npp.2/data/rates.minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --reconstructed_rates "../results/empirical/all.npp.2/data/reconstructed_rates.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --N_max 10000000
 """
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from scipy.stats import chi2
 
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, ctx, Patch, no_update
+
+
+def ellipse_points(mu: np.ndarray, cov: np.ndarray, level: float = 0.68, n_pts: int = 50):
+    """Return (x, y) arrays tracing a confidence ellipse.
+
+    Args:
+        mu: (2,) centre
+        cov: (2, 2) covariance matrix
+        level: confidence level, e.g. 0.68 or 0.95
+        n_pts: number of points on the ellipse
+
+    Returns:
+        (x, y) arrays of length n_pts
+    """
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    eigvals = np.maximum(eigvals, 0.0)  # guard against tiny negatives from floating point
+    scale = np.sqrt(chi2.ppf(level, df=2))
+    theta = np.linspace(0, 2 * np.pi, n_pts, endpoint=False)
+    circle = np.column_stack([np.cos(theta), np.sin(theta)])
+    pts = scale * (circle * np.sqrt(eigvals)) @ eigvecs.T + mu
+    return pts[:, 0], pts[:, 1]
+
+
+def load_covariances(
+    cov_path: str,
+    times: np.ndarray,
+    sample_order: np.ndarray,
+    time_step: float,
+) -> np.ndarray:
+    """Load a covariances parquet and pack into a (T, N, 2, 2) float64 array.
+
+    Args:
+        cov_path: path to covariances parquet (columns: sample_id, time, C11, C12, C21, C22)
+        times: 1-D array of binned time values (same as data['times'])
+        sample_order: 1-D array of sample_id strings (same as data['sample_ids'])
+        time_step: time bin width used to quantise time values
+
+    Returns:
+        np.ndarray shape (T, N, 2, 2), NaN where data is absent
+    """
+    df = pd.read_parquet(cov_path)
+    df["time_bin"] = (
+        np.round(df["time"].to_numpy(dtype=float) / time_step) * time_step
+    ).astype(float)
+
+    T = len(times)
+    N = len(sample_order)
+    covariances = np.full((T, N, 2, 2), np.nan, dtype=np.float64)
+
+    t_codes = pd.Categorical(df["time_bin"], categories=times, ordered=True).codes
+    s_codes = pd.Index(sample_order).get_indexer(df["sample_id"].astype(str).to_numpy())
+
+    valid = (t_codes >= 0) & (s_codes >= 0)
+    tc = t_codes[valid]
+    sc = s_codes[valid]
+    for (ri, rj), col in [((0, 0), "C11"), ((0, 1), "C12"), ((1, 0), "C21"), ((1, 1), "C22")]:
+        covariances[tc, sc, ri, rj] = df[col].to_numpy()[valid]
+
+    return covariances
 
 
 def load_and_pack(
@@ -45,6 +114,7 @@ def load_and_pack(
     time_step: float = 0.01,
     quantize_xy_to_int: bool = True,
     generation_time: float | None = None,
+    covariances_path: str | None = None,
 ):
     parquet_path = Path(parquet_path)
     df = pd.read_parquet(parquet_path)
@@ -76,6 +146,9 @@ def load_and_pack(
     xy[t_codes, s_codes, 0] = df[x_col].to_numpy(dtype=np.float32)
     xy[t_codes, s_codes, 1] = df[y_col].to_numpy(dtype=np.float32)
 
+    # Always keep full-precision copy for ellipse centres before any quantisation
+    xy_float = xy.copy().astype(np.float64)
+
     if quantize_xy_to_int:
         xy = np.rint(xy).astype(np.float32)
 
@@ -95,6 +168,16 @@ def load_and_pack(
     pop_color_map = dict(zip(colors_df["population"].astype(str), colors_df["color"].astype(str)))
     colors = np.array([pop_color_map.get(p, "#808080") for p in pops], dtype=object)
 
+    # Per-population index mapping (stable order, used for ellipse colouring)
+    unique_pops: list = []
+    pop_to_sample_indices: dict = {}
+    for i, p in enumerate(pops):
+        pk = str(p)
+        if pk not in pop_to_sample_indices:
+            unique_pops.append(p)
+            pop_to_sample_indices[pk] = []
+        pop_to_sample_indices[pk].append(i)
+
     xmin, xmax = np.nanmin(xy[:, :, 0]), np.nanmax(xy[:, :, 0])
     ymin, ymax = np.nanmin(xy[:, :, 1]), np.nanmax(xy[:, :, 1])
     dx, dy = float(xmax - xmin), float(ymax - ymin)
@@ -104,15 +187,27 @@ def load_and_pack(
     xlo, xhi = float(xmin - pad * dx), float(xmax + pad * dx)
     ylo, yhi = float(ymin - pad * dy), float(ymax + pad * dy)
 
+    covariances = None
+    if covariances_path is not None:
+        try:
+            covariances = load_covariances(covariances_path, times, sample_ids, time_step)
+        except Exception as e:
+            print(f"Warning: could not load covariances from {covariances_path}: {e}")
+
     return dict(
         times=times,
         xy=xy,
+        xy_float=xy_float,
         sample_ids=sample_ids,
         pop=pops,
         pop3=pop3,
         color=colors,
         xlo=xlo, xhi=xhi, ylo=ylo, yhi=yhi,
         generation_time=generation_time,
+        covariances=covariances,
+        unique_pops=unique_pops,
+        pop_color_map_str=pop_color_map,
+        pop_to_sample_indices=pop_to_sample_indices,
     )
 
 
@@ -155,6 +250,8 @@ def make_figure(
     point_size: float = 8.0,
     alpha: float = 0.85,
     axis_override: dict | None = None,
+    show_ellipses: bool = False,
+    confidence_level: float = 0.68,
 ):
     times = data["times"]
     xy = data["xy"]
@@ -176,7 +273,57 @@ def make_figure(
 
     t = times[frame_idx]
 
+    # Trace layout (fixed indices, stable across all figure rebuilds):
+    #   0 .. n_pops-1  : per-population ellipse traces
+    #   n_pops         : main scatter
+    #   n_pops + 1     : text labels (always present; empty when show_labels=False)
+    #   n_pops + 2     : highlight ellipse (initially empty; filled by hover callback)
+
+    unique_pops = data.get("unique_pops", [])
+    pop_color_map_str = data.get("pop_color_map_str", {})
+    pop_to_sample_indices = data.get("pop_to_sample_indices", {})
+    has_covariances = data.get("covariances") is not None
+
     traces = []
+
+    # 1. Per-population ellipse traces
+    if show_ellipses and has_covariances:
+        xy_f = data["xy_float"][frame_idx]
+        covs = data["covariances"][frame_idx]
+    else:
+        xy_f = covs = None
+
+    for pop in unique_pops:
+        pop_color = pop_color_map_str.get(str(pop), "#808080")
+        ex_all: list = []
+        ey_all: list = []
+        cd_all: list = []
+
+        if xy_f is not None:
+            for i in pop_to_sample_indices.get(str(pop), []):
+                mu = xy_f[i]
+                cov = covs[i]
+                if np.any(np.isnan(mu)) or np.any(np.isnan(cov)):
+                    continue
+                ex, ey = ellipse_points(mu, cov, level=confidence_level)
+                # Close the ellipse and add a None break
+                ex_all.extend(ex.tolist() + [ex[0], None])
+                ey_all.extend(ey.tolist() + [ey[0], None])
+                cd_all.extend([sample_ids[i]] * (len(ex) + 1) + [None])
+
+        traces.append(go.Scattergl(
+            x=ex_all,
+            y=ey_all,
+            mode="lines",
+            line=dict(width=1, color=pop_color),
+            opacity=0.5,
+            customdata=cd_all,
+            hovertemplate="sample: %{customdata}<br>pop: " + str(pop) + "<extra></extra>",
+            showlegend=False,
+            name=f"ellipse_{pop}",
+        ))
+
+    # 2. Main scatter
     traces.append(
         go.Scattergl(
             x=x,
@@ -189,19 +336,45 @@ def make_figure(
         )
     )
 
-    if show_labels:
-        traces.append(
-            go.Scatter(
-                x=x,
-                y=y,
-                mode="text",
-                text=pop3.tolist(),
-                textposition="top center",
-                textfont=dict(size=10, color=colors.tolist()),
-                hoverinfo="skip",
-                showlegend=False,
-            )
+    # 3. Text labels (always present; empty coords when hidden)
+    traces.append(
+        go.Scatter(
+            x=x if show_labels else [],
+            y=y if show_labels else [],
+            mode="text",
+            text=pop3.tolist(),
+            textposition="top center",
+            textfont=dict(size=10, color=colors.tolist()),
+            hoverinfo="skip",
+            showlegend=False,
         )
+    )
+
+    # 4. Highlight ellipse — filled by hover callback, always present for stable indexing
+    traces.append(
+        go.Scattergl(
+            x=[], y=[],
+            mode="lines",
+            line=dict(width=3, color="white"),
+            opacity=1.0,
+            hoverinfo="skip",
+            showlegend=False,
+            name="highlight_ellipse",
+        )
+    )
+
+    # 5. Pair edge — filled when hovering over a pairwise rate, always present
+    traces.append(
+        go.Scattergl(
+            x=[], y=[],
+            mode="lines+markers",
+            line=dict(width=2, color="rgba(255,255,255,0.8)"),
+            marker=dict(size=14, color=[], line=dict(color="white", width=2)),
+            hoverinfo="skip",
+            showlegend=False,
+            name="pair_edge",
+        )
+    )
 
     fig = go.Figure(data=traces)
     fig.update_layout(
@@ -236,12 +409,7 @@ def make_3d_base_figure(
 
     z_vals = np.array([_z_from_time(t, time_scale) for t in times_sub])
 
-    seen: set = set()
-    unique_pops: list = []
-    for p in pops:
-        if p not in seen:
-            unique_pops.append(p)
-            seen.add(p)
+    unique_pops: list = sorted(set(pops))
 
     pop_color_map: dict = {}
     for p, c in zip(pops, colors):
@@ -306,8 +474,8 @@ def make_3d_base_figure(
         i=[0, 0],
         j=[1, 2],
         k=[2, 3],
-        opacity=0.15,
-        color="lightblue",
+        opacity=0.35,
+        color="steelblue",
         showscale=False,
         showlegend=False,
         name="time_plane",
@@ -461,7 +629,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
         showlegend=False,
     ))
     med_x, med_y = _pop_medians(x_vals, y_vals, valid, rates_data)
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=med_x,
         y=med_y,
         mode="markers+text",
@@ -469,7 +637,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
             size=14,
             color=rates_data["same_pop_colors"],
             symbol="diamond",
-            line=dict(color="white", width=1.5),
+            line=dict(color="black", width=1.5),
         ),
         text=rates_data["unique_same_pops"],
         textposition="top center",
@@ -485,7 +653,7 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
     fig.update_layout(
         title=f"Rate comparison (t ≈ {t_actual:.2f})",
         margin=dict(l=50, r=20, t=30, b=40),
-        xaxis=dict(title="Input rate + 1/N_max", type="log", range=log_range,
+        xaxis=dict(title="True / Input Rate", type="log", range=log_range,
                    exponentformat="e"),
         yaxis=dict(title="Reconstructed rate", type="log", range=log_range,
                    exponentformat="e"),
@@ -499,6 +667,7 @@ def make_app(
     time_stride: int = 1,
     xy_lims: float | None = None,
     rates_data: dict | None = None,
+    confidence_level: float = 0.68,
 ):
     app = Dash(__name__)
     times = data["times"]
@@ -511,6 +680,14 @@ def make_app(
     plane_trace_idx = n_pop_traces + 1
 
     z_for_time = np.array([_z_from_time(t, time_scale) for t in times])
+
+    has_covariances = data.get("covariances") is not None
+
+    # Stable 2D trace indices (determined by number of populations in dataset)
+    n_pops_2d = len(data.get("unique_pops", []))
+    scatter_trace_idx_2d = n_pops_2d
+    highlight_trace_idx_2d = n_pops_2d + 2   # labels always at n_pops_2d + 1
+    pair_edge_trace_idx_2d = n_pops_2d + 3   # pair edge for rate-panel hover
 
     fig_rates_base = (
         make_rates_figure(float(times[0]), rates_data)
@@ -534,7 +711,7 @@ def make_app(
                     ),
                     dcc.Graph(
                         id="graph2d",
-                        figure=make_figure(0, data),
+                        figure=make_figure(0, data, confidence_level=confidence_level),
                         style={"flex": "1", "height": "400px"},
                     ),
                 ],
@@ -569,6 +746,34 @@ def make_app(
                         style={"whiteSpace": "nowrap"},
                     ),
                     dcc.Checklist(
+                        id="show_ellipses",
+                        options=[{"label": " Ellipses", "value": "yes",
+                                  "disabled": not has_covariances}],
+                        value=[],
+                        style={"whiteSpace": "nowrap",
+                               "display": "inline" if has_covariances else "none"},
+                    ),
+                    html.Div(
+                        id="conf_level_container",
+                        style={"display": "flex" if has_covariances else "none",
+                               "flexDirection": "column", "alignItems": "center",
+                               "minWidth": "90px"},
+                        children=[
+                            html.Label("Conf. level", style={"fontSize": "12px", "marginBottom": "2px"}),
+                            dcc.Dropdown(
+                                id="confidence_level_dropdown",
+                                options=[
+                                    {"label": "68%", "value": 0.68},
+                                    {"label": "90%", "value": 0.90},
+                                    {"label": "95%", "value": 0.95},
+                                ],
+                                value=confidence_level,
+                                clearable=False,
+                                style={"width": "70px", "fontSize": "12px"},
+                            ),
+                        ],
+                    ),
+                    dcc.Checklist(
                         id="show_rates",
                         options=[{"label": " Rate panel", "value": "yes",
                                   "disabled": rates_data is None}],
@@ -585,7 +790,7 @@ def make_app(
                                 id="speed_slider",
                                 min=0, max=4, step=None,
                                 value=2,
-                                marks={0: "0.25×", 1: "0.5×", 2: "1×", 3: "2×", 4: "20×"},
+                                marks={0: "1×", 1: "2×", 2: "10×", 3: "20×", 4: "30×"},
                                 updatemode="mouseup",
                             ),
                         ],
@@ -633,7 +838,7 @@ def make_app(
             return False, "⏸ Pause"
         return True, "▶ Play"
 
-    _SPEED_MS = {0: 800, 1: 400, 2: 200, 3: 100, 4: 10}
+    _SPEED_MS = {0: 200, 1: 100, 2: 20, 3: 10, 4: 7}
 
     @app.callback(
         Output("play_interval", "interval"),
@@ -662,13 +867,23 @@ def make_app(
         Input("t_idx", "value"),
         Input("show_labels", "value"),
         Input("axis_store", "data"),
+        Input("show_ellipses", "value"),
+        Input("confidence_level_dropdown", "value"),
     )
-    def update_figs(t_idx, show_labels_val, axis_store):
+    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val, conf_level):
         t_idx = int(t_idx)
         show = "yes" in (show_labels_val or [])
+        ellipses = "yes" in (show_ellipses_val or [])
+        level = float(conf_level) if conf_level is not None else confidence_level
         t_val = float(times[t_idx])
 
-        fig_2d = make_figure(t_idx, data, show_labels=show, axis_override=axis_store)
+        fig_2d = make_figure(
+            t_idx, data,
+            show_labels=show,
+            axis_override=axis_store,
+            show_ellipses=ellipses,
+            confidence_level=level,
+        )
 
         z0 = float(z_for_time[t_idx])
         pts_x = _to_list_none(data["xy"][t_idx, :, 0])
@@ -682,6 +897,105 @@ def make_app(
         patched["layout"]["title"]["text"] = f"3D Trajectories (t = {t_val:.2f})"
 
         return fig_2d, patched
+
+    @app.callback(
+        Output("graph2d", "figure", allow_duplicate=True),
+        Input("graph2d", "hoverData"),
+        State("t_idx", "value"),
+        State("confidence_level_dropdown", "value"),
+        prevent_initial_call=True,
+    )
+    def highlight_on_hover(hover_data, t_idx_val, conf_level_val):
+        if not has_covariances:
+            return no_update
+        if not hover_data or not hover_data.get("points"):
+            return no_update
+
+        point = hover_data["points"][0]
+        curve_num = point.get("curveNumber", -1)
+        level = float(conf_level_val) if conf_level_val is not None else confidence_level
+        t_int = int(t_idx_val)
+
+        patched = Patch()
+
+        if curve_num == scatter_trace_idx_2d:
+            # Hover on a scatter point → draw its ellipse in the highlight trace
+            sample_idx = point.get("pointIndex")
+            mu = data["xy_float"][t_int][sample_idx]
+            cov = data["covariances"][t_int][sample_idx]
+            if not (np.any(np.isnan(mu)) or np.any(np.isnan(cov))):
+                ex, ey = ellipse_points(mu, cov, level=level, n_pts=60)
+                patched["data"][highlight_trace_idx_2d]["x"] = ex.tolist() + [ex[0]]
+                patched["data"][highlight_trace_idx_2d]["y"] = ey.tolist() + [ey[0]]
+                patched["data"][highlight_trace_idx_2d]["line"]["color"] = str(data["color"][sample_idx])
+            else:
+                patched["data"][highlight_trace_idx_2d]["x"] = []
+                patched["data"][highlight_trace_idx_2d]["y"] = []
+        else:
+            # Hover off scatter (e.g. on an ellipse or empty space) → clear highlight
+            patched["data"][highlight_trace_idx_2d]["x"] = []
+            patched["data"][highlight_trace_idx_2d]["y"] = []
+
+        return patched
+
+    @app.callback(
+        Output("graph2d", "figure", allow_duplicate=True),
+        Input("graph_rates", "hoverData"),
+        Input("graph_rates", "unhoverData"),
+        State("t_idx", "value"),
+        prevent_initial_call=True,
+    )
+    def highlight_pair_on_rates_hover(hover_data, _unhover_data, t_idx_val):
+        patched = Patch()
+        clear = lambda: (
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "x"), []) or
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "y"), []) or
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "marker", "color"), [])
+        )
+
+        if ctx.triggered_id == "graph_rates" and ctx.triggered[0]["prop_id"] == "graph_rates.unhoverData":
+            clear()
+            return patched
+
+        if not hover_data or not hover_data.get("points"):
+            clear()
+            return patched
+
+        point = hover_data["points"][0]
+        cd = point.get("customdata")
+        if cd is None or not isinstance(cd, (list, tuple)) or len(cd) < 1:
+            clear()
+            return patched
+
+        pair_id = str(cd[0])
+        parts = pair_id.split(" × ")
+        if len(parts) != 2:
+            clear()
+            return patched
+
+        s1, s2 = parts
+        t_int = int(t_idx_val)
+        sid_arr = data["sample_ids"]
+        idx1_arr = np.where(sid_arr == s1)[0]
+        idx2_arr = np.where(sid_arr == s2)[0]
+        if not len(idx1_arr) or not len(idx2_arr):
+            clear()
+            return patched
+
+        idx1, idx2 = int(idx1_arr[0]), int(idx2_arr[0])
+        pos = data["xy_float"][t_int]
+        p1, p2 = pos[idx1], pos[idx2]
+        if np.any(np.isnan(p1)) or np.any(np.isnan(p2)):
+            clear()
+            return patched
+
+        patched["data"][pair_edge_trace_idx_2d]["x"] = [float(p1[0]), float(p2[0])]
+        patched["data"][pair_edge_trace_idx_2d]["y"] = [float(p1[1]), float(p2[1])]
+        patched["data"][pair_edge_trace_idx_2d]["marker"]["color"] = [
+            str(data["color"][idx1]),
+            str(data["color"][idx2]),
+        ]
+        return patched
 
     @app.callback(
         Output("rates_panel", "style"),
@@ -760,6 +1074,10 @@ if __name__ == "__main__":
                    help="Path to reconstructed rates parquet (enables rate panel)")
     p.add_argument("--N_max", type=float, default=None,
                    help="N_max used during embedding (required with --rates)")
+    p.add_argument("--covariances", type=str, default=None,
+                   help="Path to covariances parquet (enables uncertainty ellipses)")
+    p.add_argument("--confidence_level", type=float, default=0.68,
+                   help="Confidence level for ellipses: 0.68, 0.90, or 0.95 (default 0.68)")
     p.add_argument("--port", type=int, default=8050)
     args = p.parse_args()
 
@@ -774,6 +1092,7 @@ if __name__ == "__main__":
         time_step=args.time_step,
         quantize_xy_to_int=(not args.no_quantize),
         generation_time=args.generation_time,
+        covariances_path=args.covariances,
     )
 
     rates_data = None
@@ -794,5 +1113,6 @@ if __name__ == "__main__":
         time_stride=args.time_stride,
         xy_lims=lims,
         rates_data=rates_data,
+        confidence_level=args.confidence_level,
     )
     app.run(debug=False, port=args.port)

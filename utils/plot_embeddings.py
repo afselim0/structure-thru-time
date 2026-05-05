@@ -43,13 +43,21 @@ def main():
     labels_df = labels_df[labels_df['sample_id'].isin(active_samples)]
     populations = labels_df['population'].unique()
     colors_df = colors_df[colors_df['population'].isin(populations)]
+    # If ancient samples are detected (samples where the embedding is NaN), print who they are
+    ancient_samples = embeddings_df[embeddings_df.isna().any(axis=1)]
+    if not ancient_samples.empty:
+        print("Ancient samples detected:")
+        # print unique sample ids
+        print(ancient_samples.index.get_level_values(0).unique())
+    else:
+        print("No ancient samples detected.")
 
     output_basename = output_name.removesuffix(".html")
     print(f"Building Embeddings plots for embeddings file: {args.input}")
 
-    # embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
-    plotter = PlotEmbeddings(embeddings_df = embeddings_df,labels_df = labels_df,colors_df = colors_df)#, generation_time = generation_time)
-    plotter.init_plot(time_scale=args.time_scale,xy_lims=lims, min_time=min_time, max_time=max_time)
+    embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
+    plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=labels_df, colors_df=colors_df)#, generation_time=generation_time)
+    plotter.init_plot(time_scale=args.time_scale, xy_lims=lims, min_time=min_time, max_time=max_time)
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()
@@ -67,23 +75,25 @@ def main():
     #     plotter.add_support_tube()
     #     plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
     
-    print("Creating MP4 animation...")
-    try:
-        make_mp4(
-            parquet_path = args.input,
-            out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
-            fps = 20,
-            bounce = True,
-            point_size = 10.0,
-            alpha = 0.8,
-            dpi = 120,
-            min_time = args.min_time,
-            max_time = args.max_time,
-            colors_path = args.colors,
-            labels_path = args.labels,
-        )
-    except Exception as e:
-        print(f"Warning: MP4 animation failed: {e}")
+
+
+    # print("Creating MP4 animation...")
+    # try:
+    #     make_mp4(
+    #         parquet_path = args.input,
+    #         out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
+    #         fps = 20,
+    #         bounce = True,
+    #         point_size = 10.0,
+    #         alpha = 0.8,
+    #         dpi = 120,
+    #         min_time = args.min_time,
+    #         max_time = args.max_time,
+    #         colors_path = args.colors,
+    #         labels_path = args.labels,
+    #     )
+    # except Exception as e:
+    #     print(f"Warning: MP4 animation failed: {e}")
 
 if __name__ == "__main__":
     main()
