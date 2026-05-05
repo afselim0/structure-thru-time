@@ -9,15 +9,26 @@ Loss and gradient can be computed for:
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
 
+GTOL_TIMEPOINT     = 1e-12
+FTOL_TIMEPOINT     = 1e-8
+GTOL_SAMPLE        = 1e-12
+FTOL_SAMPLE        = 1e-12
+MAX_ITER_TIMEPOINT = 6000
+MAX_ITER_SAMPLE    = 6000
+
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
+from tqdm import tqdm
 
 ############################################################
 # General Functions
 ############################################################
 
-def compute_f(D, N_min, link="inverse_sq_distance"): 
+def compute_f(D,
+              N_min,
+              link="inverse_sq_distance"): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
     Args:
@@ -114,9 +125,35 @@ def compute_unpenalized_loss(f,R,valid_mask):
     loss_values = f[valid_mask] - R[valid_mask] * np.log(f[valid_mask])
     return 0.5*np.nansum(loss_values)
 
+def compute_total_unpenalized_loss(X,R,N_min,N_max,epsilon=None):
+    """Computes the total unpenalized loss function over all time points.
+
+    Args:
+        X (np.ndarray): Array of coordinates for all samples over all time points. (nxdxT)
+        R (np.ndarray): Rates matrix between pairs of samples over all time points. (nxn*T)
+        N_min (float): Minimum value for the function computation.
+        epsilon (float, optional): Scaling factor for loss, defining the standard error of rate estimates. Defaults to None.
+
+    Returns:
+        float: Total unpenalized loss value.
+    """
+    R = R.copy()
+    R += 1/N_max 
+    n,_,T = R.shape
+    D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
+    f,_ = compute_f(D,N_min)
+    valid_mask = ~np.isnan(R)
+    loss = compute_unpenalized_loss(f,R,valid_mask)
+
+    if epsilon is not None:
+        loss /= epsilon
+
+    return loss
 
 ############################################################
 # Coordinate descent over time slices
+## Coordinate descent over time slices, where at each time slice we optimize the coordinates for all samples using L-BFGS-B optimization, initializing with the solution from the previous time slice.
+## This can be done in both forward and backward directions, and takes into account ancient samples that are not present in all time points.
 ############################################################
 def compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask_t):
     """Computes the contribution to the gradient for a given time point from the unpenalized term in the loss function.
@@ -166,7 +203,7 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilo
 
     return loss, grad.ravel()
 
-def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol):
+def optimize_timepoint(X_t_init, R_t, N_min=1, N_max=np.inf, epsilon=None, max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT):
     """A single coordinate descent step.
     For a given time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization.
 
@@ -177,7 +214,8 @@ def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol):
         N_max (float): Hyperparameter for the function computation, where samples with rate = 0 will have distances of N_max between them.
         epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
         max_iter (int): Maximum number of iterations for the optimizer.
-        tol (float): Tolerance for the optimizer.
+        gtol (float): Tolerance for the gradient.
+        ftol (float): Tolerance for the function value.
 
     Returns:
         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for the t-th time point.
@@ -186,13 +224,27 @@ def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol):
                       X_t_init.ravel(), args=(R_t, N_min, N_max, epsilon), 
                       method='L-BFGS-B', 
                       jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol})
     X_opt = result.x.reshape(X_t_init.shape)
-    return X_opt, result.fun
+    return X_opt, result.fun, result.nit, result.message
 
-def time_coordinate_descent_cycle(R, N_min, N_max, epsilon, max_iter, tol, n_components, X_init=None, direction="backward"):
+def coordinate_descent_over_time(
+    R,
+    N_min=1,
+    N_max=np.inf,
+    n_components=2,
+    max_iter=MAX_ITER_TIMEPOINT,
+    gtol=GTOL_TIMEPOINT,
+    ftol=FTOL_TIMEPOINT,
+    epsilon=None,
+    X_init=None,
+    sampled_by_time=None,
+    direction="backward",
+):
     """Coordinate descent optimization over time slices.
-        For each time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization, while keeping the coordinates at other time points fixed.
+        iterates over time points, optimizing coordinates for all samples at each time point using the initialization from the previous time point. The order of optimization over time points can be specified by the direction parameter.
+        backward means starting from the last time point and moving to the present, while forward means starting from the first time point and moving to the past.
+        takes into account ancient samples that are not present in all time points
 
     Args:
         X_init (np.ndarray): Initial coordinates for all samples over all time points. (n*d*T,)
@@ -201,25 +253,138 @@ def time_coordinate_descent_cycle(R, N_min, N_max, epsilon, max_iter, tol, n_com
         N_max (float): Hyperparameter for the function computation, where samples with rate = 0 will have distances of N_max between them.
         epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
         max_iter (int): Maximum number of iterations for the optimizer.
-        tol (float): Tolerance for the optimizer.
+        gtol (float): Tolerance for the gradient.
+        ftol (float): Tolerance for the function value.
+        sampled_by_time (np.ndarray): Boolean matrix indicating which samples are present at each time point. (n*T)
         n_components (int): Number of dimensions for the latent space embeddings.
 
     Returns:
         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for all time points.
     """
-    n_timepoints = R.shape[2]
-    n_samples = R.shape[0]
-    X = np.zeros((n_samples, n_components, n_timepoints))
+
+    n_samples, _, n_timepoints = R.shape
+
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n_samples, n_timepoints), dtype=bool)
+
     if X_init is None:
-        X_t = np.random.rand(n_samples, n_components)
-    
-    loss_values = []
-    for t in range(n_timepoints):
-        R_t = R[:,:,t]
-        X_t, loss_t = optimize_timepoint(X_t, R_t, N_min, N_max, epsilon, max_iter, tol)
-        X[:,:,t] = X_t
-        loss_values.append(loss_t)
-    return X, loss_values
+        X_init = np.random.rand(n_samples, n_components, n_timepoints)
+
+    X = np.full((n_samples, n_components, n_timepoints), np.nan)
+
+    loss_before = []
+    loss_after = []
+    n_iters = []
+    messages = []
+
+    # define traversal order
+    time_order = range(n_timepoints) if direction == "forward" else range(n_timepoints - 1, -1, -1)
+
+    prev_t_idx = None
+
+    for step, t_idx in enumerate(tqdm(time_order)):
+
+        extant_mask = sampled_by_time[:, t_idx] # True if sample is present at this time point, False if sample is ancient and not present at this time point
+        extant_idx = np.where(extant_mask)[0]   # Indices of samples that are present at this time point
+
+        # --- Initialize in GLOBAL space ---
+        if step == 0:
+            X_global = X_init[:, :, t_idx].copy()
+        else:
+            # start from previous timepoint
+            X_global = X[:, :, prev_t_idx].copy()
+
+            prev_mask = sampled_by_time[:, prev_t_idx] # True if sample is present at the previous time point, False if sample is ancient and not present at this time point
+
+            # samples that are present now but were not before
+            new_mask = extant_mask & ~prev_mask
+
+            if np.any(new_mask):
+                X_global[new_mask, :] = X_init[new_mask, :, t_idx] # For new ancient samples that are not present in the previous time point, initialize with the provided initial coordinates for that time point
+
+        # --- Restrict to extant samples (ONE clean projection step) ---
+        X_t = X_global[extant_idx, :]
+        R_t = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        X_init_t = X_init[extant_idx, :, t_idx]
+
+        # --- Loss before ---
+        loss_t_before, _ = compute_loss_gradient_timepoint(
+            X_init_t, R_t, N_min, N_max, epsilon
+        )
+
+        # --- Optimize ---
+        X_t, loss_t_after, n_iter, message = optimize_timepoint(
+            X_t, R_t, N_min, N_max, epsilon, max_iter, gtol, ftol
+        )
+
+        # --- Store results back in GLOBAL tensor ---
+        if step == 0:
+            X_t -= np.mean(X_t, axis=0)
+
+        X[extant_idx, :, t_idx] = X_t
+
+        # --- Logging ---
+        loss_before.append(loss_t_before)
+        loss_after.append(loss_t_after)
+        n_iters.append(n_iter)
+        messages.append(message)
+
+        prev_t_idx = t_idx
+
+    # --- loss tracking ---
+    loss_change = np.array(loss_before) - np.array(loss_after)
+    total_loss_before = np.sum(loss_before)
+
+    loss_over_time = total_loss_before - np.cumsum(loss_change)
+    loss_df = pd.DataFrame({
+        "step": range(1, n_timepoints + 1),
+        "loss": loss_over_time,
+        "n_iterations": n_iters,
+        "message": messages,
+    })
+
+    return X, loss_df
+
+
+def optimize_timepoints_sequentially(
+    R,
+    N_min=1,
+    N_max=np.inf,
+    n_components=2,
+    max_iter=MAX_ITER_TIMEPOINT,
+    gtol=GTOL_TIMEPOINT,
+    ftol=FTOL_TIMEPOINT,
+    epsilon=None,
+    X_init=None,
+    sampled_by_time=None,
+    start_direction="backward",
+    n_epochs=3):
+    """ Repeatedly performs coordinate descent optimization over time slices.
+    """
+    loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
+    cycle_order = (
+    ["backward", "forward"]
+    if start_direction == "backward"
+    else ["forward", "backward"])
+    cycles = [cycle_order[i % 2] for i in range(n_epochs)] # Alternate between forward and backward cycles for n_epochs epochs
+
+    for epoch in range(n_epochs):
+        # First cycle, either backward or forward depending on start_direction
+        print(f"Starting epoch {epoch+1}/{n_epochs}, direction: {cycles[epoch]}")
+        X,loss_df_cycle = coordinate_descent_over_time(R=R, N_min=N_min, N_max=N_max, max_iter=max_iter, n_components=n_components, gtol=gtol, ftol=ftol, epsilon=epsilon, X_init=X_init, sampled_by_time=sampled_by_time, direction=cycles[epoch])
+        loss_df_cycle["epoch"] = epoch+1
+        loss_df = pd.concat([loss_df, loss_df_cycle], ignore_index=True)
+
+        X_init = X.copy() # Start next cycle with the optimized coordinates from the previous cycle
+
+        # X,loss_df_cycle_2 = coordinate_descent_over_time(R=R, N_min=N_min, N_max=N_max, max_iter=max_iter, n_components=n_components, gtol=gtol, ftol=ftol, epsilon=epsilon, X_init=X_init, sampled_by_time=sampled_by_time, direction=cycle_order[1])
+        # epoch_number = 2*epoch + 2
+        # loss_df_cycle_2["epoch"] = epoch_number
+        # loss_df = pd.concat([loss_df, loss_df_cycle_2], ignore_index=True)
+
+        # X_init = X.copy()
+        
+    return X,loss_df
 
 ############################################################
 # Coordinate descent over samples
@@ -387,4 +552,3 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
 #                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
 #     X_opt = result.x.reshape(X_init.shape)
 #     return X_opt, result.fun
-# %%

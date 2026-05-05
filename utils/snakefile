@@ -617,7 +617,8 @@ rule compute_embeddings:
         outdir = data_output_path,
         output_name = embeddings_data_file_name,
         n_components = n_components,
-        n_timepoints_emb = n_timepoints_emb
+        n_timepoints_emb = n_timepoints_emb,
+        pop_labels = pop_labels
     shell:
         """
         mkdir -p {params.outdir}
@@ -630,7 +631,8 @@ rule compute_embeddings:
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
-            --n_timepoints_emb {params.n_timepoints_emb}
+            --n_timepoints_emb {params.n_timepoints_emb} \
+            --pop_labels {params.pop_labels}
         """
 rule plot_embeddings:
     input:

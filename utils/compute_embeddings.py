@@ -67,14 +67,14 @@ def main():
         try:
             sim_embeddings_path = output_path.replace("tsinfer","sim").replace("singer","sim").replace("relate","sim") + f"/{args.output_name}"
             sim_embeddings_df = pd.read_parquet(sim_embeddings_path)
-            X_init = sim_embeddings_df[sim_embeddings_df.time == min(sim_embeddings_df.time)][["X1","X2"]].values
+            X_init = sim_embeddings_df[["X1","X2"]].values
             print(f"initializing with sim embeddings from {sim_embeddings_path}")
         except:
             X_init = None
             print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
     else:
         X_init = None
-    X, loss = LSE.compute_embeddings_through_time()
+    X, loss_df = LSE.compute_embeddings_through_time(start_direction="forward",X_init=X_init)
 
 
     embeddings_df = LSE.get_embeddings_df()
@@ -88,6 +88,7 @@ def main():
     else:
         print("No ancient samples detected.")
     embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
+    loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
 
 
 if __name__ == "__main__":
