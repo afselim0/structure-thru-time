@@ -363,6 +363,19 @@ def make_figure(
         )
     )
 
+    # 5. Pair edge — filled when hovering over a pairwise rate, always present
+    traces.append(
+        go.Scattergl(
+            x=[], y=[],
+            mode="lines+markers",
+            line=dict(width=2, color="rgba(255,255,255,0.8)"),
+            marker=dict(size=14, color=[], line=dict(color="white", width=2)),
+            hoverinfo="skip",
+            showlegend=False,
+            name="pair_edge",
+        )
+    )
+
     fig = go.Figure(data=traces)
     fig.update_layout(
         title=f"t = {t:.2f}",
@@ -674,6 +687,7 @@ def make_app(
     n_pops_2d = len(data.get("unique_pops", []))
     scatter_trace_idx_2d = n_pops_2d
     highlight_trace_idx_2d = n_pops_2d + 2   # labels always at n_pops_2d + 1
+    pair_edge_trace_idx_2d = n_pops_2d + 3   # pair edge for rate-panel hover
 
     fig_rates_base = (
         make_rates_figure(float(times[0]), rates_data)
@@ -922,6 +936,60 @@ def make_app(
             patched["data"][highlight_trace_idx_2d]["x"] = []
             patched["data"][highlight_trace_idx_2d]["y"] = []
 
+        return patched
+
+    @app.callback(
+        Output("graph2d", "figure", allow_duplicate=True),
+        Input("graph_rates", "hoverData"),
+        State("t_idx", "value"),
+        prevent_initial_call=True,
+    )
+    def highlight_pair_on_rates_hover(hover_data, t_idx_val):
+        patched = Patch()
+        clear = lambda: (
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "x"), []) or
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "y"), []) or
+            patched.__setitem__(("data", pair_edge_trace_idx_2d, "marker", "color"), [])
+        )
+
+        if not hover_data or not hover_data.get("points"):
+            clear()
+            return patched
+
+        point = hover_data["points"][0]
+        cd = point.get("customdata")
+        if cd is None or not isinstance(cd, (list, tuple)) or len(cd) < 1:
+            clear()
+            return patched
+
+        pair_id = str(cd[0])
+        parts = pair_id.split(" × ")
+        if len(parts) != 2:
+            clear()
+            return patched
+
+        s1, s2 = parts
+        t_int = int(t_idx_val)
+        sid_arr = data["sample_ids"]
+        idx1_arr = np.where(sid_arr == s1)[0]
+        idx2_arr = np.where(sid_arr == s2)[0]
+        if not len(idx1_arr) or not len(idx2_arr):
+            clear()
+            return patched
+
+        idx1, idx2 = int(idx1_arr[0]), int(idx2_arr[0])
+        pos = data["xy_float"][t_int]
+        p1, p2 = pos[idx1], pos[idx2]
+        if np.any(np.isnan(p1)) or np.any(np.isnan(p2)):
+            clear()
+            return patched
+
+        patched["data"][pair_edge_trace_idx_2d]["x"] = [float(p1[0]), float(p2[0])]
+        patched["data"][pair_edge_trace_idx_2d]["y"] = [float(p1[1]), float(p2[1])]
+        patched["data"][pair_edge_trace_idx_2d]["marker"]["color"] = [
+            str(data["color"][idx1]),
+            str(data["color"][idx2]),
+        ]
         return patched
 
     @app.callback(
