@@ -6,7 +6,7 @@ output_path: ../results/empirical/Wohns/all.npp.2
 trees_dir: ../data/trees/wohns_chopped
 pop_colors: ../data/metadata/wohns_pop_colors.csv
 pop_labels: ../data/metadata/wohns_pop_labels.csv 
-num_posterior_samples: 100
+num_posterior_samples: 1
 
 # coal time pdf estimation
 n_samples_per_pop: 2
