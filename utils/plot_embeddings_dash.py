@@ -941,16 +941,21 @@ def make_app(
     @app.callback(
         Output("graph2d", "figure", allow_duplicate=True),
         Input("graph_rates", "hoverData"),
+        Input("graph_rates", "unhoverData"),
         State("t_idx", "value"),
         prevent_initial_call=True,
     )
-    def highlight_pair_on_rates_hover(hover_data, t_idx_val):
+    def highlight_pair_on_rates_hover(hover_data, _unhover_data, t_idx_val):
         patched = Patch()
         clear = lambda: (
             patched.__setitem__(("data", pair_edge_trace_idx_2d, "x"), []) or
             patched.__setitem__(("data", pair_edge_trace_idx_2d, "y"), []) or
             patched.__setitem__(("data", pair_edge_trace_idx_2d, "marker", "color"), [])
         )
+
+        if ctx.triggered_id == "graph_rates" and ctx.triggered[0]["prop_id"] == "graph_rates.unhoverData":
+            clear()
+            return patched
 
         if not hover_data or not hover_data.get("points"):
             clear()
