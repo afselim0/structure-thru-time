@@ -63,17 +63,17 @@ def main():
         sample_times = None
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties, sample_times=sample_times)
     output_path = args.output_path
-    if "tsinfer" in output_path or "singer" in output_path or "relate" in output_path:
-        try:
-            sim_embeddings_path = output_path.replace("tsinfer","sim").replace("singer","sim").replace("relate","sim") + f"/{args.output_name}"
-            sim_embeddings_df = pd.read_parquet(sim_embeddings_path)
-            X_init = sim_embeddings_df[["X1","X2"]].values
-            print(f"initializing with sim embeddings from {sim_embeddings_path}")
-        except:
-            X_init = None
-            print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
-    else:
-        X_init = None
+    # if "tsinfer" in output_path or "singer" in output_path or "relate" in output_path:
+    #     try:
+    #         sim_embeddings_path = output_path.replace("tsinfer","sim").replace("singer","sim").replace("relate","sim") + f"/{args.output_name}"
+    #         sim_embeddings_df = pd.read_parquet(sim_embeddings_path)
+    #         X_init = sim_embeddings_df[["X1","X2"]].values
+    #         print(f"initializing with sim embeddings from {sim_embeddings_path}")
+    #     except:
+    #         X_init = None
+    #         print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
+    # else:
+    X_init = None
     # X, loss = LSE.compute_embeddings_through_time(
     #     compute_uncertainty=args.compute_uncertainty,
     #     n_observations=args.n_observations,
