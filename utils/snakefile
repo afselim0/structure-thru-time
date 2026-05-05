@@ -508,42 +508,42 @@ rule infer_trees:
             --num_threads {params.num_threads}
         """
 # # ______________________rates Rules_____________________
-rule compute_pdf:
-    input:
-        main_script = COUNT_COAL_EVENTS_SCRIPT,
-        script = compute_pdf_wrapper_script,
-        pop_labels = pop_labels,
-        trees_ready = trees_ready
-    params:
-        trees_dir = trees_dir,
-        outdir = data_output_path,
-        output_name = os.path.basename(pdf_data),
-        max_time = max_time,
-        n_timepoints = n_timepoints,
-        n_samples_per_pop = n_samples_per_pop,
-        num_posterior_samples = num_posterior_samples,
-        fraction_samples = fraction_samples,
-        pops = pops,
-        num_threads = num_threads
+# rule compute_pdf:
+#     input:
+#         main_script = COUNT_COAL_EVENTS_SCRIPT,
+#         script = compute_pdf_wrapper_script,
+#         pop_labels = pop_labels,
+#         trees_ready = trees_ready
+#     params:
+#         trees_dir = trees_dir,
+#         outdir = data_output_path,
+#         output_name = os.path.basename(pdf_data),
+#         max_time = max_time,
+#         n_timepoints = n_timepoints,
+#         n_samples_per_pop = n_samples_per_pop,
+#         num_posterior_samples = num_posterior_samples,
+#         fraction_samples = fraction_samples,
+#         pops = pops,
+#         num_threads = num_threads
 
-    output:
-        pdf_data
-    shell:
-        """
-        mkdir -p {params.outdir}
-        python {input.script} \
-            --input_path {params.trees_dir} \
-            --output_path {params.outdir} \
-            --output_name {params.output_name} \
-            --max_time {params.max_time} \
-            --n_timepoints {params.n_timepoints} \
-            --pops {params.pops} \
-            --num_posterior_samples {params.num_posterior_samples} \
-            --n_samples_per_pop {params.n_samples_per_pop} \
-            --fraction_samples {params.fraction_samples} \
-            --pop_labels {input.pop_labels} \
-            --num_threads {params.num_threads}
-        """
+#     output:
+#         pdf_data
+#     shell:
+#         """
+#         mkdir -p {params.outdir}
+#         python {input.script} \
+#             --input_path {params.trees_dir} \
+#             --output_path {params.outdir} \
+#             --output_name {params.output_name} \
+#             --max_time {params.max_time} \
+#             --n_timepoints {params.n_timepoints} \
+#             --pops {params.pops} \
+#             --num_posterior_samples {params.num_posterior_samples} \
+#             --n_samples_per_pop {params.n_samples_per_pop} \
+#             --fraction_samples {params.fraction_samples} \
+#             --pop_labels {input.pop_labels} \
+#             --num_threads {params.num_threads}
+#         """
 
 rule compute_rates:
     input:
