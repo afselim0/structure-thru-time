@@ -41,14 +41,14 @@ fi
 #   --cores all --rerun-incomplete
 
 
-snakemake STT_true --configfile "$configfile" \
+snakemake sim_STT --configfile "$configfile" \
   --config output_path="$output_path"/sim\
   --cores all --rerun-incomplete
 
 
-# snakemake infer_STT --configfile "$configfile" \
-#   --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
-#   --cores all
+snakemake infer_STT --configfile "$configfile" \
+  --config output_path="$output_path"/"$infer_method" infer_method="$infer_method" vcf_path="$output_path"/sim/trees \
+  --cores all
 
 
 ## Example
