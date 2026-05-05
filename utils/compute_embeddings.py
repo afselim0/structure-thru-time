@@ -74,6 +74,10 @@ def main():
             print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
     else:
         X_init = None
+    # X, loss = LSE.compute_embeddings_through_time(
+    #     compute_uncertainty=args.compute_uncertainty,
+    #     n_observations=args.n_observations,
+    # )
     X, loss_df = LSE.compute_embeddings_through_time(start_direction="forward",X_init=X_init)
 
 

@@ -203,7 +203,28 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilo
 
     return loss, grad.ravel()
 
-def optimize_timepoint(X_t_init, R_t, N_min=1, N_max=np.inf, epsilon=None, max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT):
+def extract_sample_covariances(hess_inv, n, d):
+    """Extract per-sample d×d covariance matrices from a L-BFGS inverse Hessian operator.
+
+    Under the Laplace approximation the posterior covariance is H^{-1} where H is the
+    Hessian of the loss at the MAP. scipy's L-BFGS-B result.hess_inv approximates H^{-1}
+    as a LinearOperator. We materialise the dense matrix and return the d×d diagonal block
+    for each sample's coordinates.
+
+    Args:
+        hess_inv: scipy LbfgsInvHessProduct — shape (n*d, n*d)
+        n (int): number of samples
+        d (int): number of embedding dimensions
+
+    Returns:
+        np.ndarray: shape (n, d, d)
+    """
+    n_params = n * d
+    H_inv = hess_inv @ np.eye(n_params)
+    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+
+
+def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol, return_hess_inv=False):
     """A single coordinate descent step.
     For a given time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization.
 
@@ -214,19 +235,21 @@ def optimize_timepoint(X_t_init, R_t, N_min=1, N_max=np.inf, epsilon=None, max_i
         N_max (float): Hyperparameter for the function computation, where samples with rate = 0 will have distances of N_max between them.
         epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
         max_iter (int): Maximum number of iterations for the optimizer.
-        gtol (float): Tolerance for the gradient.
-        ftol (float): Tolerance for the function value.
+        tol (float): Tolerance for the optimizer.
+        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian approximation.
 
     Returns:
-        tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for the t-th time point.
+        (X_opt, loss) or (X_opt, loss, hess_inv) when return_hess_inv is True.
     """
-    result = minimize(compute_loss_gradient_timepoint, 
-                      X_t_init.ravel(), args=(R_t, N_min, N_max, epsilon), 
-                      method='L-BFGS-B', 
-                      jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol})
+    result = minimize(compute_loss_gradient_timepoint,
+                      X_t_init.ravel(), args=(R_t, N_min, N_max, epsilon),
+                      method='L-BFGS-B',
+                      jac=True,
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
     X_opt = result.x.reshape(X_t_init.shape)
-    return X_opt, result.fun, result.nit, result.message
+    if return_hess_inv:
+        return X_opt, result.fun, result.hess_inv
+    return X_opt, result.fun
 
 def coordinate_descent_over_time(
     R,

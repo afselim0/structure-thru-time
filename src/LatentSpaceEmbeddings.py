@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from optimization_functions import *
+from itertools import product as iterproduct
 from tqdm import tqdm
 
 STDERR_ROLLING_WINDOW= 10
@@ -56,6 +57,7 @@ class LatentSpaceEmbeddings:
 
 
         self.embeddings = None
+        self.covariances = None
 
         sampled_by_time  = self.sample_times[:, np.newaxis] <= self.time_points
         self.sampled_by_time = sampled_by_time
