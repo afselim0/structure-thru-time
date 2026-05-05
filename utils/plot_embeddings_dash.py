@@ -168,6 +168,16 @@ def load_and_pack(
     pop_color_map = dict(zip(colors_df["population"].astype(str), colors_df["color"].astype(str)))
     colors = np.array([pop_color_map.get(p, "#808080") for p in pops], dtype=object)
 
+    # Per-population index mapping (stable order, used for ellipse colouring)
+    unique_pops: list = []
+    pop_to_sample_indices: dict = {}
+    for i, p in enumerate(pops):
+        pk = str(p)
+        if pk not in pop_to_sample_indices:
+            unique_pops.append(p)
+            pop_to_sample_indices[pk] = []
+        pop_to_sample_indices[pk].append(i)
+
     xmin, xmax = np.nanmin(xy[:, :, 0]), np.nanmax(xy[:, :, 0])
     ymin, ymax = np.nanmin(xy[:, :, 1]), np.nanmax(xy[:, :, 1])
     dx, dy = float(xmax - xmin), float(ymax - ymin)
@@ -195,6 +205,9 @@ def load_and_pack(
         xlo=xlo, xhi=xhi, ylo=ylo, yhi=yhi,
         generation_time=generation_time,
         covariances=covariances,
+        unique_pops=unique_pops,
+        pop_color_map_str=pop_color_map,
+        pop_to_sample_indices=pop_to_sample_indices,
     )
 
 
@@ -260,35 +273,57 @@ def make_figure(
 
     t = times[frame_idx]
 
+    # Trace layout (fixed indices, stable across all figure rebuilds):
+    #   0 .. n_pops-1  : per-population ellipse traces
+    #   n_pops         : main scatter
+    #   n_pops + 1     : text labels (always present; empty when show_labels=False)
+    #   n_pops + 2     : highlight ellipse (initially empty; filled by hover callback)
+
+    unique_pops = data.get("unique_pops", [])
+    pop_color_map_str = data.get("pop_color_map_str", {})
+    pop_to_sample_indices = data.get("pop_to_sample_indices", {})
+    has_covariances = data.get("covariances") is not None
+
     traces = []
 
-    # Ellipses trace (always added so trace index is stable; empty when not shown)
-    ellipse_x: list = []
-    ellipse_y: list = []
-    if show_ellipses and data.get("covariances") is not None:
-        xy_f = data["xy_float"][frame_idx]     # (N, 2) full-precision centres
-        covs = data["covariances"][frame_idx]  # (N, 2, 2)
-        for i in range(len(xy_f)):
-            mu = xy_f[i]
-            cov = covs[i]
-            if np.any(np.isnan(mu)) or np.any(np.isnan(cov)):
-                continue
-            ex, ey = ellipse_points(mu, cov, level=confidence_level)
-            ellipse_x.extend(ex.tolist() + [None])
-            ellipse_y.extend(ey.tolist() + [None])
+    # 1. Per-population ellipse traces
+    if show_ellipses and has_covariances:
+        xy_f = data["xy_float"][frame_idx]
+        covs = data["covariances"][frame_idx]
+    else:
+        xy_f = covs = None
 
-    traces.append(
-        go.Scattergl(
-            x=ellipse_x,
-            y=ellipse_y,
+    for pop in unique_pops:
+        pop_color = pop_color_map_str.get(str(pop), "#808080")
+        ex_all: list = []
+        ey_all: list = []
+        cd_all: list = []
+
+        if xy_f is not None:
+            for i in pop_to_sample_indices.get(str(pop), []):
+                mu = xy_f[i]
+                cov = covs[i]
+                if np.any(np.isnan(mu)) or np.any(np.isnan(cov)):
+                    continue
+                ex, ey = ellipse_points(mu, cov, level=confidence_level)
+                # Close the ellipse and add a None break
+                ex_all.extend(ex.tolist() + [ex[0], None])
+                ey_all.extend(ey.tolist() + [ey[0], None])
+                cd_all.extend([sample_ids[i]] * (len(ex) + 1) + [None])
+
+        traces.append(go.Scattergl(
+            x=ex_all,
+            y=ey_all,
             mode="lines",
-            line=dict(width=1, color="rgba(80,80,80,0.4)"),
-            hoverinfo="skip",
+            line=dict(width=1, color=pop_color),
+            opacity=0.5,
+            customdata=cd_all,
+            hovertemplate="sample: %{customdata}<br>pop: " + str(pop) + "<extra></extra>",
             showlegend=False,
-            name="uncertainty_ellipses",
-        )
-    )
+            name=f"ellipse_{pop}",
+        ))
 
+    # 2. Main scatter
     traces.append(
         go.Scattergl(
             x=x,
@@ -301,19 +336,32 @@ def make_figure(
         )
     )
 
-    if show_labels:
-        traces.append(
-            go.Scatter(
-                x=x,
-                y=y,
-                mode="text",
-                text=pop3.tolist(),
-                textposition="top center",
-                textfont=dict(size=10, color=colors.tolist()),
-                hoverinfo="skip",
-                showlegend=False,
-            )
+    # 3. Text labels (always present; empty coords when hidden)
+    traces.append(
+        go.Scatter(
+            x=x if show_labels else [],
+            y=y if show_labels else [],
+            mode="text",
+            text=pop3.tolist(),
+            textposition="top center",
+            textfont=dict(size=10, color=colors.tolist()),
+            hoverinfo="skip",
+            showlegend=False,
         )
+    )
+
+    # 4. Highlight ellipse — filled by hover callback, always present for stable indexing
+    traces.append(
+        go.Scattergl(
+            x=[], y=[],
+            mode="lines",
+            line=dict(width=3, color="white"),
+            opacity=1.0,
+            hoverinfo="skip",
+            showlegend=False,
+            name="highlight_ellipse",
+        )
+    )
 
     fig = go.Figure(data=traces)
     fig.update_layout(
@@ -622,6 +670,11 @@ def make_app(
 
     has_covariances = data.get("covariances") is not None
 
+    # Stable 2D trace indices (determined by number of populations in dataset)
+    n_pops_2d = len(data.get("unique_pops", []))
+    scatter_trace_idx_2d = n_pops_2d
+    highlight_trace_idx_2d = n_pops_2d + 2   # labels always at n_pops_2d + 1
+
     fig_rates_base = (
         make_rates_figure(float(times[0]), rates_data)
         if rates_data is not None else go.Figure()
@@ -830,6 +883,46 @@ def make_app(
         patched["layout"]["title"]["text"] = f"3D Trajectories (t = {t_val:.2f})"
 
         return fig_2d, patched
+
+    @app.callback(
+        Output("graph2d", "figure", allow_duplicate=True),
+        Input("graph2d", "hoverData"),
+        State("t_idx", "value"),
+        State("confidence_level_dropdown", "value"),
+        prevent_initial_call=True,
+    )
+    def highlight_on_hover(hover_data, t_idx_val, conf_level_val):
+        if not has_covariances:
+            return no_update
+        if not hover_data or not hover_data.get("points"):
+            return no_update
+
+        point = hover_data["points"][0]
+        curve_num = point.get("curveNumber", -1)
+        level = float(conf_level_val) if conf_level_val is not None else confidence_level
+        t_int = int(t_idx_val)
+
+        patched = Patch()
+
+        if curve_num == scatter_trace_idx_2d:
+            # Hover on a scatter point → draw its ellipse in the highlight trace
+            sample_idx = point.get("pointIndex")
+            mu = data["xy_float"][t_int][sample_idx]
+            cov = data["covariances"][t_int][sample_idx]
+            if not (np.any(np.isnan(mu)) or np.any(np.isnan(cov))):
+                ex, ey = ellipse_points(mu, cov, level=level, n_pts=60)
+                patched["data"][highlight_trace_idx_2d]["x"] = ex.tolist() + [ex[0]]
+                patched["data"][highlight_trace_idx_2d]["y"] = ey.tolist() + [ey[0]]
+                patched["data"][highlight_trace_idx_2d]["line"]["color"] = str(data["color"][sample_idx])
+            else:
+                patched["data"][highlight_trace_idx_2d]["x"] = []
+                patched["data"][highlight_trace_idx_2d]["y"] = []
+        else:
+            # Hover off scatter (e.g. on an ellipse or empty space) → clear highlight
+            patched["data"][highlight_trace_idx_2d]["x"] = []
+            patched["data"][highlight_trace_idx_2d]["y"] = []
+
+        return patched
 
     @app.callback(
         Output("rates_panel", "style"),
