@@ -247,9 +247,9 @@ def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol, retu
                       jac=True,
                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
     X_opt = result.x.reshape(X_t_init.shape)
-    if return_hess_inv:
-        return X_opt, result.fun, result.hess_inv
-    return X_opt, result.fun
+    # if return_hess_inv:
+    #     return X_opt, result.fun, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
 
 def coordinate_descent_over_time(
     R,
