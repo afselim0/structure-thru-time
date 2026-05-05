@@ -75,23 +75,25 @@ def main():
     #     plotter.add_support_tube()
     #     plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
     
-    print("Creating MP4 animation...")
-    try:
-        make_mp4(
-            parquet_path = args.input,
-            out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
-            fps = 20,
-            bounce = True,
-            point_size = 10.0,
-            alpha = 0.8,
-            dpi = 120,
-            min_time = args.min_time,
-            max_time = args.max_time,
-            colors_path = args.colors,
-            labels_path = args.labels,
-        )
-    except Exception as e:
-        print(f"Warning: MP4 animation failed: {e}")
+
+
+    # print("Creating MP4 animation...")
+    # try:
+    #     make_mp4(
+    #         parquet_path = args.input,
+    #         out_mp4 = f"{output_path}/{output_name.rstrip('.html')}_animation",
+    #         fps = 20,
+    #         bounce = True,
+    #         point_size = 10.0,
+    #         alpha = 0.8,
+    #         dpi = 120,
+    #         min_time = args.min_time,
+    #         max_time = args.max_time,
+    #         colors_path = args.colors,
+    #         labels_path = args.labels,
+    #     )
+    # except Exception as e:
+    #     print(f"Warning: MP4 animation failed: {e}")
 
 if __name__ == "__main__":
     main()

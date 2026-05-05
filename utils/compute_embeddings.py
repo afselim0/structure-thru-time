@@ -21,12 +21,13 @@ def main():
     parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
-    parser.add_argument("--sample_times", type=str, required=False, help="Path to sample times CSV file for ancient samples")
+    parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
     
     args = parser.parse_args()
     input = args.input
     l1_penalties = args.l1_penalties
     l2_penalties = args.l2_penalties
+    pop_labels_df = pd.read_csv(args.pop_labels) if args.pop_labels is not None else pd.DataFrame()
 
     if l1_penalties == "None":
         l1_penalties = None
@@ -47,9 +48,10 @@ def main():
         selected_times = [unique_times[i] for i in idx]
         rates_df = rates_df[selected_times]
         print(f"subsampled to {len(selected_times)} timepoints (requested {args.n_timepoints_emb} of {len(unique_times)})")
-    if args.sample_times:
+
+    if "sample_time" in pop_labels_df.columns:
         samples_in_rates = set(rates_df.index.get_level_values(0)).union(set(rates_df.index.get_level_values(1)))
-        sample_times_df = pd.read_csv(args.sample_times)
+        sample_times_df = pop_labels_df[["sample_id", "sample_time"]]
         sample_times_df = sample_times_df[sample_times_df['sample_id'].isin(samples_in_rates)]
         sample_times = sample_times_df.sample_time.values
         if np.any(sample_times != 0):

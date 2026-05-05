@@ -53,8 +53,9 @@ class LatentSpaceEmbeddings:
             self.sample_times = np.zeros(self.num_samples, dtype=float)
         else:
             self.sample_times = sample_times
-            print(f"Number of sample times provided: {len(self.sample_times)}")
-            print(f"Number of samples: {self.num_samples}")
+            print(f"number of ancient samples: {(self.sample_times != 0).sum()}/{len(self.sample_times)}")
+            # print(f"Number of sample times provided: {len(self.sample_times)}")
+            # print(f"Number of samples: {self.num_samples}")
 
 
         self.embeddings = None
@@ -99,29 +100,29 @@ class LatentSpaceEmbeddings:
         else:
             self.smoothing_params = None
 
-    def compute_embeddings_jointly(self, X_init=None):
-        if X_init is None:
-            X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        else:
-            assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
-        X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
-        X = procrustes_alignment(X)
-        self.embeddings = X
+    # def compute_embeddings_jointly(self, X_init=None):
+    #     if X_init is None:
+    #         X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
+    #     else:
+    #         assert X_init.shape == (self.num_samples, self.n_components, self.num_timepoints), "X_init must have shape (num_samples, n_components, num_timepoints)"
+    #     X, loss = optimize_all(X_init, self.R, self.N_min, self.N_max, self.smoothing_params)
+    #     X = procrustes_alignment(X)
+    #     self.embeddings = X
 
-    def compute_embeddings(self, X_init, time_idx):
-        R = self.R[:, :, time_idx]
+    # def compute_embeddings(self, X_init, time_idx):
+    #     R = self.R[:, :, time_idx]
 
-        extant = np.where(self.sampled_by_time[:, time_idx])[0]
-        R_sub = R[np.ix_(extant, extant)]
+    #     extant = np.where(self.sampled_by_time[:, time_idx])[0]
+    #     R_sub = R[np.ix_(extant, extant)]
 
-        X0 = X_init[extant, :]
-        X_sub, loss = compute_embeddings(X0, R_sub, self.N0)
+    #     X0 = X_init[extant, :]
+    #     X_sub, loss = compute_embeddings(X0, R_sub, self.N0)
 
-        # Re-expand to full size
-        X_full = np.full_like(X_init, np.nan, dtype=float)
-        X_full[extant, :] = X_sub
+    #     # Re-expand to full size
+    #     X_full = np.full_like(X_init, np.nan, dtype=float)
+    #     X_full[extant, :] = X_sub
 
-        return X_full, loss
+    #     return X_full, loss
 
     def compute_embeddings_through_time(self, X_init = None, direction = "backward", tol=TIMEPOINT_TOL, max_iter=MAX_ITER):
         """Computes embeddings through time by optimizing each time slice with and initializing with previous solution
@@ -151,13 +152,13 @@ class LatentSpaceEmbeddings:
             R_t = R_t[extant_samples,:,]
             R_t = R_t[:,extant_samples,]
             X_t = X_t[extant_samples, :]
-            X_t, loss = optimize_timepoint(X_t, R_t, self.N_min, self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
+            X_t, loss_after, n_iterations, message = optimize_timepoint(X_t_init = X_t, R_t = R_t, N_min = self.N_min, N_max = self.N_max, epsilon = self.multiplier, tol=tol, max_iter=max_iter)
             if k==0:
                 X_t -= X_t.mean(axis=0)
             X[extant_samples,:,time_idx] = X_t
             X_t = X[:,:,time_idx]
-            total_loss += loss
-        X = procrustes_alignment(X)
+            total_loss += loss_after
+        # X = procrustes_alignment(X)
         self.embeddings = X
         return X, total_loss
     
