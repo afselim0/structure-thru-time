@@ -116,7 +116,14 @@ class LatentSpaceEmbeddings:
         X, loss_df = optimize_timepoints_sequentially(R = self.R,N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init,sampled_by_time = self.sampled_by_time,start_direction = start_direction,n_epochs = n_epochs)
         # X = procrustes_alignment(X)
         self.embeddings = X
-        return X, loss_df          
+        return X, loss_df  
+
+    def compute_smooth_embeddings(self, X_init = None, n_epochs = 1):
+        X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
+        X_opt, loss_df = coordinate_descent_over_samples(X_init, self.R, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)        
+        # X_opt = procrustes_alignment(X_opt)
+        self.embeddings = X_opt
+        return X_opt, loss_df
                                 
 
     # def compute_embeddings_through_time(self, X_init = None, direction = "backward"):
@@ -206,6 +213,7 @@ class LatentSpaceEmbeddings:
         for dim in range(d):
             df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
 
+        df.columns = df.columns.astype(str) # To ensure safe parquet saving with multi-index columns
         return df
     
 # def compute_embeddings_jointly(self, X_init=None):

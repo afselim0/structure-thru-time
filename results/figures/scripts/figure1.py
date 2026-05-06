@@ -68,7 +68,7 @@ pop_colors.loc[len(pop_colors)] = ["focal", "#000000"]
 # Compute latent space embeddings through time and distances between them
 LSE = LatentSpaceEmbeddings(expanded_true_rates, N_min = N_min, N_max = N_max)
 np.random.seed(0)
-X_init = np.random.rand(LSE.num_samples, LSE.n_components)
+X_init = np.random.rand(LSE.num_samples, LSE.n_components, LSE.num_timepoints)
 X,loss = LSE.compute_embeddings_through_time(X_init)
 embeddings_df = LSE.get_embeddings_df()
 distances_df = compute_distances(embeddings_df)
@@ -282,10 +282,15 @@ fig.text(x_starts[1] + 0.01, 0.95, "b)", fontweight='black', va='top', ha='right
 fig.text(x_starts[3] + 0.01, 0.95, "c)", fontweight='black', va='top', ha='right')
 fig.text(x_starts[4] + 0.01, 0.95, "d)", fontweight='black', va='top', ha='right')
 
-# Add arrows between panels
+# Add arrows between panels — span from right edge of one panel to left edge of the next
+pos_a = ax_a.get_position()
+pos_b = ax_b.get_position()
+pos_d = ax_d.get_position()
+y_mid = (pos_a.y0 + pos_a.y1) / 2  # vertical midpoint of the full-height panels
+
 ax_a.annotate(
     '',
-    xy=(x_starts[0]+0.04, 0.75), xytext=(x_starts[0]+0.004, 0.75),
+    xy=(pos_b.x0, y_mid), xytext=(pos_a.x1, y_mid),
     xycoords='figure fraction',
     arrowprops=dict(arrowstyle='->', linewidth=2),
     zorder=10
@@ -293,7 +298,7 @@ ax_a.annotate(
 
 ax_a.annotate(
     '',
-    xy=(x_starts[1]+0.04, 0.75), xytext=(x_starts[1]+0.004, 0.75),
+    xy=(pos_d.x0, y_mid), xytext=(pos_b.x1, y_mid),
     xycoords='figure fraction',
     arrowprops=dict(arrowstyle='->', linewidth=2),
     zorder=10
@@ -315,7 +320,7 @@ average_d_label = 'average distances'
 
 handles = [rate_handle,focal_pair_handle, t1_handle, t2_handle, Ne_handle, average_d_handle]
 labels  = [rate_label, focal_pair_label, t1_label, t2_label, Ne_label, average_d_label]
-fig.legend(handles, labels,loc='lower center', bbox_to_anchor=(0.55, -0.2), frameon=False, ncol=3)
+fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.55, -0.25), frameon=False, ncol=3)
 
-fig.savefig(f"../outputs/{file_name}.png", dpi=DPI)
+fig.savefig(f"../outputs/{file_name}.png", dpi=DPI, bbox_inches='tight')
 # %%

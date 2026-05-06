@@ -25,10 +25,13 @@ def main():
     
     args = parser.parse_args()
     input = args.input
+    output_path = args.output_path
+    print(f"computing embeddings for {input}")
     l1_penalties = args.l1_penalties
     l2_penalties = args.l2_penalties
     pop_labels_df = pd.read_csv(args.pop_labels) if args.pop_labels is not None else pd.DataFrame()
 
+    # Parsing l1 and l2 penalties
     if l1_penalties == "None":
         l1_penalties = None
     if l2_penalties == "None":
@@ -39,7 +42,7 @@ def main():
     if l2_penalties is not None:
         l2_penalties = {i+1: float(l2) for i, l2 in enumerate(l2_penalties.split(","))} 
 
-    print(f"computing embeddings for {input}")
+    # Load rates data
     rates_df = pd.read_parquet(input)
     rates_df.columns = rates_df.columns.astype(float)
     unique_times = sorted(rates_df.columns.tolist())
@@ -49,6 +52,7 @@ def main():
         rates_df = rates_df[selected_times]
         print(f"subsampled to {len(selected_times)} timepoints (requested {args.n_timepoints_emb} of {len(unique_times)})")
 
+    # Parsing sample times if they exist in the population labels file, and checking if any sample times are non-zero (which would indicate ancient samples)
     if "sample_time" in pop_labels_df.columns:
         samples_in_rates = set(rates_df.index.get_level_values(0)).union(set(rates_df.index.get_level_values(1)))
         sample_times_df = pop_labels_df[["sample_id", "sample_time"]]
@@ -61,8 +65,26 @@ def main():
             print("All sample times are zero.")
     else:
         sample_times = None
+
+    
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties, sample_times=sample_times)
-    output_path = args.output_path
+    X_init = None
+
+    print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
+    X, loss_df = LSE.compute_embeddings_through_time(start_direction="backward",X_init=X_init, n_epochs=1)
+    unsmoothed_embeddings_df = LSE.get_embeddings_df()
+    unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
+    loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
+
+    if LSE.smoothing_params is not None:
+        print("Computing smoothed embeddings by optimizing samples with coordinate descent...")
+        X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
+        smoothed_embeddings_df = LSE.get_embeddings_df()
+        smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
+        loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
+
+
+    
     # if "tsinfer" in output_path or "singer" in output_path or "relate" in output_path:
     #     try:
     #         sim_embeddings_path = output_path.replace("tsinfer","sim").replace("singer","sim").replace("relate","sim") + f"/{args.output_name}"
@@ -73,28 +95,22 @@ def main():
     #         X_init = None
     #         print(f"could not find sim embeddings at {sim_embeddings_path}, initializing with random embeddings")
     # else:
-    X_init = None
+    
     # X, loss = LSE.compute_embeddings_through_time(
     #     compute_uncertainty=args.compute_uncertainty,
     #     n_observations=args.n_observations,
     # )
-    X, loss_df = LSE.compute_embeddings_through_time(start_direction="backward",X_init=X_init, n_epochs=4)
-
-
-
-    embeddings_df = LSE.get_embeddings_df()
-    embeddings_df.columns = embeddings_df.columns.astype(str)
+    
+    
     # if ancient samples are detected (samples where the embedding is NaN), print who they are
-    ancient_samples = embeddings_df[embeddings_df.isna().any(axis=1)]
-    if not ancient_samples.empty:
-        print("Ancient samples detected:")
-        # print unique sample ids
-        print(ancient_samples.index.get_level_values(0).unique())
-    else:
-        print("No ancient samples detected.")
-    embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
-    loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
-
-
+    # ancient_samples = unsmoothed_embeddings_df[unsmoothed_embeddings_df.isna().any(axis=1)]
+    # if not ancient_samples.empty:
+    #     print("Ancient samples detected:")
+    #     # print unique sample ids
+    #     print(ancient_samples.index.get_level_values(0).unique())
+    # else:
+    #     print("No ancient samples detected.")
+    
+    
 if __name__ == "__main__":
     main()

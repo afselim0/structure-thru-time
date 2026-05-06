@@ -66,6 +66,21 @@ def main():
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
     plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
     plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
+
+    try:
+        smooth_embeddings = pd.read_parquet(f"{args.input.replace('embeddings', 'smooth_embeddings')}")
+        print(f"Building Smoothed Embeddings plots for embeddings file: {args.input.replace('embeddings', 'smooth_embeddings')}")
+        plotter_smooth = PlotEmbeddings(embeddings_df=smooth_embeddings, labels_df=labels_df, colors_df=colors_df)#, generation_time=generation_time)
+        plotter_smooth.init_plot(time_scale=args.time_scale, xy_lims=lims, min_time=min_time, max_time=max_time)
+        plotter_smooth.add_sample_trajectories()
+        # plotter_smooth.add_population_medians()
+        plotter_smooth.add_legend()
+        plotter_smooth.fig.show()
+        plotter_smooth.fig.update_layout(title_text=output_basename + " (smoothed)")
+        plotter_smooth.fig.write_html(f"{output_path}/smooth_{output_basename}.html")
+    except FileNotFoundError:
+        print("Smooth embeddings file not found.")
+        
     # if len(populations) <=5:
     #     plotter.add_support_tube()
     #     plotter.fig.write_html(f"{output_path}/convexhull_{output_basename}.html")
@@ -75,8 +90,6 @@ def main():
     #     plotter.add_support_tube()
     #     plotter.fig.write_html(f"{output_path}/convexhullONLY_{output_basename}.html")
     
-
-
     # print("Creating MP4 animation...")
     # try:
     #     make_mp4(

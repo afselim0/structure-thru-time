@@ -399,13 +399,6 @@ def optimize_timepoints_sequentially(
         loss_df = pd.concat([loss_df, loss_df_cycle], ignore_index=True)
 
         X_init = X.copy() # Start next cycle with the optimized coordinates from the previous cycle
-
-        # X,loss_df_cycle_2 = coordinate_descent_over_time(R=R, N_min=N_min, N_max=N_max, max_iter=max_iter, n_components=n_components, gtol=gtol, ftol=ftol, epsilon=epsilon, X_init=X_init, sampled_by_time=sampled_by_time, direction=cycle_order[1])
-        # epoch_number = 2*epoch + 2
-        # loss_df_cycle_2["epoch"] = epoch_number
-        # loss_df = pd.concat([loss_df, loss_df_cycle_2], ignore_index=True)
-
-        # X_init = X.copy()
         
     return X,loss_df
 
@@ -457,7 +450,7 @@ def compute_unpenalized_gradient_sample(X_i,X,f_i,f_i_prime,D_i,R_i,valid_mask_i
     grad = term_1 - term_2
     return grad
 
-def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_params=None):
+def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,N_max,epsilon = None, smoothing_params=None):
     """Wrapper function to to compute both loss and gradient for minimization for a given sample
 
     Args:
@@ -472,6 +465,9 @@ def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_
     Returns:
         tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the i-th sample.
     """
+    R_i = R_i.copy() # (nxT) Rates between sample i and all other samples over all time points
+    R_i += 1/N_max
+
     n,d,T = X.shape
     X_i = X_i_flat.reshape((d, T))  # already (d, T)
     D_i = np.linalg.norm(X_i - X, axis=1) # (nxT) Distance between sample i and everyone else over time
@@ -492,7 +488,7 @@ def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,epsilon = None, smoothing_
     return loss, grad.ravel()
 
 
-def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter, tol):
+def optimize_sample(X_i_init, X, R_i, N_min, N_max, epsilon, smoothing_params, gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE, max_iter=MAX_ITER_SAMPLE):
     """A single coordinate descent step.
     For a given sample, finds the optimal coordinates over all time points by minimizing the unpenalized loss function using L-BFGS-B optimization.
 
@@ -500,58 +496,121 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
         X_i_init (np.ndarray): Initial coordinates for all samples at the i-th sample. (d*T,)
         R_i (np.ndarray): Rates matrix between pairs of samples at the i-th sample. (nxT)
         N_min (float): Minimum value for the function computation.
+        N_max (float): Maximum value for the function computation.
         epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
         smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
         max_iter (int): Maximum number of iterations for the optimizer.
-        tol (float): Tolerance for the optimizer.
+        gtol (float): Gradient tolerance for the optimizer.
+        ftol (float): Function tolerance for the optimizer.
 
     Returns:
         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for the t-th time point.
     """
     # Optimize using L-BFGS-B for a given sample
     result = minimize(compute_loss_gradient_sample, 
-                      X_i_init.ravel(), args=(X, R_i, N_min, epsilon, smoothing_params), 
+                      X_i_init.ravel(), args=(X, R_i, N_min, N_max, epsilon, smoothing_params), 
                       method='L-BFGS-B', 
                       jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
+                      options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol})
     X_opt = result.x.reshape(X_i_init.shape)
-    return X_opt, result.fun
+    return X_opt, result.fun, result.nit, result.message
+
+def coordinate_descent_over_samples(X_init, R, N_min, N_max, smoothing_params,sampled_by_time=None, n_epochs=1, epsilon=None, max_iter=MAX_ITER_SAMPLE, gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE):
+    """Coordinate descent optimization over samples.
+        iterates over samples, optimizing coordinates for each sample over all time points using the initialization from the previous iteration. The order of optimization over samples is sequential but can be randomized if desired.
+
+    Args:
+        X_init (np.ndarray): Initial coordinates for all samples over all time points. (n*d*T,)
+        R (np.ndarray): Rates matrix between pairs of samples over all time points. (n*n*T)
+        N_min (float): Minimum value for the function computation.
+        N_max (float): Maximum value for the function computation.
+        smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
+        sampled_by_time (np.ndarray): Boolean matrix indicating which samples are present at each time point. (n*T)
+        n_epochs (int): Number of epochs to perform coordinate descent over samples.
+        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
+        max_iter (int): Maximum number of iterations for the optimizer.
+        gtol (float): Gradient tolerance for the optimizer.
+        ftol (float): Function tolerance for the optimizer.
+
+    Returns:
+        tuple: A tuple containing the optimized coordinates (np.ndarray) and a DataFrame tracking the loss values and optimization details for each sample and epoch.
+    """
+    n_samples, _, n_timepoints = R.shape
+    X = X_init.copy()
+    loss_before = []
+    loss_after = []
+    n_iters = []
+    messages = []
+
+    loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
+    for epoch in range(n_epochs):
+        print(f"Starting epoch in sample coordinate descent {epoch+1}/{n_epochs}")
+        for i in tqdm(range(n_samples)):
+            time_mask = sampled_by_time[i, :] if sampled_by_time is not None else np.ones(n_timepoints, dtype=bool)
+            R_i = R[:, i, time_mask].copy()  # Rates between sample i and all other samples over time
+            X_i_init = X[i, :, :].copy()  # Initial coordinates for sample i
+            X_i_init = X_i_init[:, time_mask]  # Restrict to time points where sample i is present
+            loss_before_i, _ = compute_loss_gradient_sample(X_i_init.ravel(), X[:,:,time_mask], R_i, N_min, N_max, epsilon, smoothing_params)
+            X_i_opt, loss_i_after, n_iter, message = optimize_sample(X_i_init, X[:,:,time_mask], R_i, N_min, N_max, epsilon, smoothing_params, max_iter=max_iter, gtol=gtol, ftol=ftol)
+            X[i, :, :] = X_i_opt  # Update coordinates for sample i
+            loss_before.append(loss_before_i)
+            loss_after.append(loss_i_after)
+            n_iters.append(n_iter)
+            messages.append(message)
+
+        # --- loss tracking ---
+        loss_change = np.array(loss_before) - np.array(loss_after)
+        total_loss_before = np.sum(loss_before)
+
+        loss_over_time = total_loss_before - np.cumsum(loss_change)
+        loss_df_epoch = pd.DataFrame({
+            "step": range(1, n_samples + 1),
+            "loss": loss_over_time,
+            "n_iterations": n_iters,
+            "message": messages,
+        })
+        loss_df_epoch["epoch"] = epoch+1
+        loss_df = pd.concat([loss_df, loss_df_epoch], ignore_index=True)
+    return X, loss_df
 
 
-# def compute_loss_gradient_all(X_flat, R, N_min, epsilon = None, smoothing_params=None):
-#     """Wrapper function to compute both loss and gradient for minimization for all time points
+############################################################
+# Joint optimization over all samples and time points
+############################################################
+def compute_loss_gradient_all(X_flat, R, N_min, N_max, epsilon = None, smoothing_params=None):
+    """Wrapper function to compute both loss and gradient for minimization for all time points
 
-#     Args:
-#         X_flat (np.ndarray): Flattened array of coordinates for all samples over all time points. (n*d*T,)
-#         R (np.ndarray): Rates matrix between pairs of samples over all time points. (nxn*T)
-#         N_min (float): Minimum value for the function computation.
-#         epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-#         smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
-#             Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
+    Args:
+        X_flat (np.ndarray): Flattened array of coordinates for all samples over all time points. (n*d*T,)
+        R (np.ndarray): Rates matrix between pairs of samples over all time points. (nxn*T)
+        N_min (float): Minimum value for the function computation.
+        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
+        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
+            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
 
-#     Returns:
-#         tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for all time points.
-#     """
-#     n,_,T = R.shape
-#     X = X_flat.reshape((n, -1, T))  # (n, d, T)
-#     valid_mask = ~np.isnan(R)
-#     D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
-#     f,_ = compute_f(D,N_min)
-#     loss = compute_unpenalized_loss(f,R,valid_mask)
-#     grad = np.zeros_like(X)
-#     for t in range(T):
-#         grad[:,:,t] = compute_loss_gradient_timepoint(X[:,:,t], R[:,:,t], N_min, N_max=np.inf, epsilon=epsilon)[1].reshape((n, -1))
+    Returns:
+        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for all time points.
+    """
+    n,_,T = R.shape
+    X = X_flat.reshape((n, -1, T))  # (n, d, T)
+    valid_mask = ~np.isnan(R)
+    D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
+    f,_ = compute_f(D,N_min)
+    loss = compute_unpenalized_loss(f,R,valid_mask)
+    grad = np.zeros_like(X)
+    for t in range(T):
+        grad[:,:,t] = compute_loss_gradient_timepoint(X[:,:,t], R[:,:,t], N_min, N_max, epsilon=epsilon)[1].reshape((n, -1))
 
-#     if epsilon is not None:
-#         loss /= epsilon
-#         grad /= epsilon
+    if epsilon is not None:
+        loss /= epsilon
+        grad /= epsilon
     
-#     if smoothing_params is not None:
-#         penalty_loss, penalty_grad = compute_penalty_loss_gradient(X, smoothing_params)
-#         loss += penalty_loss
-#         grad += penalty_grad
+    if smoothing_params is not None:
+        penalty_loss, penalty_grad = compute_penalty_loss_gradient(X, smoothing_params)
+        loss += penalty_loss
+        grad += penalty_grad
 
-#     return loss, grad.ravel()
+    return loss, grad.ravel()
 
 
 # def optimize_all(X_init, R, N_min, epsilon, smoothing_params, max_iter, tol):
@@ -575,5 +634,3 @@ def optimize_sample(X_i_init, X, R_i, N_min, epsilon, smoothing_params, max_iter
 #                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
 #     X_opt = result.x.reshape(X_init.shape)
 #     return X_opt, result.fun
-
-# %%
