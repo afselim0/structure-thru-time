@@ -26,7 +26,7 @@ N_max: 1000000
 # l2: [1e-2]
 
 # Plotting parameters
-min_time: 1
+min_time: 40
 max_rate_plot: 0.0005
 embeddings_plot_lims: 1000
-# time_scale: log
+time_scale: log
