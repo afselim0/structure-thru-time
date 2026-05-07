@@ -23,8 +23,8 @@ poly: 1
 # Embeddings estimation parameters
 N_min: 100
 N_max: 1000000
-# l1: [1e-3, 1e-2]
-# l2: [1e-2]
+l1: [1e-3, 1e-2]
+l2: [1e-2]
 
 # Plotting parameters
 min_time: 50

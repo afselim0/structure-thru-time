@@ -19,7 +19,7 @@ max_window_size: 5000
 poly: 1
 
 # Embeddings estimation parameters
-N_min: 100
+N_min: 1000
 N_max: 10000000
 n_timepoints_emb: 1000
 # l1: [1e-3, 1e-2]
@@ -28,5 +28,6 @@ n_timepoints_emb: 1000
 # Plotting parameters
 min_time: 250
 max_rate_plot: 0.0002
-embeddings_plot_lims: 2000
+embeddings_plot_lims: 6000
+embeddings_max_time: 10000
 time_scale: log

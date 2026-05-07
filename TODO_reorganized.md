@@ -5,8 +5,6 @@
 
 # Specific Tasks
 - **Smoothing the Embeddings**
-    - Implement a forward backward pass with no explicit smoother
-    - track loss function 
     - Determine a standard level of smoothing given standard error of rate estimates
     - Add necessary parameters and changes to snakemake
         - A basic unsmoothed output
@@ -14,13 +12,6 @@
         - Any additional outputs for additionally specified smoothing parameters
 
 - **Performance Evaluation**
-    - Look more into highlighting outliers
-    - Sanity check the error in reconstructed rates with a constant pop
-    - Understanding the pulses in reconstruction error of complex 4 pop (does it go away by just increasing maximum window size?)
-    - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
-        - d=2, d=10, d=n-1
-        - True rates (from model) vs reconstructed rates or vanilla from our rate estimate
-    - Special: Do admixed individuals pull their sources too much? [medium]
     - Add an option of multiple outputs from diff inits
     
 - **Finalyzing Empirical Analyses**
@@ -63,6 +54,15 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 
 ## Archive
 #### Done
+- DONE Special: Do admixed individuals pull their sources too much? [medium]
+- DONE reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
+    - d=2, d=10, d=n-1
+    - True rates (from model) vs reconstructed rates or vanilla from our rate estimate
+- DONE Understanding the pulses in reconstruction error of complex 4 pop (does it go away by just increasing maximum window size?)
+- DONE Sanity check the error in reconstructed rates with a constant pop
+- DONE Look more into highlighting outliers
+- DONE track loss function 
+- DONE Implement a forward backward pass with no explicit smoother
 - DONE What's going on with split + tsinfer - it was an issue of ylimit on the plot 
 - DONE Parent directories in /project/jnovembre to keep track of results
 
