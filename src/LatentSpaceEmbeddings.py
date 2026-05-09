@@ -220,10 +220,10 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         return X, loss_df
     
-    def compute_embeddings_jointly(self, X_init=None, precision=1e-8):
+    def compute_embeddings_jointly(self, X_init=None, precision=1e-6):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        # ftol = precision * min(self.ell_star, 1.0)
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.w_tot, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time)#, ftol=ftol)
+        ftol = precision * min(self.ell_star, 1.0)
+        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.w_tot, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, ftol=ftol)
         self.embeddings = X
         X = procrustes_alignment(X)
         return X, loss_df
