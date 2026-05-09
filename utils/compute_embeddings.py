@@ -80,7 +80,7 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")

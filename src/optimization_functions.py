@@ -18,7 +18,7 @@ FTOL_SAMPLE        = 1e-12
 MAX_ITER_SAMPLE    = 6000
 
 GTOL_JOINT         = 1e-16
-FTOL_JOINT         = 1e-12
+FTOL_JOINT         = 1e-8
 MAX_ITER_JOINT     = 6000
 
 
@@ -620,19 +620,17 @@ def compute_loss_gradient_all(X_flat, R, W, w_tot, N_min, N_max,
 
     for i in range(n):
         time_mask = (sampled_by_time[i, :] if sampled_by_time is not None
-                     else np.ones(T, dtype=bool))
-
+                    else np.ones(T, dtype=bool))
         R_i   = R[:, i, :][:, time_mask].copy()
         W_i   = W[:, i, :][:, time_mask].copy()
-        X_i   = X[i, :, time_mask]
-        X_obs = X[:, :, time_mask]
+        X_i   = X[i][:, time_mask]              # ← fixed: was X[i, :, time_mask]
+        X_obs = X[:, :, time_mask]              # already fine (single advanced index)
 
         loss_i, grad_i = compute_loss_gradient_sample(
             X_i.ravel(), X_obs, R_i, W_i, w_tot, N_min, N_max, smoothing_params)
 
-        total_loss               += loss_i
-        total_grad[i, :, time_mask] += grad_i.reshape(X_i.shape)
-
+        total_loss += loss_i
+        total_grad[i][:, time_mask] += grad_i.reshape(X_i.shape)   # ← fixed
     return total_loss, total_grad.ravel()
 
 
