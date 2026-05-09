@@ -1115,4 +1115,19 @@ if __name__ == "__main__":
         rates_data=rates_data,
         confidence_level=args.confidence_level,
     )
-    app.run(debug=False, port=args.port)
+    import socket
+
+    def find_open_port(start, max_tries=20):
+        for port in range(start, start + max_tries):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("", port))
+                    return port
+                except OSError:
+                    continue
+        raise RuntimeError(f"No open port found in range {start}–{start + max_tries - 1}")
+
+    port = find_open_port(args.port)
+    if port != args.port:
+        print(f"Port {args.port} in use, using {port} instead.")
+    app.run(debug=False, port=port)
