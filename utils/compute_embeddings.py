@@ -5,6 +5,7 @@ import sys
 sys.path.append("../src")
 sys.path.append("../../src")
 sys.path.append("src")
+import os
 
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 import numpy as np
@@ -44,13 +45,23 @@ def main():
 
     # Load rates data
     rates_df = pd.read_parquet(input)
+    input_filename = os.path.basename(input)
+    se_path = os.path.join(os.path.dirname(input), "se_" + input_filename)
+    se_df = pd.read_parquet(se_path) if os.path.exists(se_path) else None
+
     rates_df.columns = rates_df.columns.astype(float)
+    if se_df is not None:
+        se_df.columns = se_df.columns.astype(float)
+
     unique_times = sorted(rates_df.columns.tolist())
     if args.n_timepoints_emb < len(unique_times):
         idx = np.round(np.linspace(0, len(unique_times) - 1, args.n_timepoints_emb)).astype(int)
         selected_times = [unique_times[i] for i in idx]
         rates_df = rates_df[selected_times]
-        print(f"subsampled to {len(selected_times)} timepoints (requested {args.n_timepoints_emb} of {len(unique_times)})")
+        if se_df is not None:
+            se_df = se_df[selected_times]
+        print(f"Subsampled to {len(selected_times)} timepoints "
+            f"(requested {args.n_timepoints_emb} of {len(unique_times)})")
 
     # Parsing sample times if they exist in the population labels file, and checking if any sample times are non-zero (which would indicate ancient samples)
     if "sample_time" in pop_labels_df.columns:
@@ -66,22 +77,25 @@ def main():
     else:
         sample_times = None
 
-    
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties, sample_times=sample_times)
+    if se_df is not None:
+        print("standard errors dataframe found, will use for weighting")
+
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_penalty=l1_penalties, l2_penalty=l2_penalties)
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
-    X, loss_df = LSE.compute_embeddings_through_time(start_direction="backward",X_init=X_init, n_epochs=1)
+    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init)
     unsmoothed_embeddings_df = LSE.get_embeddings_df()
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
 
     if LSE.smoothing_params is not None:
-        print("Computing smoothed embeddings by optimizing samples with coordinate descent...")
-        X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
+        print("Computing smoothed embeddings...")
+        # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
+        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X)
         smoothed_embeddings_df = LSE.get_embeddings_df()
         smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
-        loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
+        # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
 
 
     

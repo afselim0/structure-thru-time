@@ -19,8 +19,10 @@ def main():
     print(f"computing rates from estimates of the pdfs of pairwise coalescent times: {args.pdf_path}")
     pdf_df = pd.read_parquet(args.pdf_path)
     pdf_df.columns = pdf_df.columns.astype(float)
-    rates_df = compute_coal_rates(pdf_df, args.minimum_window_size, args.maximum_window_size, poly_deg=args.poly)
+    rates_df,se_df = compute_coal_rates(pdf_df, args.minimum_window_size, args.maximum_window_size)
     rates_df.columns = rates_df.columns.astype(str)
+    se_df.columns = se_df.columns.astype(str)
     rates_df.to_parquet(f"{args.output_path}/{args.output_name}")
+    se_df.to_parquet(f"{args.output_path}/se_{args.output_name}")
 if __name__ == "__main__":
     main()

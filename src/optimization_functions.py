@@ -11,16 +11,23 @@ The module also contains functions for performing optimization using L-BFGS-B fo
 
 GTOL_TIMEPOINT     = 1e-12
 FTOL_TIMEPOINT     = 1e-8
-GTOL_SAMPLE        = 1e-12
-FTOL_SAMPLE        = 1e-12
 MAX_ITER_TIMEPOINT = 6000
+
+GTOL_SAMPLE        = 1e-16
+FTOL_SAMPLE        = 1e-12
 MAX_ITER_SAMPLE    = 6000
+
+GTOL_JOINT         = 1e-16
+FTOL_JOINT         = 1e-12
+MAX_ITER_JOINT     = 6000
+
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
+import cvxpy as cp
 
 ############################################################
 # General Functions
@@ -107,7 +114,9 @@ def compute_M(f,f_prime,D,R,valid_mask):
     M[valid_mask] = (f_prime[valid_mask]/D[valid_mask])*(1-R[valid_mask]/(f[valid_mask]))
     return M
 
-def compute_unpenalized_loss(f,R,valid_mask):
+# Common loss functions
+
+def compute_unpenalized_loss(f,R,W,w_tot,valid_mask):
     """Computes the loss function without penalty.
     Can be computed for:
       1. a given time slice (nxn)
@@ -117,15 +126,17 @@ def compute_unpenalized_loss(f,R,valid_mask):
     Args:
         f (np.ndarray): Array of function values at a given time slice.
         R (np.ndarray): Rate matrix between pairs of samples at a given time slice.
+        W (np.ndarray): Weight matrix for the time slice.
+        w_tot (float): Total weight for normalization.
         valid_mask (np.ndarray): Boolean mask indicating valid entries.
 
     Returns:
         float: Unpenalized loss value.
     """
-    loss_values = f[valid_mask] - R[valid_mask] * np.log(f[valid_mask])
-    return 0.5*np.nansum(loss_values)
-
-def compute_total_unpenalized_loss(X,R,N_min,N_max,epsilon=None):
+    loss_values = W[valid_mask] * (f[valid_mask] - R[valid_mask] * np.log(f[valid_mask]))
+    return 0.5 * np.sum(loss_values) / w_tot
+    
+def compute_total_unpenalized_loss(X,R,N_min,N_max,W,w_tot):
     """Computes the total unpenalized loss function over all time points.
 
     Args:
@@ -143,10 +154,7 @@ def compute_total_unpenalized_loss(X,R,N_min,N_max,epsilon=None):
     D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
     f,_ = compute_f(D,N_min)
     valid_mask = ~np.isnan(R)
-    loss = compute_unpenalized_loss(f,R,valid_mask)
-
-    if epsilon is not None:
-        loss /= epsilon
+    loss = compute_unpenalized_loss(f,R,W,w_tot,valid_mask)
 
     return loss
 
@@ -155,482 +163,622 @@ def compute_total_unpenalized_loss(X,R,N_min,N_max,epsilon=None):
 ## Coordinate descent over time slices, where at each time slice we optimize the coordinates for all samples using L-BFGS-B optimization, initializing with the solution from the previous time slice.
 ## This can be done in both forward and backward directions, and takes into account ancient samples that are not present in all time points.
 ############################################################
-def compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask_t):
-    """Computes the contribution to the gradient for a given time point from the unpenalized term in the loss function.
+
+def compute_unpenalized_gradient_timepoint(X_t, f_t, f_prime_t, D_t, R_t, W_t, w_tot_t, valid_mask_t):
+    """Gradient of the weighted unpenalized loss at a single timepoint.
 
     Args:
-        X_t (np.ndarray): Array of coordinates for all samples at the t-th time point. (nxd)
-        f_t (np.ndarray): Array of function values for the t-th time point. (nxn)
-        f_prime_t (np.ndarray): Array of function derivatives for the t-th time point. (nxn)
-        D_t (np.ndarray): Distance matrix between pairs of samples at the t-th time point. (nxn)
-        R_t (np.ndarray): Rate matrix between pairs of samples at the t-th time point. (nxn)
-        valid_mask_t (np.ndarray): Boolean mask indicating valid entries for the t-th time point. (nxn)
+        X_t (np.ndarray): Coordinates at time t. (n, d)
+        f_t, f_prime_t (np.ndarray): Link function values and derivatives. (n, n)
+        D_t (np.ndarray): Pairwise distance matrix. (n, n)
+        R_t (np.ndarray): Rate matrix. (n, n)
+        W_t (np.ndarray): Weight matrix. (n, n)
+        w_tot_t (float): Total weight for this timepoint (normalization).
+        valid_mask_t (np.ndarray): Boolean mask for valid entries. (n, n)
 
     Returns:
-        np.ndarray: Gradient matrix for the t-th time point. (nxd)
+        np.ndarray: Gradient. (n, d)
     """
-    M = compute_M(f_t,f_prime_t,D_t,R_t,valid_mask_t)
-    grad = (np.sum(M, axis=1)[:, np.newaxis] * X_t - M @ X_t)
-    return grad
+    M  = compute_M(f_t, f_prime_t, D_t, R_t, valid_mask_t)
+    WM = np.zeros_like(M)
+    WM[valid_mask_t] = W_t[valid_mask_t] * M[valid_mask_t]
+    return (np.sum(WM, axis=1)[:, np.newaxis] * X_t - WM @ X_t) / w_tot_t
 
-def compute_loss_gradient_timepoint(X_t_flat, R_t, N_min, N_max = np.inf, epsilon = None):
-    """Wrapper function to to compute both loss and gradient for minimization for a given time point
+
+def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t, w_tot_t, N_min, N_max=np.inf):
+    """Loss and gradient for a single timepoint.
 
     Args:
-        X_t_flat (np.ndarray): Flattened array of coordinates for all samples at the t-th time point. (n*d,)
-        R_t (np.ndarray): Rates matrix between pairs of samples at the t-th time point. (nxn)
-        N_min (float): Minimum value for the function computation.
-        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
-            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
+        X_t_flat (np.ndarray): Flattened coordinates. (n*d,)
+        R_t (np.ndarray): Rate matrix. (n, n)
+        W_t (np.ndarray): Weight matrix. (n, n)
+        w_tot_t (float): Per-timepoint total weight for normalization.
+        N_min (float): Link function parameter.
+        N_max (float): Link function parameter.
 
     Returns:
-        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the t-th time point.
+        tuple: (loss, gradient)
     """
-    R_t = R_t.copy()
-    R_t += 1/N_max # To avoid issues with zero rates, which would lead to infinite distances and zero gradients, we add a small value to all rates. This value is determined by the N_max parameter, where samples with rate = N_max or lower will have infinite distances between them.
-    n,_ = R_t.shape
-    X_t = X_t_flat.reshape((n, -1))
+    R_t        = R_t.copy()
+    R_t       += 1 / N_max
+    n, _       = R_t.shape
+    X_t        = X_t_flat.reshape((n, -1))
     valid_mask = ~np.isnan(R_t)
-    D_t = squareform(pdist(X_t, 'euclidean'))
+    D_t        = squareform(pdist(X_t, 'euclidean'))
     f_t, f_prime_t = compute_f(D_t, N_min)
-    loss = compute_unpenalized_loss(f_t, R_t, valid_mask)
-    grad = compute_unpenalized_gradient_timepoint(X_t,f_t,f_prime_t,D_t,R_t,valid_mask)
-
-    if epsilon is not None:
-        loss /= epsilon
-        grad /= epsilon
-
+    loss = compute_unpenalized_loss(f_t, R_t, W_t, w_tot_t, valid_mask)
+    grad = compute_unpenalized_gradient_timepoint(
+               X_t, f_t, f_prime_t, D_t, R_t, W_t, w_tot_t, valid_mask)
     return loss, grad.ravel()
 
-def extract_sample_covariances(hess_inv, n, d):
-    """Extract per-sample d×d covariance matrices from a L-BFGS inverse Hessian operator.
 
-    Under the Laplace approximation the posterior covariance is H^{-1} where H is the
-    Hessian of the loss at the MAP. scipy's L-BFGS-B result.hess_inv approximates H^{-1}
-    as a LinearOperator. We materialise the dense matrix and return the d×d diagonal block
-    for each sample's coordinates.
+def optimize_timepoint(X_t_init, R_t, W_t, w_tot_t, N_min, N_max,
+                       max_iter, gtol, ftol):
+    """Single L-BFGS-B step for one timepoint.
 
     Args:
-        hess_inv: scipy LbfgsInvHessProduct — shape (n*d, n*d)
-        n (int): number of samples
-        d (int): number of embedding dimensions
+        X_t_init (np.ndarray): Initial coordinates. (n, d)
+        R_t (np.ndarray): Rate matrix. (n, n)
+        W_t (np.ndarray): Weight matrix. (n, n)
+        w_tot_t (float): Per-timepoint total weight.
+        N_min, N_max (float): Link function parameters.
+        max_iter (int): Maximum L-BFGS-B iterations.
+        gtol, ftol (float): Convergence tolerances.
 
     Returns:
-        np.ndarray: shape (n, d, d)
+        tuple: (X_opt, loss, n_iterations, message)
     """
-    n_params = n * d
-    H_inv = hess_inv @ np.eye(n_params)
-    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+    result = minimize(
+        compute_loss_gradient_timepoint,
+        X_t_init.ravel(),
+        args=(R_t, W_t, w_tot_t, N_min, N_max),
+        method='L-BFGS-B',
+        jac=True,
+        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
+    )
+    return result.x.reshape(X_t_init.shape), result.fun, result.nit, result.message
 
-
-def optimize_timepoint(X_t_init, R_t, N_min, N_max, epsilon, max_iter, tol, return_hess_inv=False):
-    """A single coordinate descent step.
-    For a given time point, finds the optimal coordinates for all samples by minimizing the unpenalized loss function using L-BFGS-B optimization.
-
-    Args:
-        X_t_init (np.ndarray): Initial coordinates for all samples at the t-th time point. (n*d,)
-        R_t (np.ndarray): Rates matrix between pairs of samples at the t-th time point. (nxn)
-        N_min (float): Hyperparameter for the function computation, where samples with rate = 1/N_min or higher will have zero distances between them.
-        N_max (float): Hyperparameter for the function computation, where samples with rate = 0 will have distances of N_max between them.
-        epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
-        max_iter (int): Maximum number of iterations for the optimizer.
-        tol (float): Tolerance for the optimizer.
-        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian approximation.
-
-    Returns:
-        (X_opt, loss) or (X_opt, loss, hess_inv) when return_hess_inv is True.
-    """
-    result = minimize(compute_loss_gradient_timepoint,
-                      X_t_init.ravel(), args=(R_t, N_min, N_max, epsilon),
-                      method='L-BFGS-B',
-                      jac=True,
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
-    X_opt = result.x.reshape(X_t_init.shape)
-    # if return_hess_inv:
-    #     return X_opt, result.fun, result.hess_inv
-    return X_opt, result.fun, result.nit, result.message
 
 def coordinate_descent_over_time(
     R,
-    N_min=1,
-    N_max=np.inf,
-    n_components=2,
-    max_iter=MAX_ITER_TIMEPOINT,
-    gtol=GTOL_TIMEPOINT,
-    ftol=FTOL_TIMEPOINT,
-    epsilon=None,
-    X_init=None,
-    sampled_by_time=None,
-    direction="backward",
+    W,
+    w_tot,
+    N_min          = 1,
+    N_max          = np.inf,
+    n_components   = 2,
+    X_init         = None,
+    sampled_by_time = None,
+    direction      = "backward",
+    max_iter       = MAX_ITER_TIMEPOINT,
+    gtol           = GTOL_TIMEPOINT,
+    ftol           = FTOL_TIMEPOINT,
 ):
-    """Coordinate descent optimization over time slices.
-        iterates over time points, optimizing coordinates for all samples at each time point using the initialization from the previous time point. The order of optimization over time points can be specified by the direction parameter.
-        backward means starting from the last time point and moving to the present, while forward means starting from the first time point and moving to the past.
-        takes into account ancient samples that are not present in all time points
+    """Single-pass coordinate descent over timepoints (default: backward).
 
     Args:
-        X_init (np.ndarray): Initial coordinates for all samples over all time points. (n*d*T,)
-        R (np.ndarray): Rates matrix between pairs of samples over all time points. (n*n*T)
-        N_min (float): Hyperparameter for the function computation, where samples with rate = 1/N_min or higher will have zero distances between them.
-        N_max (float): Hyperparameter for the function computation, where samples with rate = 0 will have distances of N_max between them.
-        epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
-        max_iter (int): Maximum number of iterations for the optimizer.
-        gtol (float): Tolerance for the gradient.
-        ftol (float): Tolerance for the function value.
-        sampled_by_time (np.ndarray): Boolean matrix indicating which samples are present at each time point. (n*T)
-        n_components (int): Number of dimensions for the latent space embeddings.
+        R (np.ndarray): Rate tensor. (n, n, T)
+        W (np.ndarray): Weight tensor. (n, n, T)
+        w_tot (float): Global total weight for normalization.
+        N_min, N_max (float): Link function parameters.
+        n_components (int): Latent space dimensionality.
+        max_iter (int): Maximum L-BFGS-B iterations per timepoint.
+        gtol, ftol (float): Convergence tolerances.
+        X_init (np.ndarray, optional): Initial coordinates. (n, d, T)
+        sampled_by_time (np.ndarray, optional): Boolean presence mask. (n, T)
+        direction (str): "backward" (default) or "forward".
 
     Returns:
-        tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for all time points.
+        tuple: (X, loss_df)
     """
-
     n_samples, _, n_timepoints = R.shape
 
     if sampled_by_time is None:
         sampled_by_time = np.ones((n_samples, n_timepoints), dtype=bool)
-
     if X_init is None:
         X_init = np.random.rand(n_samples, n_components, n_timepoints)
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
+    loss_before, loss_after, n_iters, messages = [], [], [], []
 
-    loss_before = []
-    loss_after = []
-    n_iters = []
-    messages = []
-
-    # define traversal order
-    time_order = range(n_timepoints) if direction == "forward" else range(n_timepoints - 1, -1, -1)
-
+    time_order = range(n_timepoints) if direction == "forward" \
+                 else range(n_timepoints - 1, -1, -1)
     prev_t_idx = None
 
     for step, t_idx in enumerate(tqdm(time_order)):
+        extant_mask = sampled_by_time[:, t_idx]
+        extant_idx  = np.where(extant_mask)[0]
 
-        extant_mask = sampled_by_time[:, t_idx] # True if sample is present at this time point, False if sample is ancient and not present at this time point
-        extant_idx = np.where(extant_mask)[0]   # Indices of samples that are present at this time point
-
-        # --- Initialize in GLOBAL space ---
+        # --- Initialize ---
         if step == 0:
             X_global = X_init[:, :, t_idx].copy()
         else:
-            # start from previous timepoint
             X_global = X[:, :, prev_t_idx].copy()
-
-            prev_mask = sampled_by_time[:, prev_t_idx] # True if sample is present at the previous time point, False if sample is ancient and not present at this time point
-
-            # samples that are present now but were not before
-            new_mask = extant_mask & ~prev_mask
-
+            new_mask = extant_mask & ~sampled_by_time[:, prev_t_idx]
             if np.any(new_mask):
-                X_global[new_mask, :] = X_init[new_mask, :, t_idx] # For new ancient samples that are not present in the previous time point, initialize with the provided initial coordinates for that time point
+                X_global[new_mask, :] = X_init[new_mask, :, t_idx]
 
-        # --- Restrict to extant samples (ONE clean projection step) ---
-        X_t = X_global[extant_idx, :]
-        R_t = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        # --- Restrict to extant samples ---
+        X_t      = X_global[extant_idx, :]
+        R_t      = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        W_t      = W[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
         X_init_t = X_init[extant_idx, :, t_idx]
+
+        # Per-timepoint normalization keeps gradient at a workable scale for L-BFGS
+        w_tot_t  = 0.5 * np.nansum(W_t)
+        scale   = w_tot_t / w_tot
 
         # --- Loss before ---
         loss_t_before, _ = compute_loss_gradient_timepoint(
-            X_init_t, R_t, N_min, N_max, epsilon
-        )
+            X_init_t, R_t, W_t, w_tot_t, N_min, N_max)
 
         # --- Optimize ---
         X_t, loss_t_after, n_iter, message = optimize_timepoint(
-            X_t, R_t, N_min, N_max, epsilon, max_iter, gtol, ftol
-        )
+            X_t, R_t, W_t, w_tot_t, N_min, N_max, max_iter, gtol, ftol)
 
-        # --- Store results back in GLOBAL tensor ---
+        # --- Center (first step only) and Procrustes align ---
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
-
+        X_t = procrustes_single_time(X_global[extant_idx, :], X_t)
         X[extant_idx, :, t_idx] = X_t
 
-        # --- Logging ---
-        loss_before.append(loss_t_before)
-        loss_after.append(loss_t_after)
+        loss_before.append(loss_t_before * scale)
+        loss_after.append(loss_t_after * scale)
         n_iters.append(n_iter)
         messages.append(message)
-
         prev_t_idx = t_idx
 
-    # --- loss tracking ---
-    loss_change = np.array(loss_before) - np.array(loss_after)
-    total_loss_before = np.sum(loss_before)
-
-    loss_over_time = total_loss_before - np.cumsum(loss_change)
+    loss_change    = np.array(loss_before) - np.array(loss_after)
+    loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
     loss_df = pd.DataFrame({
-        "step": range(1, n_timepoints + 1),
-        "loss": loss_over_time,
+        "step":         range(1, n_timepoints + 1),
+        "loss":         loss_over_time,
         "n_iterations": n_iters,
-        "message": messages,
+        "message":      messages,
     })
-
     return X, loss_df
 
 
-def optimize_timepoints_sequentially(
-    R,
-    N_min=1,
-    N_max=np.inf,
-    n_components=2,
-    max_iter=MAX_ITER_TIMEPOINT,
-    gtol=GTOL_TIMEPOINT,
-    ftol=FTOL_TIMEPOINT,
-    epsilon=None,
-    X_init=None,
-    sampled_by_time=None,
-    start_direction="backward",
-    n_epochs=1):
-    """ Repeatedly performs coordinate descent optimization over time slices.
-    """
-    loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
-    cycle_order = (
-    ["backward", "forward"]
-    if start_direction == "backward"
-    else ["forward", "backward"])
-    cycles = [cycle_order[i % 2] for i in range(n_epochs)] # Alternate between forward and backward cycles for n_epochs epochs
+# def optimize_timepoints_sequentially(
+#     R,
+#     W,
+#     N_min           = 1,
+#     N_max           = np.inf,
+#     n_components    = 2,
+#     max_iter        = MAX_ITER_TIMEPOINT,
+#     gtol            = GTOL_TIMEPOINT,
+#     ftol            = FTOL_TIMEPOINT,
+#     X_init          = None,
+#     sampled_by_time = None,
+#     start_direction = "backward",
+#     n_epochs        = 1,
+# ):
+#     """Coordinate descent over time slices, optionally over multiple alternating epochs.
 
-    for epoch in range(n_epochs):
-        # First cycle, either backward or forward depending on start_direction
-        print(f"Starting epoch {epoch+1}/{n_epochs}, direction: {cycles[epoch]}")
-        X,loss_df_cycle = coordinate_descent_over_time(R=R, N_min=N_min, N_max=N_max, max_iter=max_iter, n_components=n_components, gtol=gtol, ftol=ftol, epsilon=epsilon, X_init=X_init, sampled_by_time=sampled_by_time, direction=cycles[epoch])
-        loss_df_cycle["epoch"] = epoch+1
-        loss_df = pd.concat([loss_df, loss_df_cycle], ignore_index=True)
+#     Args:
+#         R (np.ndarray): Rate tensor. (n, n, T)
+#         W (np.ndarray): Weight tensor. (n, n, T)
+#         N_min, N_max (float): Link function parameters.
+#         n_components (int): Latent space dimensionality.
+#         max_iter (int): Maximum L-BFGS-B iterations per timepoint.
+#         gtol, ftol (float): Convergence tolerances.
+#         X_init (np.ndarray, optional): Initial coordinates. (n, d, T)
+#         sampled_by_time (np.ndarray, optional): Boolean presence mask. (n, T)
+#         start_direction (str): First sweep direction — "backward" (default) or "forward".
+#         n_epochs (int): Number of sweeps. Default 1 (single backward pass).
 
-        X_init = X.copy() # Start next cycle with the optimized coordinates from the previous cycle
-        
-    return X,loss_df
+#     Returns:
+#         tuple: (X, loss_df)
+#     """
+#     cycle_order = (["backward", "forward"] if start_direction == "backward"
+#                    else ["forward", "backward"])
+#     cycles  = [cycle_order[i % 2] for i in range(n_epochs)]
+#     loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
 
+#     for epoch in range(n_epochs):
+#         print(f"Epoch {epoch + 1}/{n_epochs}  direction: {cycles[epoch]}")
+#         X, loss_df_epoch = coordinate_descent_over_time(
+#             R               = R,
+#             W               = W,
+#             N_min           = N_min,
+#             N_max           = N_max,
+#             n_components    = n_components,
+#             max_iter        = max_iter,
+#             gtol            = gtol,
+#             ftol            = ftol,
+#             X_init          = X_init,
+#             sampled_by_time = sampled_by_time,
+#             direction       = cycles[epoch],
+#         )
+#         loss_df_epoch["epoch"] = epoch + 1
+#         loss_df  = pd.concat([loss_df, loss_df_epoch], ignore_index=True)
+#         X_init   = X.copy()
+
+#     return X, loss_df
+    
 ############################################################
 # Coordinate descent over samples
 ############################################################
 
-def compute_penalty_loss_gradient(X,smoothing_params):
-    """Computes the contribution to the loss and the gradient from the penalty term that encourages smoothing.
-    l_penalty = sum_k {l_k^{1} |DX|_1 + l_k^{2} ||DX||_2^2}
+def compute_penalty_loss_gradient(X, smoothing_params):
+    """Penalty loss and gradient for L1 (group norm) and L2 on finite differences.
+
+    L1 uses the exact group norm — no pseudo-Huber needed since L2 on the same
+    order provides the curvature near zero that L-BFGS requires.
 
     Args:
-        X (np.ndarray): Array of coordinates for all samples over all time points. (nxdxT)
-                        or Array of coordinates for a given sample over all time points. (dxT)
-        smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term.
-                                Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addtion to "diff_operator" that contains the finite difference operator to compute DX.
+        X (np.ndarray): Coordinates, shape (d, T) for one sample or (n, d, T) for all.
+        smoothing_params (dict): Keys "l1", "l2" (dicts of {order: lambda}),
+                                 "diff_operators" ({order: matrix}).
+    Returns:
+        tuple: (loss, grad) with grad matching X's shape.
     """
-
-    loss = 0
+    loss = 0.0
     grad = np.zeros_like(X)
-    n_timepoints = X.shape[-1]
 
-    for k,D in smoothing_params["diff_operators"].items():
+    for k, D in smoothing_params["diff_operators"].items():
         l1 = smoothing_params["l1"].get(k, 0)
         l2 = smoothing_params["l2"].get(k, 0)
-        DX = X @ D.T
-        loss += l1 * np.sum(np.abs(DX)) + l2 * np.sum(DX**2)
-        grad += l1 * np.sign(DX) @ D + 2 * l2 * DX @ D
-    
+        DX = X @ D.T                                              # (..., d, T)
+
+        if l2:
+            loss += l2 * np.sum(DX ** 2)
+            grad += 2 * l2 * DX @ D
+
+        if l1:
+            sq_norms  = np.sum(DX ** 2, axis=-2, keepdims=True)  # (..., 1, T)
+            norms     = np.sqrt(sq_norms)                          # (..., 1, T)
+            safe_norm = np.where(norms > 0, norms, 1.0)           # DX=0 → grad=0
+            loss += l1 * np.sum(norms)
+            grad += l1 * (DX / safe_norm) @ D
+
     return loss, grad
 
-def compute_unpenalized_gradient_sample(X_i,X,f_i,f_i_prime,D_i,R_i,valid_mask_i):
-    """Computes the contribution to the gradient for a given sample from the unpenalized term in the loss function.
+
+def compute_unpenalized_gradient_sample(X_i, X, f_i, f_i_prime, D_i, R_i, W_i, w_tot, valid_mask_i):
+    """Gradient of the weighted unpenalized loss w.r.t. sample i's trajectory.
+
+    Uses the full symmetric sum with a 0.5 factor, consistent with
+    compute_unpenalized_loss, so loss and gradient are properly matched.
 
     Args:
-        X_i (np.ndarray): Array of coordinates for the i-th sample. (dxT)
-        X (np.ndarray): Array of coordinates for all samples. (nxdxT)
-        f_i (np.ndarray): Array of function values for the i-th sample. (nxT)
-        f_i_prime (np.ndarray): Array of function derivatives for the i-th sample. (nxT)
-        D_i (np.ndarray): Distance matrix between the i-th sample and all other samples over all time points. (nxT)
-        R_i (np.ndarray): Rates matrix between the i-th sample and all other samples over all time points. (nxT)
-        valid_mask_i (np.ndarray): Boolean mask indicating valid entries for the i-th sample. (nxT)
-    """
-    M = compute_M(f_i,f_i_prime,D_i,R_i,valid_mask_i)
-    M_sum = np.sum(M, axis=0)  # (T,)
-    term_1 = M_sum * X_i  # (d, T)
-    term_2 = (X * M[:,None,:]).sum(axis=0)  # (d, T) = sum_i (X_i * M_i) where M_i is (T,) and X_i is (d, T)
-    # term_2 =  np.einsum("it,ipt -> pt", M, X) # (Equivilent)
-    grad = term_1 - term_2
-    return grad
-
-def compute_loss_gradient_sample(X_i_flat,X,R_i,N_min,N_max,epsilon = None, smoothing_params=None):
-    """Wrapper function to to compute both loss and gradient for minimization for a given sample
-
-    Args:
-        X_i_flat (np.ndarray): Flattened array of coordinates for the i-th sample. (d*T,)
-        X (np.ndarray): Array of coordinates for all samples. (nxdxT)
-        R_i (np.ndarray): Rates matrix between the i-th sample and all other samples over all time points. (nxT)
-        N_min (float): Minimum value for the function computation.
-        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
-            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addtion to "diff_operator" that contains the finite difference operator to compute DX.
+        X_i (np.ndarray): Coordinates for sample i. (d, T)
+        X (np.ndarray): Coordinates for all samples. (n, d, T)
+        f_i, f_i_prime (np.ndarray): Link values and derivatives. (n, T)
+        D_i (np.ndarray): Distances from sample i to all others. (n, T)
+        R_i (np.ndarray): Rates from sample i to all others. (n, T)
+        W_i (np.ndarray): Weights for sample i's pairs. (n, T)
+        w_tot (float): Global total weight for normalization.
+        valid_mask_i (np.ndarray): Valid entry mask. (n, T)
 
     Returns:
-        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for the i-th sample.
+        np.ndarray: Gradient w.r.t. X_i. (d, T)
     """
-    R_i = R_i.copy() # (nxT) Rates between sample i and all other samples over all time points
-    R_i += 1/N_max
+    M   = compute_M(f_i, f_i_prime, D_i, R_i, valid_mask_i)
+    WM = np.zeros_like(M)
+    WM[valid_mask_i] = W_i[valid_mask_i] * M[valid_mask_i]
+    return 0.5 * (np.sum(WM, axis=0) * X_i
+                  - (X * WM[:, np.newaxis, :]).sum(axis=0)) / w_tot
 
-    n,d,T = X.shape
-    X_i = X_i_flat.reshape((d, T))  # already (d, T)
-    D_i = np.linalg.norm(X_i - X, axis=1) # (nxT) Distance between sample i and everyone else over time
-    f_i, f_i_prime = compute_f(D_i, N_min) # (nxT) Function values and derivatives for sample i with respect to all other samples over time
-    valid_mask_i = ~np.isnan(R_i)
-    loss = compute_unpenalized_loss(f_i, R_i, valid_mask_i)
-    grad = compute_unpenalized_gradient_sample(X_i,X,f_i,f_i_prime,D_i,R_i,valid_mask_i)
 
-    if epsilon is not None:
-        loss /= epsilon
-        grad /= epsilon
+def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i, w_tot, N_min, N_max=np.inf,
+                                  smoothing_params=None):
+    """Loss and gradient for sample i's trajectory over all timepoints.
+
+    Args:
+        X_i_flat (np.ndarray): Flattened coordinates for sample i. (d*T,)
+        X (np.ndarray): Coordinates for all samples. (n, d, T)
+        R_i (np.ndarray): Rates from sample i to all others. (n, T)
+        W_i (np.ndarray): Weights for sample i's pairs. (n, T)
+        w_tot (float): Global total weight for normalization.
+        N_min, N_max (float): Link function parameters.
+        smoothing_params (dict, optional): Smoothing configuration.
+
+    Returns:
+        tuple: (loss, gradient)
+    """
+    R_i = R_i.copy()
+    R_i += 1 / N_max
+    n, d, T   = X.shape
+    X_i       = X_i_flat.reshape((d, T))
+    D_i       = np.linalg.norm(X_i - X, axis=1)        # (n, T)
+    f_i, f_i_prime = compute_f(D_i, N_min)
+    valid_mask_i   = ~np.isnan(R_i)
+
+    loss = compute_unpenalized_loss(f_i, R_i, W_i, w_tot, valid_mask_i)
+    grad = compute_unpenalized_gradient_sample(
+               X_i, X, f_i, f_i_prime, D_i, R_i, W_i, w_tot, valid_mask_i)
 
     if smoothing_params is not None:
-        penalty_loss, penalty_grad = compute_penalty_loss_gradient(X_i, smoothing_params)
-        loss += penalty_loss
-        grad += penalty_grad
+        pen_loss, pen_grad = compute_penalty_loss_gradient(X_i, smoothing_params)
+        loss += pen_loss
+        grad += pen_grad
 
     return loss, grad.ravel()
 
 
-def optimize_sample(X_i_init, X, R_i, N_min, N_max, epsilon, smoothing_params, gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE, max_iter=MAX_ITER_SAMPLE):
-    """A single coordinate descent step.
-    For a given sample, finds the optimal coordinates over all time points by minimizing the unpenalized loss function using L-BFGS-B optimization.
+def optimize_sample(X_i_init, X, R_i, W_i, w_tot, N_min, N_max, smoothing_params,
+                    gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE, max_iter=MAX_ITER_SAMPLE):
+    """L-BFGS-B step for one sample's trajectory.
 
     Args:
-        X_i_init (np.ndarray): Initial coordinates for all samples at the i-th sample. (d*T,)
-        R_i (np.ndarray): Rates matrix between pairs of samples at the i-th sample. (nxT)
-        N_min (float): Minimum value for the function computation.
-        N_max (float): Maximum value for the function computation.
-        epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
-        smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
-        max_iter (int): Maximum number of iterations for the optimizer.
-        gtol (float): Gradient tolerance for the optimizer.
-        ftol (float): Function tolerance for the optimizer.
+        X_i_init (np.ndarray): Initial coordinates. (d, T)
+        X (np.ndarray): All sample coordinates. (n, d, T)
+        R_i (np.ndarray): Rates for sample i. (n, T)
+        W_i (np.ndarray): Weights for sample i. (n, T)
+        w_tot (float): Global total weight.
+        N_min, N_max (float): Link function parameters.
+        smoothing_params (dict): Smoothing configuration.
+        gtol, ftol (float): Convergence tolerances.
+        max_iter (int): Maximum iterations.
 
     Returns:
-        tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for the t-th time point.
+        tuple: (X_opt, loss, n_iterations, message)
     """
-    # Optimize using L-BFGS-B for a given sample
-    result = minimize(compute_loss_gradient_sample, 
-                      X_i_init.ravel(), args=(X, R_i, N_min, N_max, epsilon, smoothing_params), 
-                      method='L-BFGS-B', 
-                      jac=True, 
-                      options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol})
-    X_opt = result.x.reshape(X_i_init.shape)
-    return X_opt, result.fun, result.nit, result.message
+    result = minimize(
+        compute_loss_gradient_sample,
+        X_i_init.ravel(),
+        args=(X, R_i, W_i, w_tot, N_min, N_max, smoothing_params),
+        method='L-BFGS-B',
+        jac=True,
+        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
+    )
+    return result.x.reshape(X_i_init.shape), result.fun, result.nit, result.message
 
-def coordinate_descent_over_samples(X_init, R, N_min, N_max, smoothing_params,sampled_by_time=None, n_epochs=1, epsilon=None, max_iter=MAX_ITER_SAMPLE, gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE):
-    """Coordinate descent optimization over samples.
-        iterates over samples, optimizing coordinates for each sample over all time points using the initialization from the previous iteration. The order of optimization over samples is sequential but can be randomized if desired.
+
+def coordinate_descent_over_samples(X_init, R, W, w_tot, N_min, N_max,
+                                     smoothing_params, sampled_by_time=None,
+                                     n_epochs=1, max_iter=MAX_ITER_SAMPLE,
+                                     gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE):
+    """Coordinate descent over samples, optimizing each trajectory independently.
 
     Args:
-        X_init (np.ndarray): Initial coordinates for all samples over all time points. (n*d*T,)
-        R (np.ndarray): Rates matrix between pairs of samples over all time points. (n*n*T)
-        N_min (float): Minimum value for the function computation.
-        N_max (float): Maximum value for the function computation.
-        smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
-        sampled_by_time (np.ndarray): Boolean matrix indicating which samples are present at each time point. (n*T)
-        n_epochs (int): Number of epochs to perform coordinate descent over samples.
-        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-        max_iter (int): Maximum number of iterations for the optimizer.
-        gtol (float): Gradient tolerance for the optimizer.
-        ftol (float): Function tolerance for the optimizer.
+        X_init (np.ndarray): Initial coordinates. (n, d, T)
+        R (np.ndarray): Rate tensor. (n, n, T)
+        W (np.ndarray): Weight tensor. (n, n, T)
+        w_tot (float): Global total weight for normalization.
+        N_min, N_max (float): Link function parameters.
+        smoothing_params (dict): Smoothing configuration.
+        sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
+        n_epochs (int): Number of passes over all samples.
+        max_iter (int): Maximum L-BFGS-B iterations per sample.
+        gtol, ftol (float): Convergence tolerances.
 
     Returns:
-        tuple: A tuple containing the optimized coordinates (np.ndarray) and a DataFrame tracking the loss values and optimization details for each sample and epoch.
+        tuple: (X, loss_df)
     """
     n_samples, _, n_timepoints = R.shape
     X = X_init.copy()
-    loss_before = []
-    loss_after = []
-    n_iters = []
-    messages = []
-
     loss_df = pd.DataFrame(columns=["epoch", "step", "loss", "n_iterations", "message"])
+
     for epoch in range(n_epochs):
-        print(f"Starting epoch in sample coordinate descent {epoch+1}/{n_epochs}")
+        loss_before, loss_after, n_iters, messages = [], [], [], []
+        print(f"Epoch {epoch + 1}/{n_epochs}")
+
         for i in tqdm(range(n_samples)):
-            time_mask = sampled_by_time[i, :] if sampled_by_time is not None else np.ones(n_timepoints, dtype=bool)
-            R_i = R[:, i, time_mask].copy()  # Rates between sample i and all other samples over time
-            X_i_init = X[i, :, :].copy()  # Initial coordinates for sample i
-            X_i_init = X_i_init[:, time_mask]  # Restrict to time points where sample i is present
-            loss_before_i, _ = compute_loss_gradient_sample(X_i_init.ravel(), X[:,:,time_mask], R_i, N_min, N_max, epsilon, smoothing_params)
-            X_i_opt, loss_i_after, n_iter, message = optimize_sample(X_i_init, X[:,:,time_mask], R_i, N_min, N_max, epsilon, smoothing_params, max_iter=max_iter, gtol=gtol, ftol=ftol)
-            X[i, :, :] = X_i_opt  # Update coordinates for sample i
+            time_mask = (sampled_by_time[i, :] if sampled_by_time is not None
+                         else np.ones(n_timepoints, dtype=bool))
+
+            R_i      = R[:, i, :][:, time_mask].copy()
+            W_i      = W[:, i, :][:, time_mask].copy()
+            X_i_init = X[i, :, :][:, time_mask].copy()
+            X_slice  = X[:, :, time_mask]
+
+            loss_before_i, _ = compute_loss_gradient_sample(
+                X_i_init.ravel(), X_slice, R_i, W_i, w_tot, N_min, N_max, smoothing_params)
+
+            X_i_opt, loss_after_i, n_iter, message = optimize_sample(
+                X_i_init, X_slice, R_i, W_i, w_tot, N_min, N_max, smoothing_params,
+                gtol=gtol, ftol=ftol, max_iter=max_iter)
+
+            X[i, :, time_mask] = X_i_opt          # only update present timepoints
             loss_before.append(loss_before_i)
-            loss_after.append(loss_i_after)
+            loss_after.append(loss_after_i)
             n_iters.append(n_iter)
             messages.append(message)
 
-        # --- loss tracking ---
-        loss_change = np.array(loss_before) - np.array(loss_after)
-        total_loss_before = np.sum(loss_before)
-
-        loss_over_time = total_loss_before - np.cumsum(loss_change)
-        loss_df_epoch = pd.DataFrame({
-            "step": range(1, n_samples + 1),
-            "loss": loss_over_time,
+        loss_change    = np.array(loss_before) - np.array(loss_after)
+        loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
+        loss_df_epoch  = pd.DataFrame({
+            "step":         range(1, n_samples + 1),
+            "loss":         loss_over_time,
             "n_iterations": n_iters,
-            "message": messages,
+            "message":      messages,
+            "epoch":        epoch + 1,
         })
-        loss_df_epoch["epoch"] = epoch+1
         loss_df = pd.concat([loss_df, loss_df_epoch], ignore_index=True)
+
     return X, loss_df
 
 
 ############################################################
 # Joint optimization over all samples and time points
 ############################################################
-def compute_loss_gradient_all(X_flat, R, N_min, N_max, epsilon = None, smoothing_params=None):
-    """Wrapper function to compute both loss and gradient for minimization for all time points
+
+def compute_loss_gradient_all(X_flat, R, W, w_tot, N_min, N_max,
+                               sampled_by_time=None, smoothing_params=None):
+    """Total weighted loss and gradient over all samples and timepoints.
+
+    Sums per-sample contributions; the 0.5 factor inside compute_loss_gradient_sample
+    ensures each pair is counted once, so no correction is needed here.
 
     Args:
-        X_flat (np.ndarray): Flattened array of coordinates for all samples over all time points. (n*d*T,)
-        R (np.ndarray): Rates matrix between pairs of samples over all time points. (nxn*T)
-        N_min (float): Minimum value for the function computation.
-        epsilon (float, optional): Scaling factor for loss and gradient, defining the standard error of rate estimates. Defaults to None.
-        smoothing_params (dict, optional): Dictionary containing smoothing parameters for the penalty term. Defaults to None.
-            Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
+        X_flat (np.ndarray): Flattened coordinates. (n*d*T,)
+        R (np.ndarray): Rate tensor. (n, n, T)
+        W (np.ndarray): Weight tensor. (n, n, T)
+        w_tot (float): Global total weight for normalization.
+        N_min, N_max (float): Link function parameters.
+        sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
+        smoothing_params (dict, optional): Smoothing configuration.
 
     Returns:
-        tuple: A tuple containing the loss (float) and the gradient (np.ndarray) for all time points.
+        tuple: (total_loss, gradient)
     """
-    n,_,T = R.shape
-    X = X_flat.reshape((n, -1, T))  # (n, d, T)
-    valid_mask = ~np.isnan(R)
-    D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
-    f,_ = compute_f(D,N_min)
-    loss = compute_unpenalized_loss(f,R,valid_mask)
-    grad = np.zeros_like(X)
-    for t in range(T):
-        grad[:,:,t] = compute_loss_gradient_timepoint(X[:,:,t], R[:,:,t], N_min, N_max, epsilon=epsilon)[1].reshape((n, -1))
+    n, _, T = R.shape
+    X       = X_flat.reshape((n, -1, T))
+    total_loss = 0.0
+    total_grad = np.zeros_like(X)
 
-    if epsilon is not None:
-        loss /= epsilon
-        grad /= epsilon
-    
-    if smoothing_params is not None:
-        penalty_loss, penalty_grad = compute_penalty_loss_gradient(X, smoothing_params)
-        loss += penalty_loss
-        grad += penalty_grad
+    for i in range(n):
+        time_mask = (sampled_by_time[i, :] if sampled_by_time is not None
+                     else np.ones(T, dtype=bool))
 
-    return loss, grad.ravel()
+        R_i   = R[:, i, :][:, time_mask].copy()
+        W_i   = W[:, i, :][:, time_mask].copy()
+        X_i   = X[i, :, time_mask]
+        X_obs = X[:, :, time_mask]
+
+        loss_i, grad_i = compute_loss_gradient_sample(
+            X_i.ravel(), X_obs, R_i, W_i, w_tot, N_min, N_max, smoothing_params)
+
+        total_loss               += loss_i
+        total_grad[i, :, time_mask] += grad_i.reshape(X_i.shape)
+
+    return total_loss, total_grad.ravel()
 
 
-# def optimize_all(X_init, R, N_min, epsilon, smoothing_params, max_iter, tol):
-#     """Joint minimization of the total unpenalized loss function using L-BFGS
+def optimize_jointly(X_init, R, W, w_tot, N_min, N_max, smoothing_params,
+                     sampled_by_time=None, max_iter=MAX_ITER_JOINT,
+                     gtol=GTOL_JOINT, ftol=FTOL_JOINT):
+    """Joint L-BFGS-B optimization over all samples and timepoints.
 
-#     Args:
-#         X_init (np.ndarray): Initial coordinates for all samples over all time points. (n*d*T,)
-#         R (np.ndarray): Rates matrix between pairs of samples over all time points. (n*n*T)
-#         N_min (float): Minimum value for the function computation.
-#         epsilon (float): Scaling factor for loss and gradient, defining the standard error of rate estimates.
-#         smoothing_params (dict): Dictionary containing smoothing parameters for the penalty term. Keys should be "l1" and "l2" for L1 and L2 penalties respectively in addition to "diff_operator" that contains the finite difference operator to compute DX.
-#         max_iter (int): Maximum number of iterations for the optimizer.
-#         tol (float): Tolerance for the optimizer.
-#     Returns:
-#         tuple: A tuple containing the optimized coordinates (np.ndarray) and the final loss value (float) for all time points.
-#     """
-#     result = minimize(compute_loss_gradient_all, 
-#                       X_init.ravel(), args=(R, N_min, epsilon, smoothing_params), 
-#                       method='L-BFGS-B', 
-#                       jac=True, 
-#                       options={'maxiter': max_iter, 'disp': False, 'gtol': tol, 'ftol': tol})
-#     X_opt = result.x.reshape(X_init.shape)
-#     return X_opt, result.fun
+    Args:
+        X_init (np.ndarray): Initial coordinates. (n, d, T)
+        R (np.ndarray): Rate tensor. (n, n, T)
+        W (np.ndarray): Weight tensor. (n, n, T)
+        w_tot (float): Global total weight for normalization.
+        N_min, N_max (float): Link function parameters.
+        smoothing_params (dict): Smoothing configuration.
+        sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
+        max_iter (int): Maximum iterations.
+        gtol, ftol (float): Convergence tolerances.
+
+    Returns:
+        tuple: (X_opt, progress_df)
+    """
+    progress = []
+
+    def callback(x):
+        loss, grad = compute_loss_gradient_all(
+            x, R, W, w_tot, N_min, N_max, sampled_by_time, smoothing_params)
+        progress.append({
+            "iteration":    len(progress) + 1,
+            "loss":         loss,
+            "proj_grad_max": np.max(np.abs(grad)),
+        })
+        print(f"  iter {progress[-1]['iteration']:4d}  "
+              f"loss={loss:.10g}  "
+              f"max|grad|={progress[-1]['proj_grad_max']:.6g}")
+
+    result = minimize(
+        compute_loss_gradient_all,
+        X_init.ravel(),
+        args=(R, W, w_tot, N_min, N_max, sampled_by_time, smoothing_params),
+        method='L-BFGS-B',
+        jac=True,
+        callback=callback,
+        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
+    )
+    print(f"Finished: {result.message}  "
+          f"(loss={result.fun:.10g}, iterations={result.nit})")
+
+    return result.x.reshape(X_init.shape), pd.DataFrame(progress)
+
+############################################################
+# Smoothing the trajectories individually
+############################################################
+def smooth_trajectories(X, smoothing_params, sampled_by_time=None):
+    """
+    Smooth trajectories in X using L1 and/or L2 difference penalties.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (n, d, T)
+        Positions of n particles in d-dimensional space over T timepoints.
+        NaN values indicate missing observations.
+    smoothing_params : dict or None
+        Output of _parse_smoothing_params. Expected keys:
+            "l2"            : dict {order: lambda_value}
+            "l1"            : dict {order: lambda_value}
+            "diff_operators": dict {order: np.ndarray (T, T)}
+        If None, X is returned unchanged.
+    sampled_by_time : np.ndarray of bool, shape (n, T), optional
+        Whether particle i exists at timepoint t. If None, all timepoints
+        are assumed observed for all particles.
+
+    Returns
+    -------
+    X_smooth : np.ndarray, shape (n, d, T)
+        Smoothed trajectories. Timepoints where sampled_by_time is False
+        are left as NaN.
+    """
+    if smoothing_params is None:
+        return X.copy()
+
+    l2      = smoothing_params.get("l2", {})
+    l1      = smoothing_params.get("l1", {})
+    D_dict  = smoothing_params.get("diff_operators", {})
+    has_l1  = bool(l1)
+    has_l2  = bool(l2)
+
+    n, d, T = X.shape
+    X_smooth = np.full_like(X, np.nan)
+
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n, T), dtype=bool)
+
+    for i in tqdm(range(n)):
+        obs = sampled_by_time[i]          # (T,) boolean mask
+        obs_idx = np.where(obs)[0]        # indices of observed timepoints
+        T_i = len(obs_idx)
+
+        if T_i == 0:
+            continue
+
+        # Slice difference operators to observed timepoints only:
+        #   rows select which finite differences to penalise (only those
+        #   entirely within the observed support are meaningful),
+        #   columns select the observed timepoints.
+        D_dict_i = {order: Dk[np.ix_(obs_idx, obs_idx)]
+                    for order, Dk in D_dict.items()}
+
+        if has_l2 and not has_l1:
+            A = np.eye(T_i)
+            for order, lam in l2.items():
+                Dk = D_dict_i[order]
+                A += lam * (Dk.T @ Dk)
+            L = np.linalg.cholesky(A)
+
+            for dim in range(d):
+                x = X[i, dim, obs_idx]
+                x_smooth = np.linalg.solve(L.T, np.linalg.solve(L, x))
+                X_smooth[i, dim, obs_idx] = x_smooth
+
+        elif has_l1:
+            for dim in range(d):
+                x = X[i, dim, obs_idx]
+                x_var = cp.Variable(T_i)
+
+                cost = cp.sum_squares(x_var - x)
+
+                for order, lam in l2.items():
+                    Dk = D_dict_i[order]
+                    cost = cost + lam * cp.sum_squares(Dk @ x_var)
+
+                for order, lam in l1.items():
+                    Dk = D_dict_i[order]
+                    cost = cost + lam * cp.norm1(Dk @ x_var)
+
+                prob = cp.Problem(cp.Minimize(cost))
+                prob.solve()
+
+                if x_var.value is None:
+                    raise RuntimeError(
+                        f"CVXPY failed for particle {i}, dim {dim}. "
+                        f"Solver status: {prob.status}"
+                    )
+                X_smooth[i, dim, obs_idx] = x_var.value
+
+        else:
+            X_smooth[i, dim, obs_idx] = X[i, dim, obs_idx]
+
+    return X_smooth
