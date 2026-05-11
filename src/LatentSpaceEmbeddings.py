@@ -93,13 +93,13 @@ class LatentSpaceEmbeddings:
         valid       = np.isfinite(r_upper) & np.isfinite(w_upper) & (r_upper > 0)
         r_v, w_v    = r_upper[valid], w_upper[valid]
         self.w_tot  = w_v.sum()
-        self.saturated_loss = np.sum(w_v * r_v * (1 - np.log(r_v)))
+        self.saturated_loss = np.sum(w_v * r_v * (1 - np.log(r_v))) / self.w_tot
 
         # Per-timepoint: used for ftol in stage-1 per-slice optimization
         wl = np.where(valid, w_upper * r_upper * (1 - np.log(np.where(valid, r_upper, 1))), 0.0)
         w  = np.where(valid, w_upper, 0.0)
         w_tot_t       = w.sum(axis=0)                                         # (T,)
-        self.saturated_loss_t = np.where(w_tot_t > 0, wl.sum(axis=0), np.nan)  # (T,)
+        self.saturated_loss_t = np.where(w_tot_t > 0, wl.sum(axis=0) / w_tot_t, np.nan)  # (T,)
         self.w_tot_t    = w_tot_t                                             # (T,)
         self.l1_strengths = l1_strengths
         self.l2_strengths = l2_strengths
@@ -126,6 +126,22 @@ class LatentSpaceEmbeddings:
         self.num_samples     = n_ind
         self.sampled_by_time = self.sampled_by_time[::2, :]
 
+    # def _parse_smoothing_params(self, l1_penalty, l2_penalty):
+    #     if l1_penalty is None and l2_penalty is None:
+    #         self.smoothing_params = None
+    #         return
+    #     assert l1_penalty is None or isinstance(l1_penalty, dict), "l1_penalty must be a dict"
+    #     assert l2_penalty is None or isinstance(l2_penalty, dict), "l2_penalty must be a dict"
+    #     max_order = max(
+    #         max(l1_penalty.keys()) if l1_penalty else 0,
+    #         max(l2_penalty.keys()) if l2_penalty else 0,
+    #     )
+    #     self.smoothing_params = {
+    #         "l1":            l1_penalty or {},
+    #         "l2":            l2_penalty or {},
+    #         "diff_operators": compute_difference_operators(
+    #                               self.num_timepoints, max_order, self.delta_t),
+    #     }
     def _parse_smoothing_params(self, l1_strengths, l2_strengths):
         """Compute smoothing weights from transferable strengths and the current embeddings.
 
@@ -176,7 +192,9 @@ class LatentSpaceEmbeddings:
             "diff_operators": diff_operators,
         }
 
-    def compute_embeddings_through_time(self, X_init = None, precision = 1e-12):
+    def compute_embeddings_through_time(self,
+                                        X_init = None,
+                                        target_precision = 1e-8):
         """Compute embeddings by coordinate descent over time points
 
         Args:
@@ -187,26 +205,25 @@ class LatentSpaceEmbeddings:
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
-        ftol_t = precision * np.nanmean(self.saturated_loss_t)
-        print(f"Stage 1: coordinate descent over time with ftol={ftol_t:.2e}")
-        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init, sampled_by_time = self.sampled_by_time, ftol=ftol_t)
+        ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
+        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, w_tot = self.w_tot, N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init, sampled_by_time = self.sampled_by_time, ftol=ftol_t)
         # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
+        print(self.smoothing_params)
         return X, loss_df  
 
     def compute_embeddings_sample_coordinate_descent(self, X_init = None, n_epochs = 1):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)        
+        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.w_tot, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)        
         # X = procrustes_alignment(X)
         self.embeddings = X
         return X, loss_df
     
-    def compute_embeddings_jointly(self, X_init=None, precision=1e-12):
+    def compute_embeddings_jointly(self, X_init=None, precision=1e-5):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        ftol = precision * self.saturated_loss
-        print(f"Stage 2: joint optimization with ftol={ftol:.2e}")
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, ftol=ftol)
+        ftol = precision * min(self.saturated_loss, 1.0)
+        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.w_tot, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, ftol=ftol)
         self.embeddings = X
         X = procrustes_alignment(X)
         return X, loss_df
@@ -244,6 +261,7 @@ def compute_smoothing_weights(X, saturated_loss, l1_strengths, l2_strengths, dif
     n, d, T    = X.shape
     l1_weights = {}
     l2_weights = {}
+
     for k in set(list(l1_strengths.keys()) + list(l2_strengths.keys())):
         D    = diff_operators[k]
         DkX  = X @ D.T          # (n, d, T)
@@ -255,3 +273,27 @@ def compute_smoothing_weights(X, saturated_loss, l1_strengths, l2_strengths, dif
             l1_weights[k] = l1_strengths[k] * saturated_loss / np.sum(np.linalg.norm(DkX, axis=1))
 
     return l1_weights, l2_weights
+# # %%
+# rates_path = "../results/simulations/outputs/split/sim/data/rates.minWS100.maxWS200.V1.FS1.0.maxT10000.nT2000.parquet"
+# se_path =  "../results/simulations/outputs/split/sim/data/se_rates.minWS100.maxWS200.V1.FS1.0.maxT10000.nT2000.parquet"
+# rates_df = pd.read_parquet(rates_path)
+# se_df = pd.read_parquet(se_path)
+
+# rates_df = rates_df[rates_df.columns[:700]]
+# se_df = se_df[se_df.columns[:700]]
+
+# LSE = LatentSpaceEmbeddings(rates_df, se_df, N_min=1, N_max=np.inf, n_components=2, individuals=True)
+# X, loss_df = LSE.compute_embeddings_through_time(target_precision=1e-7)
+# # %%
+# l1_strengths = {2: 1}
+# l2_strengths = None
+
+# LSE._parse_smoothing_params(l1_strengths, l2_strengths)
+# smoothing_params = LSE.smoothing_params
+# # %%
+# smoothing_params["l1"]
+# # %%
+# penalty_loss, penalty_grad = compute_penalty_loss_gradient(LSE.embeddings, LSE.smoothing_params)
+# # %%
+# print(penalty_grad)
+# # %%
