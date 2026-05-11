@@ -5,22 +5,16 @@
 
 # Specific Tasks
 - **Smoothing the Embeddings**
-    - Determine a standard level of smoothing given standard error of rate estimates
-    - Add necessary parameters and changes to snakemake
-        - A basic unsmoothed output
-        - An output with the standard level of smoothing
-        - Any additional outputs for additionally specified smoothing parameters
 
 - **Performance Evaluation**
-    - Add an option of multiple outputs from diff inits
     
 - **Finalyzing Empirical Analyses**
     - Preparing datasets [medium]
         - Reinfer Wohns with tsinfer+tsdate
-            - with and without archiacs
         - Reinfer Chimps with tsinfer+tsdate
 
 # Minor Tasks
+- Add an option of multiple outputs from diff inits
 - Embeddings for individuals rather than haplotypes [high]
 - Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
@@ -54,6 +48,12 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 
 ## Archive
 #### Done
+- DONE Determine a standard level of smoothing given standard error of rate estimates
+- DONE Add necessary parameters and changes to snakemake
+    - A basic unsmoothed output
+    - An output with the standard level of smoothing
+    - Any additional outputs for additionally specified smoothing parameters
+
 - DONE Special: Do admixed individuals pull their sources too much? [medium]
 - DONE reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
     - d=2, d=10, d=n-1

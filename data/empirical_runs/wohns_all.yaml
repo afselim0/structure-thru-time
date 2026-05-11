@@ -3,8 +3,8 @@ num_threads: 4
 
 # file paths
 output_path: ../results/empirical/Wohns/all.npp.2
-# trees_dir: ../data/trees/wohns_chopped
-trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/wohns_chopped
+trees_dir: ../data/trees/wohns_chopped
+# trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/wohns_chopped
 pop_colors: ../data/metadata/wohns_pop_colors.csv
 pop_labels: ../data/metadata/wohns_pop_labels.csv 
 num_posterior_samples: 1
@@ -22,8 +22,8 @@ poly: 1
 # Embeddings estimation parameters
 N_min: 1000
 N_max: 10000000
-# l1: [1e-3, 1e-2]
-# l2: [1e-2]
+l1: [0,0.05]
+l2: [0,0.005]
 
 # Plotting parameters
 min_time: 20

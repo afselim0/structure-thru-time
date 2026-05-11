@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 MIN_RATE = 1e-12
 
@@ -55,12 +56,15 @@ def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, min_rat
         minimum_window_size, maximum_window_size, n_T, time_step
     )
 
+    print("Multiplying cumulative rate matrix with weights to compute slopes (rates)")
     rates_raw  = H @ S.T   # (n_pairs, n_T)
+    print("Multiplying cumulative rate matrix with weights to compute intercepts")
     intercepts = H @ A.T   # (n_pairs, n_T)
 
     # SE from local linear residuals (computed on unclipped rates)
+    print("Computing standard errors")
     se = np.full_like(rates_raw, np.nan)
-    for t in range(t_min, t_max):
+    for t in tqdm(range(t_min, t_max)):
         m    = np.count_nonzero(A[t])              # = 2h+1, non-zero at all window points
         h    = (m - 1) // 2
         l, r = t - h, t + h + 1
@@ -73,7 +77,7 @@ def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, min_rat
 
     # Clip and mask
     rates = rates_raw.copy()
-    rates[rates < min_rate] = 0
+    # rates[rates < min_rate] = 0
     rates = rates[:, t_min:t_max]
     se = se[:, t_min:t_max]
 
