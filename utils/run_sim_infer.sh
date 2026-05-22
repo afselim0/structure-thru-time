@@ -41,7 +41,7 @@ fi
 #   --cores all --rerun-incomplete
 
 
-snakemake sim_STT --configfile "$configfile" \
+snakemake sim --configfile "$configfile" \
   --config output_path="$output_path"/sim\
   --cores all --rerun-incomplete
 
@@ -52,7 +52,7 @@ snakemake sim_STT --configfile "$configfile" \
 
 
 ## Example
-### ./run_sim_infer.sh -o ../results/simulations/outputs/split -i tsinfer -p ../data/demes/main_1_config/split.yaml
+### ./run_sim_infer.sh -o ../results/simulations/outputs/admix -i tsinfer -p ../data/demes/main_1_config/admix.yaml
 ###./run_sim_infer.sh -o ../results/simulations/outputs/split_sawtooth -i tsinfer -p ../data/demes/main_1_config/split_sawtooth.yaml
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/complex_4_pops -i tsinfer -p ../data/demes/main_1_config/complex_4_pops.yaml
 ### ./run_sim_infer.sh -o ../results/simulations/outputs/stepping_stones_2d -i tsinfer -p ../data/demes/main_1_config/stepping_stones_2d.yaml

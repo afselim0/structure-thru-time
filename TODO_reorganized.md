@@ -1,13 +1,7 @@
 # General Tasks
-- **Smoothing the Embeddings**
-- **Performance Evaluation**
 - **Finalize Empirical Analyses**
 
 # Specific Tasks
-- **Smoothing the Embeddings**
-
-- **Performance Evaluation**
-    
 - **Finalyzing Empirical Analyses**
     - Preparing datasets [medium]
         - Reinfer Wohns with tsinfer+tsdate

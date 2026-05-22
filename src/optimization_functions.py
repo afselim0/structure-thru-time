@@ -283,7 +283,6 @@ def coordinate_descent_over_time(
     time_order = range(n_timepoints) if direction == "forward" \
                  else range(n_timepoints - 1, -1, -1)
     prev_t_idx = None
-
     for step, t_idx in enumerate(tqdm(time_order)):
         extant_mask = sampled_by_time[:, t_idx]
         extant_idx  = np.where(extant_mask)[0]
@@ -326,6 +325,45 @@ def coordinate_descent_over_time(
         n_iters.append(n_iter)
         messages.append(message)
         prev_t_idx = t_idx
+
+    loss_change    = np.array(loss_before) - np.array(loss_after)
+    loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
+    loss_df = pd.DataFrame({
+        "step":         range(1, n_timepoints + 1),
+        "loss":         loss_over_time,
+        "n_iterations": n_iters,
+        "message":      messages,
+    })
+    return X, loss_df
+
+def copied_coordinate_descent_over_time(X_init, R, W, w_tot, N_min, N_max, n_components, sampled_by_time, max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT):
+    n_samples, _, n_timepoints = R.shape
+    X = np.full((n_samples, n_components, n_timepoints), np.nan)
+    loss_before, loss_after, n_iters, messages = [], [], [], []
+
+    for t_idx in tqdm(range(n_timepoints)):
+        extant_mask = sampled_by_time[:, t_idx]
+        extant_idx  = np.where(extant_mask)[0]
+        X_init_t = X_init[extant_idx, :, t_idx]
+
+        R_t      = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        W_t      = W[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        
+        w_tot_t  = 0.5 * np.nansum(W_t)
+        scale   = w_tot_t / w_tot
+
+        loss_t_before, _ = compute_loss_gradient_timepoint(
+            X_init_t, R_t, W_t, w_tot_t, N_min, N_max)
+
+        X_t, loss_t_after, n_iter, message = optimize_timepoint(
+            X_init_t, R_t, W_t, w_tot_t, N_min, N_max, max_iter, gtol, ftol)
+
+        X[extant_idx, :, t_idx] = X_t
+
+        loss_before.append(loss_t_before * scale)
+        loss_after.append(loss_t_after * scale)
+        n_iters.append(n_iter)
+        messages.append(message)
 
     loss_change    = np.array(loss_before) - np.array(loss_after)
     loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
@@ -780,3 +818,190 @@ def smooth_trajectories(X, smoothing_params, sampled_by_time=None):
             X_smooth[i, dim, obs_idx] = X[i, dim, obs_idx]
 
     return X_smooth
+
+############################################################
+# Functions for handling admixed samples
+############################################################
+## Coordinate descent over time slices, where at each time slice we optimize the coordinates for all samples using L-BFGS-B optimization, initializing with the solution from the previous time slice. This can be done in both forward and backward directions, and takes into account ancient samples that are not present in all time points.
+
+def optimize_timepoint_admixed(X_t_init: np.ndarray, R_t: np.ndarray, W_t: np.ndarray,
+                             w_tot_t: float, N_min: float, N_max: float,
+                             max_iter: int, gtol: float, ftol: float,
+                             free_indices: list[int]) -> tuple:
+    """Single L-BFGS-B step for one timepoint, optimizing a subset of samples.
+    Positions of samples not in free_indices are held fixed throughout optimization.
+    Loss is computed over all pairs for consistency with optimize_timepoint.
+
+    Args:
+        X_t_init (np.ndarray): Initial coordinates. (n, d)
+        R_t (np.ndarray): Rate matrix. (n, n)
+        W_t (np.ndarray): Weight matrix. (n, n)
+        w_tot_t (float): Per-timepoint total weight.
+        N_min, N_max (float): Link function parameters.
+        max_iter (int): Maximum L-BFGS-B iterations.
+        gtol, ftol (float): Convergence tolerances.
+        free_indices (list[int]): Indices of samples whose positions are optimized.
+            All other sample positions are held fixed at their X_t_init values.
+    Returns:
+        tuple: (X_opt, loss, n_iterations, message)
+            X_opt (np.ndarray): Full coordinate matrix (n, d) with free samples
+                at optimized positions and fixed samples unchanged.
+    """
+    n, d = X_t_init.shape
+    free_indices = list(free_indices)
+
+    # Validate free_indices
+    if not free_indices:
+        raise ValueError("free_indices must contain at least one sample index.")
+    if any(i < 0 or i >= n for i in free_indices):
+        raise ValueError(
+            f"All free_indices must be in [0, {n-1}]; got {free_indices}."
+        )
+    if len(set(free_indices)) != len(free_indices):
+        raise ValueError("free_indices must not contain duplicate indices.")
+
+    # Fixed positions held constant throughout; only free rows are passed to optimizer
+    X_fixed = X_t_init.copy()
+    X_free_init = X_t_init[free_indices]
+
+    # Wrapper that reconstructs the full coordinate matrix before evaluating loss/gradient,
+    # then returns only the gradient rows corresponding to free samples
+    def objective(x_free_flat: np.ndarray) -> tuple[float, np.ndarray]:
+        X_full = X_fixed.copy()
+        X_full[free_indices] = x_free_flat.reshape(X_free_init.shape)
+
+        # Loss and full gradient computed over all pairs for loss consistency
+        loss, grad_full = compute_loss_gradient_timepoint(
+            X_full.ravel(), R_t, W_t, w_tot_t, N_min, N_max
+        )
+
+        # Return only the gradient rows for the free samples to L-BFGS-B
+        grad_free = grad_full.reshape(n, d)[free_indices].ravel()
+        return loss, grad_free
+
+    result = minimize(
+        objective,
+        X_free_init.ravel(),
+        method='L-BFGS-B',
+        jac=True,
+        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
+    )
+
+    # Reconstruct the full coordinate matrix with optimized free positions
+    X_opt = X_fixed.copy()
+    X_opt[free_indices] = result.x.reshape(X_free_init.shape)
+
+    return X_opt, result.fun, result.nit, result.message
+
+def coordinate_descent_over_time_admixed(
+    R,
+    W,
+    w_tot,
+    free_indices,
+    N_min           = 1,
+    N_max           = np.inf,
+    n_components    = 2,
+    X_init          = None,
+    sampled_by_time = None,
+    direction       = "backward",
+    max_iter        = MAX_ITER_TIMEPOINT,
+    gtol            = GTOL_TIMEPOINT,
+    ftol            = FTOL_TIMEPOINT,
+):
+    """Single-pass coordinate descent over timepoints for embedding admixed samples
+    into a fixed reference frame of non-admixed samples.
+    All sample positions are initialized from X_init at every timepoint; no
+    carry-forward between timepoints. Non-admixed sample positions are held fixed
+    by the optimizer; only admixed (free) samples are optimized.
+    No Procrustes alignment is performed, as the reference frame is already fixed
+    by the non-admixed samples.
+
+    Args:
+        R (np.ndarray): Rate tensor. (n, n, T)
+        W (np.ndarray): Weight tensor. (n, n, T)
+        w_tot (float): Global total weight for normalization.
+        free_indices (list[int]): Indices of admixed samples to optimize.
+            All other sample positions are held fixed at their X_init values.
+        N_min, N_max (float): Link function parameters.
+        n_components (int): Latent space dimensionality.
+        X_init (np.ndarray, optional): Initial coordinates. (n, d, T)
+        sampled_by_time (np.ndarray, optional): Boolean presence mask. (n, T)
+        direction (str): "backward" (default) or "forward".
+        max_iter (int): Maximum L-BFGS-B iterations per timepoint.
+        gtol, ftol (float): Convergence tolerances.
+    Returns:
+        tuple: (X, loss_df)
+    """
+    n_samples, _, n_timepoints = R.shape
+
+    # Validate free_indices against sample dimensions
+    if not free_indices:
+        raise ValueError("free_indices must contain at least one sample index.")
+    if any(i < 0 or i >= n_samples for i in free_indices):
+        raise ValueError(
+            f"All free_indices must be in [0, {n_samples - 1}]; got {free_indices}."
+        )
+
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n_samples, n_timepoints), dtype=bool)
+    if X_init is None:
+        X_init = np.random.rand(n_samples, n_components, n_timepoints)
+
+    X = np.full((n_samples, n_components, n_timepoints), np.nan)
+    loss_before, loss_after, n_iters, messages = [], [], [], []
+
+    time_order = range(n_timepoints) if direction == "forward" \
+        else range(n_timepoints - 1, -1, -1)
+
+    for t_idx in tqdm(time_order):
+        extant_mask = sampled_by_time[:, t_idx]
+        extant_idx  = np.where(extant_mask)[0]
+
+        # Always initialize all samples from X_init at this timepoint;
+        # fixed samples will remain here throughout optimization
+        X_t      = X_init[extant_idx, :, t_idx].copy()
+        R_t      = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        W_t      = W[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
+        X_init_t = X_init[extant_idx, :, t_idx]
+
+        # Per-timepoint normalization keeps gradient at a workable scale for L-BFGS
+        w_tot_t = 0.5 * np.nansum(W_t)
+        scale   = w_tot_t / w_tot
+
+        # Remap free_indices into the local extant index space
+        extant_list        = list(extant_idx)
+        free_indices_local = [extant_list.index(i) for i in free_indices
+                              if i in extant_list]
+
+        # --- Loss before ---
+        loss_t_before, _ = compute_loss_gradient_timepoint(
+            X_init_t.ravel(), R_t, W_t, w_tot_t, N_min, N_max
+        )
+
+        # --- Optimize free (admixed) samples, holding fixed samples constant ---
+        if free_indices_local:
+            X_t, loss_t_after, n_iter, message = optimize_timepoint_admixed(
+                X_t, R_t, W_t, w_tot_t, N_min, N_max,
+                max_iter, gtol, ftol, free_indices_local
+            )
+        else:
+            # No admixed samples present at this timepoint; record null step
+            loss_t_after = loss_t_before
+            n_iter       = 0
+            message      = "no free samples at this timepoint"
+
+        X[extant_idx, :, t_idx] = X_t
+        loss_before.append(loss_t_before * scale)
+        loss_after.append(loss_t_after * scale)
+        n_iters.append(n_iter)
+        messages.append(message)
+
+    loss_change    = np.array(loss_before) - np.array(loss_after)
+    loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
+    loss_df = pd.DataFrame({
+        "step":         range(1, n_timepoints + 1),
+        "loss":         loss_over_time,
+        "n_iterations": n_iters,
+        "message":      messages,
+    })
+    return X, loss_df

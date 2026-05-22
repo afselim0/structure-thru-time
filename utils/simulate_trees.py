@@ -1,3 +1,4 @@
+#%%
 import argparse
 import pandas as pd
 import demes
@@ -16,7 +17,16 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
     n_pops = len(populations)
     n_samples_per_pop = n_samples // (2 * n_pops) # diploid samples
     samples = {pop_labels.loc[2*i*n_samples_per_pop,'population']: n_samples_per_pop for i in range(n_pops)} # diploid samples
-
+    admix_times = []
+    admix = False
+    for event in demography.events:
+        if event._type_str == "Admixture":
+            admix = True
+            print(f"Admixture event at time {event.time} generations between {event.ancestral[0]} and {event.ancestral[1]} with proportions {event.proportions}")
+            admix_times.append(event.time)
+    if admix:
+        demography.add_census(time=max(admix_times)+1)
+        demography.sort_events()
 
     def simulate_replicate(i):
         ts = msprime.sim_ancestry(
@@ -73,5 +83,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# %%

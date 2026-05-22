@@ -1,6 +1,6 @@
-# %%
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -189,7 +189,7 @@ class LocalAncestryInference:
         sample_sets = [self.ancestry_samples[lbl] for lbl in labels]
         rows: list[dict] = []
 
-        for tree in tqdm(self.ts.trees(), desc="Inferring local ancestry",
+        for tree in tqdm(self.ts.trees(), desc=f"Inferring local ancestry",
                          total=self.ts.num_trees):
             start, end = tree.interval.left, tree.interval.right
 
@@ -236,6 +236,150 @@ def infer_local_ancestry(
 ) -> pd.DataFrame:
     """Functional wrapper around :class:`LocalAncestryInference`."""
     return LocalAncestryInference(ts, admixed_sample_ids, ancestry_samples).infer()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-contig inference
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _infer_and_save_contig(args: tuple) -> str:
+    """
+    Module-level worker: load one .trees file, run GNN inference, and
+    write the result as a parquet file.  Returns the output path as a
+    string so the caller can log progress.
+
+    Must be module-level (not nested) so pathos/dill can pickle it.
+
+    Parameters
+    ----------
+    args : tuple
+        (ts_path, admixed_sample_ids, ancestry_samples, output_dir)
+
+    Returns
+    -------
+    str
+        Path to the written parquet file.
+    """
+    ts_path, admixed_sample_ids, ancestry_samples, output_dir = args
+    ts_path    = Path(ts_path)
+    output_dir = Path(output_dir)
+    contig_id  = ts_path.stem   # filename without .trees suffix
+
+    ts  = tskit.load(str(ts_path))
+    df  = LocalAncestryInference(ts, admixed_sample_ids, ancestry_samples).infer()
+
+    out_path = output_dir / f"{contig_id}.parquet"
+    df.to_parquet(out_path, index=False)
+    return str(out_path)
+
+
+def infer_local_ancestry_multi(
+    trees_dir: str | Path,
+    admixed_sample_ids: list[int],
+    ancestry_samples: dict[Any, list[int]],
+    output_dir: str | Path,
+    num_threads: int = 1,
+) -> None:
+    """
+    Run GNN local ancestry inference across all ``.trees`` files in a
+    directory and write one ``.parquet`` file per contig to ``output_dir``.
+
+    Each output file is named ``<contig_id>.parquet`` where ``contig_id``
+    is the source filename without the ``.trees`` suffix.  Files are written
+    independently — no aggregation step is required and results are
+    immediately usable as each worker finishes.
+
+    Parameters
+    ----------
+    trees_dir : str | Path
+        Directory containing one or more ``.trees`` files, processed in
+        sorted order.
+    admixed_sample_ids : list[int]
+        Node IDs of the admixed (query) haplotypes — must be consistent
+        across all tree sequences in the directory.
+    ancestry_samples : dict[Any, list[int]]
+        Mapping from ancestry label → list of reference sample node IDs —
+        must be consistent across all tree sequences.
+    output_dir : str | Path
+        Directory where parquet files are written.  Created if it does
+        not exist.
+    num_threads : int
+        Number of parallel worker processes.  When 1 (default), processes
+        files sequentially.  When > 1, uses
+        ``pathos.multiprocessing.ProcessingPool`` with one file per worker.
+
+    Returns
+    -------
+    None
+        Results are written to disk; nothing is returned or held in memory.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``trees_dir`` does not exist or contains no ``.trees`` files.
+
+    Notes
+    -----
+    * Memory usage per worker is proportional to one tree sequence.
+      With ``num_threads=k``, peak memory is k × (one tree sequence).
+    * To load a specific contig's results afterwards:
+        ``pd.read_parquet("output_dir/chr1.parquet")``
+    * To load all contigs lazily (e.g. with dask or pyarrow):
+        ``pd.read_parquet("output_dir/")``
+
+    Example
+    -------
+    >>> infer_local_ancestry_multi(
+    ...     trees_dir="simulations/",
+    ...     admixed_sample_ids=np.arange(40, 60).tolist(),
+    ...     ancestry_samples={1.0: np.arange(0, 20).tolist(),
+    ...                        2.0: np.arange(20, 40).tolist()},
+    ...     output_dir="lai_results/",
+    ...     num_threads=4,
+    ... )
+    >>> # Load a single contig
+    >>> df_chr1 = pd.read_parquet("lai_results/chr1.parquet")
+    >>> # Load all contigs at once
+    >>> df_all  = pd.read_parquet("lai_results/")
+    """
+    trees_dir  = Path(trees_dir)
+    output_dir = Path(output_dir)
+
+    if not trees_dir.is_dir():
+        raise FileNotFoundError(f"Directory not found: {trees_dir}")
+
+    ts_paths = sorted(trees_dir.glob("*.trees"))
+    if not ts_paths:
+        raise FileNotFoundError(f"No .trees files found in: {trees_dir}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    work_items = [
+        (str(p), admixed_sample_ids, ancestry_samples, str(output_dir))
+        for p in ts_paths
+    ]
+
+    if num_threads == 1:
+        for item in work_items:
+            print(f"Processing {item[0].split('/')[-1]}...")
+            _infer_and_save_contig(item)
+    else:
+        from pathos.multiprocessing import ProcessingPool
+
+        pool = ProcessingPool(nodes=num_threads)
+        try:
+            # imap returns a lazy iterator — tqdm shows per-file progress
+            # as each worker finishes rather than waiting for all to complete
+            for _ in tqdm(
+                pool.imap(_infer_and_save_contig, work_items),
+                total=len(work_items),
+                desc=f"Processing contigs ({num_threads} threads)",
+            ):
+                pass
+        finally:
+            pool.close()
+            pool.join()
+            pool.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -865,3 +1009,29 @@ def plot_chromosome_painting(
                  fontsize=10, y=1.01)
     fig.tight_layout()
     return fig
+#%%
+trees_dir = "../results/simulations/outputs/admix/sim/trees"
+n = 10
+ancestry_samples = {
+    1.0: list(range(0, 2*n)),
+    2.0: list(range(2*n, 4*n)),
+}
+admixed_sample_ids = list(range(4*n, 6*n))
+#%%
+# output_dir = "../results/simulations/outputs/admix/sim/LAI"
+# num_threads = 1
+# infer_local_ancestry_multi(
+#     trees_dir,
+#     admixed_sample_ids,
+#     ancestry_samples,
+#     output_dir,
+#     num_threads
+# )
+#%%
+output_dir = "../results/simulations/outputs/admix/sim/LAI_true"
+n_contigs = 500
+admix_time = 100
+for contig in range(n_contigs):
+    ts = tskit.load(f"{trees_dir}/contig_{contig}.trees")
+    admix_df = true_local_ancestry(ts, admixed_sample_ids, admix_time)
+    admix_df.to_parquet(f"{output_dir}/contig_{contig}.parquet", index=False)

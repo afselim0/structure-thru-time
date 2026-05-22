@@ -1,20 +1,20 @@
 time_units: generations
 generation_time: 1
 demes:
-- name: main
+- name: Ancestral
   epochs:
-  - {end_time: 2000.0, start_size: 10000.0}
-- name: pop_1
-  ancestors: [main]
-  epochs:
-  - {end_time: 0, start_size: 10000.0}
-- name: pop_2
-  ancestors: [main]
+  - {end_time: 2000, start_size: 10000.0}
+- name: A
+  ancestors: [Ancestral]
   epochs:
   - {end_time: 0, start_size: 10000.0}
-- name: Admix
-  start_time: 100.0
-  ancestors: [pop_1, pop_2]
+- name: B
+  ancestors: [Ancestral]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: C
+  start_time: 100
+  ancestors: [A, B]
   proportions: [0.5, 0.5]
   epochs:
   - {end_time: 0, start_size: 10000.0}

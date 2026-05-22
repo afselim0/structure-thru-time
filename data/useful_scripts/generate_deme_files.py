@@ -78,7 +78,7 @@ def pop_split_admix(N0,N1,N2,N_admix,t_split,t_admix,admix_prop=0.5):
     demography.add_population_split(time=t_split, derived=["A", "B"], ancestral="Ancestral")
 
     demography.add_admixture(time=t_admix,derived="C",ancestral=["A","B"],proportions=[admix_prop,1-admix_prop])
-
+    demography.add_census(time=t_admix+1)
     demography.sort_events()
     
     return demography
@@ -276,4 +276,11 @@ K = 10
 demography = Stepping_Stones_2d(N,K,m)
 graph = demography.to_demes()
 demes.dump(graph, main_demes_dir_1 + "stepping_stones_2d.yaml")
+# %%
+Ne = 1e4
+t_split = 2000
+t_admix = 100
+demography = pop_split_admix(Ne,Ne,Ne,Ne,t_split,t_admix,admix_prop=0.5)
+graph = demography.to_demes()
+demes.dump(graph, main_demes_dir_1 + "admix.yaml")
 # %%
