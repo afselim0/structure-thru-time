@@ -23,6 +23,8 @@
 - Outputs to log files... 
 
 # Discussion Points
+- 5/14 Should we make the exponention power k/p a command-line parameter?
+- 5/14 We've been agonizing about percieved structure in panmictic periods and smoothing -- but if we sample over uncertainty - some of that apparent structure/disconuities may be more directly interpretable as minor
 - 1/26 Next paper or a small last section - use embedding to re-estimate rates and show an improvement over the raw rates
 - 1/26 Show multiple solutions for same data (HT Amy G)
 
