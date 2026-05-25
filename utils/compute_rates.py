@@ -50,13 +50,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# %%
-pdf_path = "../results/empirical/Wohns/sardinia/data/coal_pdf.V1.FS1.0.maxT4000.nT4000.parquet"
-output_path = "../results/empirical/Wohns/sardinia/data"
-minimum_window_size = 100
-maximum_window_size = 1000
-n_bootstrap_replicates = 100
-bootstrap_subsample_size = 100
-
-
-# %%

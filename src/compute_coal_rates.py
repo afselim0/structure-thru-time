@@ -32,6 +32,7 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
     # A        = np.zeros((n_timepoints, n_timepoints))
     # se_scale = np.full(n_timepoints, np.nan)
 
+    # Interior: symmetric window growing from minimum to maximum bandwidth
     for k, t in enumerate(range(t_min, t_max)):
         m = window_sizes[k]
         if m % 2 == 0:
@@ -42,6 +43,25 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
         S[t, t - h : t + h + 1] = xloc / S2        # slope:     j*dt / S2
         # A[t, t - h : t + h + 1] = 1.0 / m          # intercept: local mean
         # se_scale[t]              = 1.0 / np.sqrt(S2) # SE = s_hat / sqrt(S2)
+
+    # Early-time boundary (t < t_min): one fixed window [0, minimum_num_idxs),
+    # slope evaluated at each t within it via one-sided local linear fit.
+    for t in range(t_min):
+        xloc = (np.arange(minimum_num_idxs) - t) * time_step
+        S1 = xloc.sum()
+        S2 = (xloc ** 2).sum()
+        n  = minimum_num_idxs
+        S[t, :minimum_num_idxs] = (n * xloc - S1) / (n * S2 - S1 ** 2)
+
+    # Late-time boundary (t >= t_max): one fixed window [n_timepoints - maximum_num_idxs, n_timepoints),
+    # slope evaluated at each t within it via one-sided local linear fit.
+    start = n_timepoints - maximum_num_idxs
+    for t in range(t_max, n_timepoints):
+        xloc = (np.arange(maximum_num_idxs) - (t - start)) * time_step
+        S1 = xloc.sum()
+        S2 = (xloc ** 2).sum()
+        n  = maximum_num_idxs
+        S[t, start:] = (n * xloc - S1) / (n * S2 - S1 ** 2)
 
     # return S, t_min, t_max
     return S

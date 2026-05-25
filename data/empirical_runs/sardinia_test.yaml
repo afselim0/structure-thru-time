@@ -23,8 +23,8 @@ max_window_size: 800
 N_min: 100
 N_max: 2000000
 n_timepoints_emb: 500
-l1: [0,0.1] 
-l2: [0,0.01]
+l1: [0,0.05] 
+l2: [0,0.005]
 
 # Plotting parameters
 min_time: 50
