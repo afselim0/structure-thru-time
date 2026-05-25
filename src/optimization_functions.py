@@ -10,7 +10,7 @@ The module also contains functions for performing optimization using L-BFGS-B fo
 """
 
 GTOL_TIMEPOINT     = 1e-12
-FTOL_TIMEPOINT     = 1e-8
+FTOL_TIMEPOINT     = 1e-12
 MAX_ITER_TIMEPOINT = 6000
 
 GTOL_SAMPLE        = 1e-16
@@ -28,6 +28,7 @@ from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
 import cvxpy as cp
+from sklearn.manifold import smacof
 
 ############################################################
 # General Functions
@@ -35,7 +36,8 @@ import cvxpy as cp
 
 def compute_f(D,
               N_min,
-              link="inverse_sq_distance"): 
+            #   d = 4):
+              link="inverse_distance"): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
     Args:
@@ -46,7 +48,10 @@ def compute_f(D,
 
     Returns:
         tuple: f and f_prime arrays.
-    """
+    """  
+    # inverse_distance = 1/(D**d + N_min)  
+    # f = inverse_distance
+    # f_prime = -d*D**(d-1)*inverse_distance**2
     if link == "inverse_distance":                  # f = 1/(D + N_min)                         
         inverse_distance = 1/(D + N_min)            
         f = inverse_distance 
@@ -58,8 +63,16 @@ def compute_f(D,
     elif link == "exponential":                     # f = 1/N_min * exp(-D)
         f = (1/N_min)*np.exp(-D)
         f_prime = -f
-    
     return f,f_prime
+
+def compute_f_inverse(f, N_min, link="inverse_distance"):
+    if link == "inverse_distance":
+        x = 1/f - N_min
+    elif link == "inverse_sq_distance":
+        x = np.sqrt(1/f - N_min)
+    elif link == "exponential":
+        x = -np.log(f * N_min)
+    return x
 
 def procrustes_single_time(X_reference, Y):
     X_reference_centered = X_reference - np.mean(X_reference, axis=0)
@@ -228,9 +241,14 @@ def optimize_timepoint(X_t_init, R_t, W_t, w_tot_t, N_min, N_max,
     Returns:
         tuple: (X_opt, loss, n_iterations, message)
     """
+    # Initialize with the MDS solution
+    n_components = X_t_init.shape[1]
+    D = compute_f_inverse(R_t + 1/N_max, N_min)
+    D[np.isnan(D)] = 0
+    X_MDS,_ = smacof(D, init=X_t_init, n_components=n_components, n_init = 1)
     result = minimize(
         compute_loss_gradient_timepoint,
-        X_t_init.ravel(),
+        X_MDS.ravel(),
         args=(R_t, W_t, w_tot_t, N_min, N_max),
         method='L-BFGS-B',
         jac=True,
@@ -270,6 +288,7 @@ def coordinate_descent_over_time(
     Returns:
         tuple: (X, loss_df)
     """
+    print(ftol)
     n_samples, _, n_timepoints = R.shape
 
     if sampled_by_time is None:

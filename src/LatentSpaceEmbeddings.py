@@ -205,8 +205,8 @@ class LatentSpaceEmbeddings:
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
-        ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, w_tot = self.w_tot, N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init, sampled_by_time = self.sampled_by_time, ftol=ftol_t)
+        # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
+        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, w_tot = self.w_tot, N_min = self.N_min,N_max = self.N_max,n_components = self.n_components,X_init = X_init, sampled_by_time = self.sampled_by_time)#, ftol=ftol_t)
         # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)

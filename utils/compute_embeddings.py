@@ -48,6 +48,7 @@ def main():
     input_filename = os.path.basename(input)
     se_path = os.path.join(os.path.dirname(input), "se_" + input_filename)
     se_df = pd.read_parquet(se_path) if os.path.exists(se_path) else None
+    # se_df = None
 
     rates_df.columns = rates_df.columns.astype(float)
     if se_df is not None:
@@ -92,7 +93,7 @@ def main():
     if LSE.smoothing_params is not None:
         print("Computing smoothed embeddings...")
         # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
-        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X)
+        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8)
         smoothed_embeddings_df = LSE.get_embeddings_df()
         smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
         # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
