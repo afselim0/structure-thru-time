@@ -33,7 +33,6 @@ vcf_dir                           = read_config("vcf_dir", default=tree_output_p
 fraction_samples                  = read_config("fraction_samples", default = 1.0)   # Fraction of samples taken into account in pdf computation at each contig
 min_window_size                   = read_config("min_window_size", default = 50)    # Window size for local linear regression at t=0
 max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
-poly                              = read_config("poly", default = 1) # Degree of polynomial fit for local rate estimation
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 
@@ -559,8 +558,7 @@ rule compute_rates:
         outdir = data_output_path,
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
-        max_window_size = max_window_size,
-        poly = poly
+        max_window_size = max_window_size
     shell:
         """
         mkdir -p {params.outdir}
@@ -569,8 +567,7 @@ rule compute_rates:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --minimum_window_size {params.min_window_size} \
-            --maximum_window_size {params.max_window_size} \
-            --poly {params.poly}
+            --maximum_window_size {params.max_window_size}
         """
 
 rule plot_rates:

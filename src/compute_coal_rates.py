@@ -18,6 +18,8 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
     if maximum_num_idxs < minimum_num_idxs:
         maximum_num_idxs = minimum_num_idxs
 
+    # t_min = minimum_num_idxs // 2
+    # t_max = n_timepoints - maximum_num_idxs // 2
     t_min = minimum_num_idxs // 2
     t_max = n_timepoints - maximum_num_idxs // 2
 
@@ -26,9 +28,9 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
 
     window_sizes = np.linspace(minimum_num_idxs, maximum_num_idxs, t_max - t_min).astype(int)
 
-    S        = np.zeros((n_timepoints, n_timepoints))
-    A        = np.zeros((n_timepoints, n_timepoints))
-    se_scale = np.full(n_timepoints, np.nan)
+    S = np.zeros((n_timepoints, n_timepoints))
+    # A        = np.zeros((n_timepoints, n_timepoints))
+    # se_scale = np.full(n_timepoints, np.nan)
 
     for k, t in enumerate(range(t_min, t_max)):
         m = window_sizes[k]
@@ -38,13 +40,14 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
         xloc = np.arange(-h, h + 1) * time_step   # S1 = 0 by symmetry
         S2   = (xloc ** 2).sum()
         S[t, t - h : t + h + 1] = xloc / S2        # slope:     j*dt / S2
-        A[t, t - h : t + h + 1] = 1.0 / m          # intercept: local mean
-        se_scale[t]              = 1.0 / np.sqrt(S2) # SE = s_hat / sqrt(S2)
+        # A[t, t - h : t + h + 1] = 1.0 / m          # intercept: local mean
+        # se_scale[t]              = 1.0 / np.sqrt(S2) # SE = s_hat / sqrt(S2)
 
-    return S, A, se_scale, t_min, t_max
+    # return S, t_min, t_max
+    return S
 
 
-def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, min_rate=MIN_RATE):
+def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size):
     times     = pdf_df.columns.astype(float)
     time_step = times[1] - times[0]
     n_T       = len(times)
@@ -52,38 +55,117 @@ def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, min_rat
     survival_df = 1 - pdf_df.cumsum(axis=1)
     H = -np.log(survival_df.values.clip(1e-10))   # (n_pairs, n_T); clip avoids -inf at S=0
 
-    S, A, se_scale, t_min, t_max = adaptive_local_linear_filter(
-        minimum_window_size, maximum_window_size, n_T, time_step
+    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+
+    print("Multiplying cumulative hazard matrix with derivative weights to compute rates")
+    rates = H @ S.T   # (n_pairs, n_T)
+
+    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
+    return rates_df
+
+
+def compute_coal_rates_bootstrap_se(
+    pdf_df: pd.DataFrame,
+    bootstrap_dir: str,
+    minimum_window_size: float,
+    maximum_window_size: float,
+    n_replicates: int,
+    subsample_size: int,
+) -> pd.DataFrame:
+    """Estimate SE of coalescent rate estimates by block bootstrap over tree files.
+
+    For each of ``n_replicates`` bootstrap replicates, ``subsample_size`` count
+    files are drawn without replacement from ``bootstrap_dir``.  The sampled
+    counts are summed and normalised using the corresponding columns of
+    ``coverage_df`` to form a bootstrap PDF, from which rates are computed using
+    the same derivative filter matrix as ``compute_coal_rates``.  The SE at
+    each (pair, timepoint) is the standard deviation across replicates.
+
+    Parameters
+    ----------
+    pdf_df : pd.DataFrame
+        Full PDF estimate (output of ``CountCoalEvents.compute_coal_time_pdf``).
+        Used to set the time grid and index.
+    bootstrap_dir : str
+        Directory containing per-file ``.parquet`` count files, as written by
+        ``CountCoalEvents.compute_coal_time_pdf``.
+    minimum_window_size : float
+        Passed to ``adaptive_local_linear_filter``.
+    maximum_window_size : float
+        Passed to ``adaptive_local_linear_filter``.
+    n_replicates : int
+        Number of bootstrap replicates.
+    subsample_size : int
+        Number of count files drawn without replacement per replicate.
+
+    Returns
+    -------
+    pd.DataFrame
+        SE estimates with the same index and columns as ``pdf_df``.
+    """
+    import os
+
+    times     = pdf_df.columns.astype(float)
+    time_step = times[1] - times[0]
+    n_T       = len(times)
+
+    coverage_df = pd.read_parquet(os.path.join(bootstrap_dir, "coverage.parquet"))
+
+    # Build derivative filter once — shared across all replicates
+    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+
+    # Discover available count files (exclude coverage.parquet)
+    available_files = sorted(
+        f for f in os.listdir(bootstrap_dir)
+        if f.endswith(".parquet") and f != "coverage.parquet"
     )
+    file_basenames = [f.removesuffix(".parquet") for f in available_files]
+    n_files = len(available_files)
 
-    print("Multiplying cumulative rate matrix with weights to compute slopes (rates)")
-    rates_raw  = H @ S.T   # (n_pairs, n_T)
-    print("Multiplying cumulative rate matrix with weights to compute intercepts")
-    intercepts = H @ A.T   # (n_pairs, n_T)
+    if n_files == 0:
+        raise ValueError(f"No count parquet files found in {bootstrap_dir}.")
 
-    # SE from local linear residuals (computed on unclipped rates)
-    print("Computing standard errors")
-    se = np.full_like(rates_raw, np.nan)
-    for t in tqdm(range(t_min, t_max)):
-        m    = np.count_nonzero(A[t])              # = 2h+1, non-zero at all window points
-        h    = (m - 1) // 2
-        l, r = t - h, t + h + 1
-        xloc      = np.arange(-h, h + 1) * time_step          # (m,)
-        fitted    = (intercepts[:, [t]]
-                     + rates_raw[:, [t]] * xloc[np.newaxis, :]) # (n_pairs, m)
-        residuals = H[:, l:r] - fitted                          # (n_pairs, m)
-        s_hat     = np.sqrt(np.sum(residuals**2, axis=1) / (m - 2))
-        se[:, t]  = s_hat * se_scale[t]
+    missing = set(file_basenames) - set(coverage_df.columns)
+    if missing:
+        raise ValueError(f"coverage_df is missing columns for files: {missing}")
 
-    # Clip and mask
-    rates = rates_raw.copy()
-    # rates[rates < min_rate] = 0
-    rates = rates[:, t_min:t_max]
-    se = se[:, t_min:t_max]
+    # Align coverage_df columns to the order of discovered files
+    coverage_df = coverage_df[file_basenames]
+    coverage_vals = coverage_df.values  # (n_pairs, n_files)
 
-    rates_df = pd.DataFrame(rates, columns=times[t_min:t_max], index=pdf_df.index)
-    se_df    = pd.DataFrame(se,    columns=times[t_min:t_max], index=pdf_df.index)
-    return rates_df, se_df
+    if subsample_size > n_files:
+        raise ValueError(
+            f"subsample_size={subsample_size} exceeds the number of available count files ({n_files})."
+        )
+
+    # Load all count files once into a (n_files, n_pairs, n_T) array
+    print("Loading all bootstrap count files into memory …")
+    n_pairs = len(pdf_df)
+    all_counts = np.zeros((n_files, n_pairs, n_T))
+    for i, fname in enumerate(tqdm(available_files, desc="Loading count files")):
+        all_counts[i] = pd.read_parquet(os.path.join(bootstrap_dir, fname)).values
+
+    replicate_rates = np.zeros((n_replicates, n_pairs, n_T))
+
+    for rep in tqdm(range(n_replicates), desc="Bootstrap replicates"):
+        sampled_idxs = np.random.choice(n_files, size=subsample_size, replace=False)
+
+        # Sum counts and coverage for sampled files
+        counts_sum = all_counts[sampled_idxs].sum(axis=0)          # (n_pairs, n_T)
+        total_len  = coverage_vals[:, sampled_idxs].sum(axis=1)     # (n_pairs,)
+
+        with np.errstate(invalid="ignore"):
+            pdf_rep = counts_sum / total_len[:, np.newaxis]
+
+        # Survival → cumulative hazard → rates
+        survival_rep = 1 - np.cumsum(pdf_rep, axis=1)
+        H_rep = -np.log(survival_rep.clip(1e-10))
+        replicate_rates[rep] = H_rep @ S.T
+
+    # SE = std across replicates
+    se = np.std(replicate_rates, axis=0)   # (n_pairs, n_T)
+
+    return pd.DataFrame(se, columns=times, index=pdf_df.index)
 #%%
 # def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_timepoints, time_step):
 #     # -------------------------
