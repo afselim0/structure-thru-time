@@ -10,8 +10,29 @@
     
 - **Finalyzing Empirical Analyses**
     - Preparing datasets [medium]
-        - Reinfer Wohns with tsinfer+tsdate
-        - Reinfer Chimps with tsinfer+tsdate
+        - Reinfer Wohns with SINGER
+        - Developing the protocol* 
+            - QC'ing the pipeline:
+                - ***Reviewing VCF filtering - all-sites VCF / gVCF needed / how do those assumptions work?  [ Ahmed ]     
+                    - e.g. check Wohn's procedure / SINGER procedures / etc     
+                - A filter on initial round of tsinfer/tsdate outputs for outlier regions that post hoc appear they should have been filtered out 
+                    - Inspect dist'n -- Flag top .001% and 99.99%-ile of sites according to TMRCA - remove 1 Mb [ Ahmed /Carla / James ]
+                - Reviewing choices/options for recombination rate and mu/rho
+                    - For tsdate/tsinfer - minimal mutation rate; also recomb rate [ Ahmed / Carla ]
+                    - For SINGER - 
+                - Compare VCF-based SFS vs SFS implied by the ts branch lengths [ James / Marida ]
+                - Read RILab pipelines and annotate best practices to adopt here [ Everyone - Ahmed ]
+            - Known issues:
+                - Split at centromeres (may require looking in annotations)
+                - Trim telomeric regions more aggressive (1Mb and 2Mb datasets)
+            - Ideal progress and timeline:  Quick turnaround to some fresh VCFs asap       
+        - Chimp
+            -***Going back to deManuel paper to recalibrate our expectations what we should see 
+        - Elephant*
+            - 
+        - Infer HPRC trees
+
+
 
 # Minor Tasks
 - Add an option of multiple outputs from diff inits
