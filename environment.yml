@@ -41,3 +41,4 @@ dependencies:
     - trame-vuetify
     - nest_asyncio2
     - dash
+    - cvxpy
