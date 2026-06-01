@@ -9,8 +9,8 @@ Loss and gradient can be computed for:
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
 
-GTOL_TIMEPOINT     = 1e-12
-FTOL_TIMEPOINT     = 1e-12
+GTOL_TIMEPOINT     = 1e-16
+FTOL_TIMEPOINT     = 1e-16
 MAX_ITER_TIMEPOINT = 6000
 
 GTOL_SAMPLE        = 1e-16
@@ -243,12 +243,12 @@ def optimize_timepoint(X_t_init, R_t, W_t, N_min, N_max,
     """
     # Initialize with the MDS solution
     n_components = X_t_init.shape[1]
-    D = compute_f_inverse(R_t + 1/N_max, N_min)
-    D[np.isnan(D)] = 0
-    X_MDS,_ = smacof(D, init=X_t_init, n_components=n_components, n_init = 1)
+    # D = compute_f_inverse(R_t + 1/N_max, N_min)
+    # D[np.isnan(D)] = 0
+    # X_MDS,_ = smacof(D, init=X_t_init, n_components=n_components, n_init = 1)
     result = minimize(
         compute_loss_gradient_timepoint,
-        X_MDS.ravel(),
+        X_t_init.ravel(),
         args=(R_t, W_t, N_min, N_max),
         method='L-BFGS-B',
         jac=True,
@@ -286,7 +286,7 @@ def coordinate_descent_over_time(
     Returns:
         tuple: (X, loss_df)
     """
-    print(ftol)
+    print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
     n_samples, _, n_timepoints = R.shape
 
     if W is None:
