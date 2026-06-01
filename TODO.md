@@ -1,55 +1,30 @@
-# outputs / workflow engineering
-- Ready to run
-    - Debugging what's gone awry with latest chimp analyses relative to the summer 2025 embeddings
+# General Tasks
+- **Smoothing the Embeddings**
+- **Performance Evaluation**
+- **Finalize Empirical Analyses**
 
+# Specific Tasks
+- **Smoothing the Embeddings**
 
-- Finalize performance evaluation
-    - reconstructed rates vs input rates
-    - reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations)
-        - d=2, d=10
-    - Special: Do admixed individuals pull their sources too much?
-
-    - visualizing performance
-        - text and colors to denote residuals
-        - interactive dash?
-
-- Resolve which ARG inference we want to use
-    - Finish SINGER testing on simulation
-
-- Finalizing Empirical Analyses
-    - Finalize strategy of inference
-        - ARG inference across ~2500 1 Mb spans
-    - Preparing Datasets
-        - reinfer Wohns with SINGER?
-        - reinfer Chimps with if necessary?
-        - reinfer HPRC
-
-- Revise Wohns/HPRC and Chimp analsyes
-    - Preparing the "many loci" approach (500 loci 1 Mb? - 500kb?) and reinfer [Haoyang]
+- **Performance Evaluation**
     
-- Revised set of preliminary figures 
-- including scripts to help with 2-D plots alongside 3d plots
-- For manuscript - template figure in the latex 
-- In the working directories - several figure outputs;     
+- **Finalyzing Empirical Analyses**
+    - Preparing datasets [medium]
+        - Reinfer Wohns with tsinfer+tsdate
+        - Reinfer Chimps with tsinfer+tsdate
 
-- Set up to show multiple solutions for same data (HT Amy G) [ Ahmed ]
-
-
-- Turn attention to the local admixture problem 
-
-
-
-Minor:
+# Minor Tasks
+- Add an option of multiple outputs from diff inits
+- Embeddings for individuals rather than haplotypes [high]
 - Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
-- Set up syncronization so that overleaf has access to fig outputs directory(ies)
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
 - Outputs to log files... 
-- Static figures cannot be saved on cluster
 
-
-To Discuss:
+# Discussion Points
+- 5/14 Should we make the exponention power k/p a command-line parameter?
+- 5/14 We've been agonizing about percieved structure in panmictic periods and smoothing -- but if we sample over uncertainty - some of that apparent structure/disconuities may be more directly interpretable as minor
 - 1/26 Next paper or a small last section - use embedding to re-estimate rates and show an improvement over the raw rates
 - 1/26 Show multiple solutions for same data (HT Amy G)
 
@@ -72,16 +47,25 @@ To Discuss:
 structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.html
 - 1/18 Where are the empirical outputs... let's be sure to keep example runs
 
-# Misc:
-### Moot discussion points
 
-- 1/18 JN : Didn't accomplish too much except to realize how fussy plotly static export is!  Static figures are improved somewhat; 2 camera outputs; and figure scraper is set up; see note above about need to step up and link in Luke's code  
-- 1/18 Snakemake stalls oddly on split.yaml - not sure why - some kind of lock or sync issue
-- 1/18 Realizing I don't know how to launch a job on cluster that will run in a particular conda environment - add source activate line to bash script that call snakemake
-- 1/18 About an 1hr 20 min to do all deme examples from scratch with FP=1 on laptop!
+## Archive
+#### Done
+- DONE Determine a standard level of smoothing given standard error of rate estimates
+- DONE Add necessary parameters and changes to snakemake
+    - A basic unsmoothed output
+    - An output with the standard level of smoothing
+    - Any additional outputs for additionally specified smoothing parameters
 
-
-### Done
+- DONE Special: Do admixed individuals pull their sources too much? [medium]
+- DONE reconstructed rates vs true rates vs vanilla rate estimator from ARGs (simulations) [high]
+    - d=2, d=10, d=n-1
+    - True rates (from model) vs reconstructed rates or vanilla from our rate estimate
+- DONE Understanding the pulses in reconstruction error of complex 4 pop (does it go away by just increasing maximum window size?)
+- DONE Sanity check the error in reconstructed rates with a constant pop
+- DONE Look more into highlighting outliers
+- DONE track loss function 
+- DONE Implement a forward backward pass with no explicit smoother
+- DONE What's going on with split + tsinfer - it was an issue of ylimit on the plot 
 - DONE Parent directories in /project/jnovembre to keep track of results
 
 - DONE 2-D plots wuold help (also for showing admixture) (HT Amy G)
@@ -104,12 +88,17 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - DONE Adding option for Singer vs tsinfer/tsdate, and relate [ Ahmed ]
     - add to simulation pipeline
 - DONE Master snakefile for running both simulations and empirical results
+- DONE Finish SINGER inference on simulated data
+- DONE Add the sample-based coordinate descent to the LatentSpaceEmbeddings.py script 
+- Done Rerun chimps asap to identify what's gone awry since the 2025 set of results 
+- DONE reconstructed rates vs input rates [high]
+- DONE **Finalize choice of ARG inference method: Use tsinfer + new tsdate**
+    - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
+    - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
+    - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
+    - Follow up with Yan about new tsinfer/tsdate + new Wohns data
 
-
-
-### Miscellnaeous archived notes
-
-
+### Archived discussion points
 - Wohns et al and Chimp et al for UCLA talk 
     - PAUSED same large chrom, chimps and humans, singer relate  [Chimp takes too long to run]
         - choose a syntenic hom chrom
