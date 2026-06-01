@@ -53,12 +53,13 @@ class LatentSpaceEmbeddings:
             R[j, i, :] = r
             if se_df is not None:
                 se = se_df.loc[(s1, s2)].values
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    w = np.where(
-                        r > 0,
-                        r / se ** 2,     # Poisson-motivated: λ/σ² = effective exposure
-                        1.0 / se ** 2    # r=0 fallback: pure precision; se=0 → inf → capped
-                    )
+                w = (r+1/self.N_max) / se ** 2
+                # with np.errstate(divide='ignore', invalid='ignore'):
+                #     w = np.where(
+                #         r > 0,
+                #         r / se ** 2,     # Poisson-motivated: λ/σ² = effective exposure
+                #         1.0 / se ** 2    # r=0 fallback: pure precision; se=0 → inf → capped
+                #     )
                 W[i, j, :] = w
                 W[j, i, :] = w
             else:
