@@ -1,47 +1,43 @@
 # General Tasks
-- **Smoothing the Embeddings**
-- **Performance Evaluation**
-- **Finalize Empirical Analyses**
+- **QC'ing tree inference pipeline**
+- **Preparing trees for empirical analysis**
+- **Empirical Runs and issues**
 
-# Specific Tasks
-- **Smoothing the Embeddings**
-
-- **Performance Evaluation**
-    
-- **Finalyzing Empirical Analyses**
+# Specific Tasks    
+- **QC'ing tree inference pipeline**
+    - ***Reviewing VCF filtering - all-sites VCF / gVCF needed / how do those assumptions work?  [ Ahmed ]     
+        - e.g. check Wohn's procedure / SINGER procedures / etc     
+    - A filter on initial round of tsinfer/tsdate outputs for outlier regions that post hoc appear they should have been filtered out 
+        - Inspect dist'n -- Flag top .001% and 99.99%-ile of sites according to TMRCA - remove 1 Mb [ Ahmed /Carla / James ]
+    - Reviewing choices/options for recombination rate and mu/rho
+        - For tsdate/tsinfer - minimal mutation rate; also recomb rate [ Ahmed / Carla ]
+        - For SINGER - 
+    - Compare VCF-based SFS vs SFS implied by the ts branch lengths [ James / Marida ]
+    - Read RILab pipelines and annotate best practices to adopt here [ Everyone - Ahmed ]
+    - Known issues:
+    - Split at centromeres (may require looking in annotations)
+    - Trim telomeric regions more aggressive (1Mb and 2Mb datasets)
+    - Ideal progress and timeline:  Quick turnaround to some fresh VCFs asap     
+- **Preparing trees for empirical analysis**
     - Preparing datasets [medium]
-        - Reinfer Wohns with SINGER
-        - Developing the protocol* 
-            - QC'ing the pipeline:
-                - ***Reviewing VCF filtering - all-sites VCF / gVCF needed / how do those assumptions work?  [ Ahmed ]     
-                    - e.g. check Wohn's procedure / SINGER procedures / etc     
-                - A filter on initial round of tsinfer/tsdate outputs for outlier regions that post hoc appear they should have been filtered out 
-                    - Inspect dist'n -- Flag top .001% and 99.99%-ile of sites according to TMRCA - remove 1 Mb [ Ahmed /Carla / James ]
-                - Reviewing choices/options for recombination rate and mu/rho
-                    - For tsdate/tsinfer - minimal mutation rate; also recomb rate [ Ahmed / Carla ]
-                    - For SINGER - 
-                - Compare VCF-based SFS vs SFS implied by the ts branch lengths [ James / Marida ]
-                - Read RILab pipelines and annotate best practices to adopt here [ Everyone - Ahmed ]
-            - Known issues:
-                - Split at centromeres (may require looking in annotations)
-                - Trim telomeric regions more aggressive (1Mb and 2Mb datasets)
-            - Ideal progress and timeline:  Quick turnaround to some fresh VCFs asap       
-        - Chimp
-            -***Going back to deManuel paper to recalibrate our expectations what we should see 
-        - Elephant*
-            - 
-        - Infer HPRC trees
+        - Wohns   
+        - Chimps
+            - ***Going back to deManuel paper to recalibrate our expectations what we should see 
+        - Elephants
 
+- **Empirical Runs and issues**
+    - Wohns
+    - Chimps
+    - Elephants
 
 
 # Minor Tasks
-- Add an option of multiple outputs from diff inits
 - Embeddings for individuals rather than haplotypes [high]
-- Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
 - Elaborating the snakefile for manuscript figure generation: In Figures/snakefile
     - Rule to make the single pop fig as a template for other figures
 - One or several "clean"-type rules in the snakemake that remove intermediate files that take up space and are quickly regenerated
-- Outputs to log files... 
+- Add an option of multiple outputs from diff inits
+
 
 # Discussion Points
 - 5/14 Should we make the exponention power k/p a command-line parameter?
@@ -71,6 +67,8 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 
 ## Archive
 #### Done
+- DONE Add outputs for diagnostics to embedding script - csv - # of iterative steps per time t; loss function value achieved per time t;   
+- DONE Outputs to log files... (loss function updates are not outputs)
 - DONE Determine a standard level of smoothing given standard error of rate estimates
 - DONE Add necessary parameters and changes to snakemake
     - A basic unsmoothed output
@@ -118,6 +116,7 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
     - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
     - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
     - Follow up with Yan about new tsinfer/tsdate + new Wohns data
+
 
 ### Archived discussion points
 - Wohns et al and Chimp et al for UCLA talk 
