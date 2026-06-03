@@ -15,8 +15,8 @@
     - Compare VCF-based SFS vs SFS implied by the ts branch lengths [ James / Marida ]
     - Read RILab pipelines and annotate best practices to adopt here [ Everyone - Ahmed ]
     - Known issues:
-    - Split at centromeres (may require looking in annotations)
-    - Trim telomeric regions more aggressive (1Mb and 2Mb datasets)
+        - Split at centromeres (may require looking in annotations)
+        - Trim telomeric regions more aggressive (1Mb and 2Mb datasets)
     - Ideal progress and timeline:  Quick turnaround to some fresh VCFs asap     
 - **Preparing trees for empirical analysis**
     - Preparing datasets [medium]
