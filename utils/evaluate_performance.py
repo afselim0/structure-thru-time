@@ -43,8 +43,8 @@ def compute_distance_df(embeddings, id_label="sample_id"):
 
     return D_df
 
-def reconstruct_rates(D_df, N_min):
-    reconstructed_rates,_ = compute_f(D_df, N_min)
+def reconstruct_rates(D_df, N_min, link_function="inverse_distance"):
+    reconstructed_rates,_ = compute_f(D_df, N_min, link=link_function)
     return reconstructed_rates
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
@@ -327,6 +327,7 @@ def main():
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
     argparser.add_argument("--N_max", type=float, default=None, help="N_max used to compute embeddings")
+    argparser.add_argument("--link_function", type=str, default="inverse_distance", help="Link function type used to compute embeddings")
     argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--data_output_name", type=str, required=True, help="Name of the output file")
@@ -356,7 +357,7 @@ def main():
             raise ValueError("Either --embeddings or --reconstructed_rates must be provided")
         embeddings = pd.read_parquet(args.embeddings)
         D_df = compute_distance_df(embeddings, id_label=id_label)
-        reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
+        reconstructed_rates = reconstruct_rates(D_df, N_min=N_min, link_function=args.link_function)
         reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     # Align to common timepoints (embeddings may have been subsampled)
