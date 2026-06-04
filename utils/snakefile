@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from itertools import combinations
 def read_config(parameter, default, params = config):
     return config[parameter] if parameter in params else default
 
@@ -39,6 +40,7 @@ n_timepoints                      = read_config("n_timepoints", default = max_ti
 # STT Parameters 
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
+link_function                     = read_config("link_function", default = "inverse_distance")
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
@@ -59,11 +61,25 @@ n_samples_per_pop                 = read_config("n_samples_per_pop", -1)
 pop_colors                        = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
 pop_labels                        = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
 
+# Replicate optimization seeds (optional; used only by compute_embeddings_replicates rule)
+seeds                             = read_config("seeds", default = [])
+
+# Parameter label for plot titles (optional — pass to --param_label in plotting rules)
+_l1_str = f" | l1={l1_penalties}" if l1_penalties != "None" else ""
+_l2_str = f" | l2={l2_penalties}" if l2_penalties != "None" else ""
+param_label = (
+    f"n={n_samples_per_pop}/pop | "
+    f"N=[{N_min}, {N_max}] | "
+    f"link={link_function} | "
+    f"window size=[{min_window_size}, {max_window_size}]"
+    f"{_l1_str}{_l2_str}"
+)
+
 # Filename Tags
 SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
-STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link_function}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
 
@@ -85,6 +101,7 @@ infer_trees_script                = "infer_trees.py"
 compute_pdf_wrapper_script        = "compute_pdf.py"
 compute_rates_wrapper_script      = "compute_rates.py"
 plot_rates_script                 = "plot_rates.py"
+plot_relative_div_script          = "plot_relative_div.py"
 compute_embeddings_wrapper_script      = "compute_embeddings.py"
 plot_embeddings_wrapper_script         = "plot_embeddings.py"
 plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
@@ -125,6 +142,8 @@ trees_ready                       = os.path.join(trees_dir, trees_ready)
 pdf_data_file_name                = f"coal_pdf{PDF_TAG}.parquet"
 rates_data_file_name              = f"rates{RATES_TAG}.parquet"
 rates_plot_file_name              = f"rates{RATES_TAG}.png"
+relative_div_plot_file_name       = f"relative_div{RATES_TAG}.png"
+relative_div_plot_summary_file_name = f"relative_div{RATES_TAG}_summary.png"
 
 embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
 embeddings_plot_file_name         = f"embeddings{PLOT_TAG}.html"
@@ -151,6 +170,8 @@ infer_finished                    = os.path.join(tree_output_path, infer_finishe
 pdf_data                          = os.path.join(data_output_path, pdf_data_file_name)
 rates_data                        = os.path.join(data_output_path, rates_data_file_name)
 rates_plot                        = os.path.join(plot_output_path, rates_plot_file_name)
+relative_div_plot                 = os.path.join(plot_output_path, relative_div_plot_file_name)
+relative_div_plot_summary         = os.path.join(plot_output_path, relative_div_plot_summary_file_name)
 
 embeddings_data                   = os.path.join(data_output_path, embeddings_data_file_name)
 embeddings_plot                   = os.path.join(plot_output_path, embeddings_plot_file_name)
@@ -163,6 +184,27 @@ dash_launch_true                  = os.path.join(plot_output_path, dash_launch_t
 
 combs_data_dir                    = os.path.join(output_path, "combs/data")
 combs_plot_dir                    = os.path.join(output_path, "combs/plots")
+
+# Replicate embeddings file names (one per seed)
+embeddings_replicate_data         = [os.path.join(data_output_path, f"embeddings_seed{s}{STT_TAG}.parquet") for s in seeds]
+replicates_panel_file_name             = f"replicates_panel{PLOT_TAG}.png"
+replicates_panel                       = os.path.join(plot_output_path, replicates_panel_file_name)
+replicates_2d_slice_file_name          = f"replicates_2d_slice{PLOT_TAG}.png"
+replicates_2d_slice                    = os.path.join(plot_output_path, replicates_2d_slice_file_name)
+replicates_ggpairs_file_name           = f"replicates_ggpairs{PLOT_TAG}.png"
+replicates_ggpairs                     = os.path.join(plot_output_path, replicates_ggpairs_file_name)
+replicates_performance_panel_file_name = f"replicates_performance_panel{PLOT_TAG}.png"
+replicates_performance_panel           = os.path.join(plot_output_path, replicates_performance_panel_file_name)
+
+# Pairwise rates comparison plots between replicates (all ordered pairs i < j)
+replicate_comparison_plots        = [
+    f
+    for sa, sb in combinations(seeds, 2)
+    for f in [
+        os.path.join(plot_output_path, f"rates_comparison_seed{sa}_vs_seed{sb}{PLOT_TAG}.png"),
+        os.path.join(plot_output_path, f"rates_comparison_seed{sa}_vs_seed{sb}{PLOT_TAG}.html"),
+    ]
+]
 
 if trees_dir != tree_output_path and not os.path.exists(trees_ready): # In the case of using trees inferred from empirical data, create the trees ready file
     Path(trees_ready).touch()
@@ -181,6 +223,7 @@ sim_targets = [
 STT_targets = [
     pdf_data,
     rates_data, rates_plot,
+    relative_div_plot, relative_div_plot_summary,
     embeddings_data, embeddings_plot,
     performance_plot, performance_data, performance_interactive,
     dash_launch,
@@ -193,6 +236,14 @@ true_targets = [
     performance_true_data, performance_true_plot, performance_true_interactive,
     dash_launch_true,
     ]
+
+replicates_targets = ([rates_data]
+                      + embeddings_replicate_data
+                      + ([replicates_panel]                  if seeds else [])
+                      + ([replicates_2d_slice]               if seeds else [])
+                      + ([replicates_ggpairs]                if len(seeds) > 1 else [])
+                      + ([replicates_performance_panel]      if seeds else [])
+                      + replicate_comparison_plots)
 
 # =====================================================
 # General Rules
@@ -213,6 +264,10 @@ rule STT: # Run STT
 # Compute true rates, embeddings, and performance without simulating trees
 rule STT_true:
     input: true_targets
+
+# Run multiple replicate optimizations with different seeds (rates computed once)
+rule STT_replicates:
+    input: replicates_targets
 
 # =====================================================
 # Specific Rules
@@ -341,7 +396,8 @@ rule compute_embeddings_true:
         N_min = N_min,
         N_max = N_max,
         n_components = n_components,
-        n_timepoints_emb = n_timepoints_emb
+        n_timepoints_emb = n_timepoints_emb,
+        link_function = link_function
     shell:
         """
         mkdir -p {params.outdir}
@@ -352,7 +408,8 @@ rule compute_embeddings_true:
             --N_min {params.N_min} \
             --N_max {params.N_max} \
             --n_components {params.n_components} \
-            --n_timepoints_emb {params.n_timepoints_emb}
+            --n_timepoints_emb {params.n_timepoints_emb} \
+            --link_function {params.link_function}
         """
 
 rule plot_embeddings_true:
@@ -419,10 +476,11 @@ rule evaluate_performance_true:
     params:
         N_min = N_min,
         N_max = N_max,
+        link_function = link_function,
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
         data_output_name = performance_true_file_name,
-        plot_output_name = performance_true_plot_file_name, 
+        plot_output_name = performance_true_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale
@@ -433,6 +491,7 @@ rule evaluate_performance_true:
             --rates {input.rates} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
+            --link_function {params.link_function} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --data_output_path {params.data_output_path} \
@@ -597,6 +656,32 @@ rule plot_rates:
             --output_name {params.output_name} \
             --time_scale {params.time_scale}
         """
+rule plot_relative_div:
+    input:
+        rates = rates_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_relative_div_script
+    output:
+        relative_div_plot,
+        relative_div_plot_summary
+    params:
+        outdir = plot_output_path,
+        output_name = relative_div_plot_file_name,
+        min_time = min_time,
+        time_scale = time_scale
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --min_time {params.min_time} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --time_scale {params.time_scale}
+        """
 # ______________________STT Rules_________________________
 rule compute_embeddings:
     input:
@@ -609,6 +694,7 @@ rule compute_embeddings:
     params:
         N_min = N_min,
         N_max = N_max,
+        link_function = link_function,
         l1_penalties = l1_penalties,
         l2_penalties = l2_penalties,
         outdir = data_output_path,
@@ -625,6 +711,7 @@ rule compute_embeddings:
             --output_name {params.output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
+            --link_function {params.link_function} \
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
@@ -651,6 +738,7 @@ rule plot_embeddings:
         N_max = N_max,
         rates_path = rates_data,
         reconstructed_rates_path = performance_data,
+        param_label = param_label,
     shell:
         """
         mkdir -p {params.outdir}
@@ -663,7 +751,8 @@ rule plot_embeddings:
             --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --param_label "{params.param_label}"
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
 # Run from the utils/ directory
@@ -725,10 +814,11 @@ rule evaluate_performance:
     params:
         N_min = N_min,
         N_max = N_max,
+        link_function = link_function,
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
         data_output_name = performance_data_file_name,
-        plot_output_name = performance_plot_file_name, 
+        plot_output_name = performance_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale
@@ -739,6 +829,7 @@ rule evaluate_performance:
             --rates {input.rates} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
+            --link_function {params.link_function} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --data_output_path {params.data_output_path} \
@@ -773,4 +864,210 @@ rule STT_pop_combs:
             --pop_colors {input.pop_colors} \
             --rates_file {input.rates} \
             --N0 {params.N0}
+        """
+
+# ______________________replicate Rules______________________
+rule compute_embeddings_replicate:
+    input:
+        rates = rates_data,
+        script = compute_embeddings_wrapper_script,
+        main_script = COMPUTE_EMBEDDINGS_SCRIPT,
+        support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
+    output:
+        os.path.join(data_output_path, "embeddings_seed{seed}" + STT_TAG + ".parquet")
+    params:
+        N_min = N_min,
+        N_max = N_max,
+        link_function = link_function,
+        l1_penalties = l1_penalties,
+        l2_penalties = l2_penalties,
+        outdir = data_output_path,
+        n_components = n_components,
+        n_timepoints_emb = n_timepoints_emb,
+        pop_labels = pop_labels,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --output_path {params.outdir} \
+            --output_name embeddings_seed{wildcards.seed}{STT_TAG}.parquet \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --link_function {params.link_function} \
+            --l1_penalties {params.l1_penalties} \
+            --l2_penalties {params.l2_penalties} \
+            --n_components {params.n_components} \
+            --n_timepoints_emb {params.n_timepoints_emb} \
+            --pop_labels {params.pop_labels} \
+            --seed {wildcards.seed}
+        """
+
+rule plot_embeddings_replicates:
+    input:
+        embeddings = embeddings_replicate_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = "plot_embeddings_replicates.py"
+    output:
+        replicates_panel
+    params:
+        seeds = " ".join(str(s) for s in seeds),
+        outdir = plot_output_path,
+        output_name = replicates_panel_file_name,
+        min_time = min_time,
+        embeddings_max_time = embeddings_max_time,
+        embeddings_plot_lims = embeddings_plot_lims,
+        time_scale = time_scale,
+        param_label = param_label,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --inputs {input.embeddings} \
+            --seeds {params.seeds} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --lims {params.embeddings_plot_lims} \
+            --time_scale {params.time_scale} \
+            --param_label "{params.param_label}"
+        """
+
+rule plot_replicate_rates_comparison:
+    input:
+        emb_a  = os.path.join(data_output_path, "embeddings_seed{seed_a}" + STT_TAG + ".parquet"),
+        emb_b  = os.path.join(data_output_path, "embeddings_seed{seed_b}" + STT_TAG + ".parquet"),
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = "plot_replicate_rates_comparison.py"
+    output:
+        png  = os.path.join(plot_output_path, "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".png"),
+        html = os.path.join(plot_output_path, "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".html"),
+    params:
+        outdir           = plot_output_path,
+        output_name      = "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".png",
+        output_name_html = "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".html",
+        N_min            = N_min,
+        N_max            = N_max,
+        link_function    = link_function,
+        param_label      = param_label,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input_a {input.emb_a} \
+            --input_b {input.emb_b} \
+            --seed_a "seed {wildcards.seed_a}" \
+            --seed_b "seed {wildcards.seed_b}" \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --link_function {params.link_function} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --output_name_html {params.output_name_html} \
+            --param_label "{params.param_label}"
+        """
+
+rule plot_replicate_rates_ggpairs:
+    input:
+        embeddings = embeddings_replicate_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script     = "plot_replicate_rates_ggpairs.py"
+    output:
+        replicates_ggpairs
+    params:
+        seeds       = " ".join(str(s) for s in seeds),
+        outdir      = plot_output_path,
+        output_name = replicates_ggpairs_file_name,
+        N_min       = N_min,
+        N_max       = N_max,
+        link_function = link_function,
+        param_label = param_label,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --inputs {input.embeddings} \
+            --seeds {params.seeds} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --link_function {params.link_function} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --param_label "{params.param_label}"
+        """
+
+rule plot_2d_slice_replicates:
+    input:
+        embeddings = embeddings_replicate_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script     = "plot_2d_slice_replicates.py"
+    output:
+        replicates_2d_slice
+    params:
+        seeds       = " ".join(str(s) for s in seeds),
+        outdir      = plot_output_path,
+        output_name = replicates_2d_slice_file_name,
+        min_time    = min_time,
+        embeddings_max_time  = embeddings_max_time,
+        embeddings_plot_lims = embeddings_plot_lims,
+        param_label = param_label,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --inputs {input.embeddings} \
+            --seeds {params.seeds} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --lims {params.embeddings_plot_lims} \
+            --param_label "{params.param_label}"
+        """
+
+rule plot_performance_replicates:
+    input:
+        embeddings = embeddings_replicate_data,
+        rates      = rates_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script     = "plot_performance_replicates.py"
+    output:
+        replicates_performance_panel
+    params:
+        seeds         = " ".join(str(s) for s in seeds),
+        outdir        = plot_output_path,
+        output_name   = replicates_performance_panel_file_name,
+        N_min         = N_min,
+        N_max         = N_max,
+        link_function = link_function,
+        param_label   = param_label,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --inputs {input.embeddings} \
+            --seeds {params.seeds} \
+            --rates {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --N_min {params.N_min} \
+            --N_max {params.N_max} \
+            --link_function {params.link_function} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --param_label "{params.param_label}"
         """

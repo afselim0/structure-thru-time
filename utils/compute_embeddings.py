@@ -17,13 +17,15 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
+    parser.add_argument("--link_function", type=str, default="inverse_distance", help="Link function type: inverse_distance, inverse_sq_distance, or exponential")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
     parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
-    
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility. None (default) leaves numpy's state unseeded.")
+
     args = parser.parse_args()
     input = args.input
     output_path = args.output_path
@@ -81,8 +83,12 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties, link_function=args.link_function)
     X_init = None
+
+    if args.seed is not None:
+        np.random.seed(args.seed)
+        print(f"Random seed set to {args.seed}")
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
     X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init)

@@ -15,7 +15,8 @@ class LatentSpaceEmbeddings:
                  n_components:          int          = 2,
                  l1_strengths:         dict         = None,
                  l2_strengths:         dict         = None,
-                 weight_cap_percentile: float        = .95):
+                 weight_cap_percentile: float        = .95,
+                 link_function:         str          = "inverse_distance"):
 
         rates_df.columns = rates_df.columns.astype(float)
 
@@ -30,6 +31,7 @@ class LatentSpaceEmbeddings:
         self.delta_t         = self.time_points[1] - self.time_points[0]
         self.N_min           = N_min
         self.N_max           = N_max
+        self.link_function   = link_function
 
         # --- Sample times ---
         if sample_times is None:
@@ -206,7 +208,7 @@ class LatentSpaceEmbeddings:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
         # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time)#, ftol=ftol_t)
+        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, link = self.link_function)#, ftol=ftol_t)
         # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
@@ -215,7 +217,7 @@ class LatentSpaceEmbeddings:
 
     def compute_embeddings_sample_coordinate_descent(self, X_init = None, n_epochs = 1):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)
+        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs, link=self.link_function)
         # X = procrustes_alignment(X)
         self.embeddings = X
         return X, loss_df
@@ -223,7 +225,7 @@ class LatentSpaceEmbeddings:
     def compute_embeddings_jointly(self, X_init=None, precision=1e-5):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
         ftol = precision * min(self.saturated_loss, 1.0)
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, ftol=ftol)
+        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, self.smoothing_params, self.sampled_by_time, ftol=ftol, link=self.link_function)
         self.embeddings = X
         X = procrustes_alignment(X)
         return X, loss_df
