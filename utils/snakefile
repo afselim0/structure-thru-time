@@ -35,6 +35,7 @@ min_window_size                   = read_config("min_window_size", default = 50)
 max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
+phased                            = read_config("phased", default = "False") # If "False", coalescent rates (and embeddings, plots) are per-individual rather than per-haplotype
 
 # STT Parameters 
 N_min                             = read_config("N_min", default = 1)
@@ -189,9 +190,9 @@ STT_targets = [
 true_targets = [
     pop_labels, pop_colors,
     rates_true, rates_true_plot,
-    embeddings_true, embeddings_true_plot,
-    performance_true_data, performance_true_plot, performance_true_interactive,
-    dash_launch_true,
+    # embeddings_true, embeddings_true_plot,
+    # performance_true_data, performance_true_plot, performance_true_interactive,
+    # dash_launch_true,
     ]
 
 # =====================================================
@@ -271,7 +272,8 @@ rule run_pca:
         pca_plot
     params:
         outdir = plot_output_path,
-        n_per_pop = n_sim_per_pop
+        n_per_pop = n_sim_per_pop,
+        phased = phased
     shell:
         """
         python {input.script} \
@@ -279,7 +281,8 @@ rule run_pca:
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --n {params.n_per_pop}
+            --n {params.n_per_pop} \
+            --phased {params.phased}
         """
 
 rule compute_rates_true:
@@ -291,7 +294,8 @@ rule compute_rates_true:
         rates_true
     params:
         outdir = data_output_path,
-        max_time = max_time
+        max_time = max_time,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -299,7 +303,8 @@ rule compute_rates_true:
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
             --max_time {params.max_time} \
-            --labels {input.pop_labels}
+            --labels {input.pop_labels} \
+            --phased {params.phased}
         """
 rule plot_rates_true:
     input:
@@ -314,7 +319,8 @@ rule plot_rates_true:
         output_name = rates_true_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
-        time_scale = time_scale
+        time_scale = time_scale,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -326,7 +332,8 @@ rule plot_rates_true:
             --max_rate_plot {params.max_rate_plot} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         """
 rule compute_embeddings_true:
     input:
@@ -341,7 +348,8 @@ rule compute_embeddings_true:
         N_min = N_min,
         N_max = N_max,
         n_components = n_components,
-        n_timepoints_emb = n_timepoints_emb
+        n_timepoints_emb = n_timepoints_emb,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -352,7 +360,8 @@ rule compute_embeddings_true:
             --N_min {params.N_min} \
             --N_max {params.N_max} \
             --n_components {params.n_components} \
-            --n_timepoints_emb {params.n_timepoints_emb}
+            --n_timepoints_emb {params.n_timepoints_emb} \
+            --phased {params.phased}
         """
 
 rule plot_embeddings_true:
@@ -375,6 +384,7 @@ rule plot_embeddings_true:
         N_max = N_max,
         rates_path = rates_true,
         reconstructed_rates_path = performance_true_data,
+        phased = phased,
     shell:
         """
         mkdir -p {params.outdir}
@@ -387,7 +397,8 @@ rule plot_embeddings_true:
             --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
 # Run from the utils/ directory
@@ -422,10 +433,11 @@ rule evaluate_performance_true:
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
         data_output_name = performance_true_file_name,
-        plot_output_name = performance_true_plot_file_name, 
+        plot_output_name = performance_true_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
-        time_scale = time_scale
+        time_scale = time_scale,
+        phased = phased
     shell:
         """
         python {input.script} \
@@ -441,7 +453,8 @@ rule evaluate_performance_true:
             --plot_output_name {params.plot_output_name} \
             --min_time {params.min_time} \
             --max_rate_plot {params.max_rate_plot} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         """
 
 rule simulate_trees:
@@ -550,6 +563,7 @@ rule compute_pdf:
 rule compute_rates:
     input:
         pdf_data = pdf_data,
+        pop_labels = pop_labels,
         script = compute_rates_wrapper_script,
         main_script = COMPUTE_RATES_SCRIPT
     output:
@@ -558,7 +572,8 @@ rule compute_rates:
         outdir = data_output_path,
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
-        max_window_size = max_window_size
+        max_window_size = max_window_size,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -567,7 +582,9 @@ rule compute_rates:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --minimum_window_size {params.min_window_size} \
-            --maximum_window_size {params.max_window_size}
+            --maximum_window_size {params.max_window_size} \
+            --pop_labels {input.pop_labels} \
+            --phased {params.phased}
         """
 
 rule plot_rates:
@@ -583,7 +600,8 @@ rule plot_rates:
         output_name = rates_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
-        time_scale = time_scale
+        time_scale = time_scale,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -595,7 +613,8 @@ rule plot_rates:
             --max_rate_plot {params.max_rate_plot} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         """
 # ______________________STT Rules_________________________
 rule compute_embeddings:
@@ -615,7 +634,8 @@ rule compute_embeddings:
         output_name = embeddings_data_file_name,
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
-        pop_labels = pop_labels
+        pop_labels = pop_labels,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -629,7 +649,8 @@ rule compute_embeddings:
             --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
-            --pop_labels {params.pop_labels}
+            --pop_labels {params.pop_labels} \
+            --phased {params.phased}
         """
 rule plot_embeddings:
     input:
@@ -651,6 +672,7 @@ rule plot_embeddings:
         N_max = N_max,
         rates_path = rates_data,
         reconstructed_rates_path = performance_data,
+        phased = phased,
     shell:
         """
         mkdir -p {params.outdir}
@@ -663,7 +685,8 @@ rule plot_embeddings:
             --lims {params.embeddings_plot_lims} \
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
 # Run from the utils/ directory
@@ -728,10 +751,11 @@ rule evaluate_performance:
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
         data_output_name = performance_data_file_name,
-        plot_output_name = performance_plot_file_name, 
+        plot_output_name = performance_plot_file_name,
         min_time = min_time,
         max_rate_plot = max_rate_plot,
-        time_scale = time_scale
+        time_scale = time_scale,
+        phased = phased
     shell:
         """
         python {input.script} \
@@ -747,7 +771,8 @@ rule evaluate_performance:
             --plot_output_name {params.plot_output_name} \
             --min_time {params.min_time} \
             --max_rate_plot {params.max_rate_plot} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         """
 
 rule STT_pop_combs:

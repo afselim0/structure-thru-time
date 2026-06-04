@@ -1,3 +1,4 @@
+#%%
 import os
 import argparse
 import demes
@@ -25,7 +26,7 @@ def preprocess_demography(demes_file_path,n_samples_per_pop):
     pop_labels = np.repeat(pops, 2*n_samples_per_pop) # diploid samples
     pop_labels = pd.DataFrame({
         "sample_id": np.arange(len(pop_labels)),
-        "individual_id": np.arange(len(pop_labels)) // (2*n_samples_per_pop), # each individual has 2 samples for diploidy
+        "individual_id": np.arange(len(pop_labels)) // 2, # each individual has 2 samples for diploidy
         "population": pop_labels
     })
     return pop_labels, pop_colors

@@ -30,16 +30,18 @@ def compute_true_rates(demes_file_path, max_time, delta_t = 10):
             rates_df.loc[(pop1,pop2),:] = coalescence_rates
     return rates_df
 
-def expand_true_rates(rates_df, pop_labels):
-    sample_pop_dict = dict(zip(pop_labels['sample_id'], pop_labels['population']))
-    samples = pop_labels['sample_id'].tolist()
+def expand_true_rates(rates_df, pop_labels, phased):
+    id_label = "sample_id" if phased else "individual_id"
+    sample_pop_dict = dict(zip(pop_labels[id_label], pop_labels['population']))
+    samples = np.unique(pop_labels[id_label].tolist())
     sample_pairs = []
     for i in range(len(samples)):
         for j in range(i+1,len(samples)):
             sample1 = samples[i]
             sample2 = samples[j]
             sample_pairs.append((sample1,sample2))
-    sample_rates_df = pd.DataFrame(columns=rates_df.columns,index=pd.MultiIndex.from_tuples(sample_pairs,names=["sample_1","sample_2"]))
+    names = ["sample_1","sample_2"] if phased else ["individual_1","individual_2"]
+    sample_rates_df = pd.DataFrame(columns=rates_df.columns,index=pd.MultiIndex.from_tuples(sample_pairs,names=names))
     for pair in sample_pairs:
         sample1 = pair[0]
         sample2 = pair[1]
@@ -60,6 +62,7 @@ def main():
     parser.add_argument("--max_time", type=int, required=True, help="Maximum time for rate calculation")
     parser.add_argument("--labels", type=str, required=True, help="Path to the population labels file")
     parser.add_argument("--delta_t", type=int, default=10, help="Time step for rate calculation")
+    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the output rates should be per-sample-pair (phased=True) or per-individual-pair (phased=False).  If phased=False, rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
     
     args = parser.parse_args()
     
@@ -68,6 +71,7 @@ def main():
     max_time = args.max_time
     labels_path = args.labels
     delta_t = args.delta_t
+    phased = args.phased == "True"
 
     print(f"Computing true rates for the demes file: {demes_file_path}")
     # if delta_t is None:
@@ -79,7 +83,7 @@ def main():
         rates_df.to_parquet(f"{output_path}/rates_true.parquet")
     pop_rates_df = compute_true_rates(demes_file_path, max_time, delta_t=delta_t)
     pop_labels = pd.read_csv(labels_path)
-    expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels)
+    expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels, phased = phased)
     expanded_rates_df.columns = expanded_rates_df.columns.astype(str)
     expanded_rates_df.to_parquet(f"{output_path}/rates_true.parquet")
 

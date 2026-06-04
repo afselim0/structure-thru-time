@@ -2,11 +2,56 @@
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
+from scipy import sparse
 from tqdm import tqdm
+import os
 
-MIN_RATE = 1e-12
 
-def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_timepoints, time_step):
+MIN_RATE = 1e-20
+
+
+def adaptive_local_linear_filter(
+    minimum_window_size: float,
+    maximum_window_size: float,
+    n_timepoints: int,
+    time_step: float,
+) -> np.ndarray:
+    """Build the (n_timepoints, n_timepoints) derivative-filter matrix S.
+
+    Row t of S contains the local-linear regression weights for estimating
+    d/dt H(t), where H is the cumulative hazard.  The bandwidth (number of
+    bins used) grows linearly from ``minimum_window_size`` at early times to
+    ``maximum_window_size`` at late times.
+
+    Three regimes:
+    - Interior [t_min, t_max): symmetric window, bandwidth grows with t.
+    - Early boundary [0, t_min): fixed minimum window, one-sided fit.
+    - Late boundary [t_max, n_timepoints): fixed maximum window, one-sided fit.
+
+    The late-boundary loop reuses the full maximum window starting at index
+    ``n_timepoints - maximum_num_idxs``, which is the same window as the last
+    interior point — the transition is therefore smooth.
+
+    Parameters
+    ----------
+    minimum_window_size : float
+        Minimum bandwidth in the same time units as ``time_step``.
+    maximum_window_size : float
+        Maximum bandwidth in the same time units as ``time_step``.
+    n_timepoints : int
+        Number of time bins.
+    time_step : float
+        Uniform spacing between bins (in generations or years).
+
+    Returns
+    -------
+    S : scipy.sparse.csr_matrix, shape (n_timepoints, n_timepoints)
+        Derivative-filter matrix.  ``rates = H @ S.T`` gives the estimated
+        hazard rate at each time point for each pair.  Returned as a sparse CSR
+        matrix because S is banded (bandwidth <= maximum window size), which
+        makes the matmul against the (n_pairs, n_T) hazard matrix much cheaper
+        than the dense O(n_pairs * n_T^2) product.
+    """
     minimum_num_idxs = int(minimum_window_size // time_step)
     if minimum_num_idxs % 2 == 0:
         minimum_num_idxs += 1
@@ -18,19 +63,18 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
     if maximum_num_idxs < minimum_num_idxs:
         maximum_num_idxs = minimum_num_idxs
 
-    # t_min = minimum_num_idxs // 2
-    # t_max = n_timepoints - maximum_num_idxs // 2
     t_min = minimum_num_idxs // 2
     t_max = n_timepoints - maximum_num_idxs // 2
 
     if t_max <= t_min:
         raise ValueError("Time series too short for the requested window sizes.")
 
+    # One window size per interior time point; cast to int after linspace to
+    # avoid fractional bandwidths.  An extra +1 parity correction is applied
+    # inside the loop to keep all windows odd-sized.
     window_sizes = np.linspace(minimum_num_idxs, maximum_num_idxs, t_max - t_min).astype(int)
 
     S = np.zeros((n_timepoints, n_timepoints))
-    # A        = np.zeros((n_timepoints, n_timepoints))
-    # se_scale = np.full(n_timepoints, np.nan)
 
     # Interior: symmetric window growing from minimum to maximum bandwidth
     for k, t in enumerate(range(t_min, t_max)):
@@ -41,8 +85,6 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
         xloc = np.arange(-h, h + 1) * time_step   # S1 = 0 by symmetry
         S2   = (xloc ** 2).sum()
         S[t, t - h : t + h + 1] = xloc / S2        # slope:     j*dt / S2
-        # A[t, t - h : t + h + 1] = 1.0 / m          # intercept: local mean
-        # se_scale[t]              = 1.0 / np.sqrt(S2) # SE = s_hat / sqrt(S2)
 
     # Early-time boundary (t < t_min): one fixed window [0, minimum_num_idxs),
     # slope evaluated at each t within it via one-sided local linear fit.
@@ -63,76 +105,219 @@ def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_tim
         n  = maximum_num_idxs
         S[t, start:] = (n * xloc - S1) / (n * S2 - S1 ** 2)
 
-    # return S, t_min, t_max
-    return S
+    # S is banded; return CSR so that H @ S.T exploits the sparsity.
+    return sparse.csr_matrix(S)
 
 
-def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size):
-    times     = pdf_df.columns.astype(float)
-    time_step = times[1] - times[0]
-    n_T       = len(times)
-
-    survival_df = 1 - pdf_df.cumsum(axis=1)
-    H = -np.log(survival_df.values.clip(1e-10))   # (n_pairs, n_T); clip avoids -inf at S=0
-
-    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
-
-    print("Multiplying cumulative hazard matrix with derivative weights to compute rates")
-    rates = H @ S.T   # (n_pairs, n_T)
-
-    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
-    return rates_df
-
-
-def compute_coal_rates_bootstrap_se(
+def compute_coal_rates(
     pdf_df: pd.DataFrame,
-    bootstrap_dir: str,
     minimum_window_size: float,
     maximum_window_size: float,
-    n_replicates: int,
-    subsample_size: int,
+    phased: bool = False,
+    sample_individal_ids: pd.DataFrame | None = None,
+    filter_matrix: sparse.spmatrix | None = None,
 ) -> pd.DataFrame:
-    """Estimate SE of coalescent rate estimates by block bootstrap over tree files.
+    """Compute pairwise coalescent rates from a PDF of pairwise coalescent times.
 
-    For each of ``n_replicates`` bootstrap replicates, ``subsample_size`` count
-    files are drawn without replacement from ``bootstrap_dir``.  The sampled
-    counts are summed and normalised using the corresponding columns of
-    ``coverage_df`` to form a bootstrap PDF, from which rates are computed using
-    the same derivative filter matrix as ``compute_coal_rates``.  The SE at
-    each (pair, timepoint) is the standard deviation across replicates.
+    For each pair, the cumulative hazard H(t) = -log S(t) is computed from the
+    empirical survival S(t) = 1 - CDF(t).  The instantaneous rate at each time
+    point is then estimated as dH/dt via a local linear fit whose bandwidth grows
+    from ``minimum_window_size`` to ``maximum_window_size`` (see
+    ``adaptive_local_linear_filter``).
 
     Parameters
     ----------
     pdf_df : pd.DataFrame
-        Full PDF estimate (output of ``CountCoalEvents.compute_coal_time_pdf``).
-        Used to set the time grid and index.
-    bootstrap_dir : str
-        Directory containing per-file ``.parquet`` count files, as written by
-        ``CountCoalEvents.compute_coal_time_pdf``.
+        Estimated PDF of pairwise coalescent times.  Index is a MultiIndex of
+        (sample_id_1, sample_id_2) pairs; columns are float time points.
     minimum_window_size : float
-        Passed to ``adaptive_local_linear_filter``.
+        Minimum local-linear bandwidth (same units as column time points).
     maximum_window_size : float
-        Passed to ``adaptive_local_linear_filter``.
-    n_replicates : int
-        Number of bootstrap replicates.
-    subsample_size : int
-        Number of count files drawn without replacement per replicate.
+        Maximum local-linear bandwidth (same units as column time points).
+    phased : bool
+        If True, return per-sample-pair rates.  If False, average rates over
+        all cross-individual sample pairs to return per-individual-pair rates.
+    sample_individal_ids : pd.DataFrame or None
+        Required when ``phased=False``.  Must have two columns, ``sample_id``
+        and ``individual_id``.  If None, consecutive sample IDs are assumed to
+        belong to the same diploid individual (IDs 0–1 → individual 0, IDs 2–3 →
+        individual 1, etc.) — this assumption is only valid for zero-indexed,
+        contiguous sample IDs.
+    filter_matrix : scipy.sparse.spmatrix or None
+        Precomputed derivative-filter matrix from
+        ``adaptive_local_linear_filter``.  If None it is built internally.  Pass
+        a precomputed matrix when calling repeatedly on the same time grid (e.g.
+        in the bootstrap loop) to avoid rebuilding it each time.
 
     Returns
     -------
-    pd.DataFrame
-        SE estimates with the same index and columns as ``pdf_df``.
+    rates_df : pd.DataFrame
+        Estimated coalescent rates.  Index is a MultiIndex of pair IDs (sample
+        or individual depending on ``phased``); columns are the same time points
+        as ``pdf_df``.  Values are clipped to MIN_RATE to suppress numerical
+        artefacts from non-monotone empirical survival estimates.
     """
-    import os
-
     times     = pdf_df.columns.astype(float)
     time_step = times[1] - times[0]
     n_T       = len(times)
 
-    coverage_df = pd.read_parquet(os.path.join(bootstrap_dir, "coverage.parquet"))
+    # S(t) = 1 - CDF(t) is the probability of not having coalesced by the right
+    # edge of bin t.  H(t) = -log S(t) is the cumulative hazard at that edge.
+    survival_df = 1 - pdf_df.cumsum(axis=1)
+    H = -np.log(survival_df.values.clip(1e-10))   # (n_pairs, n_T); clip avoids -inf at S=0
 
-    # Build derivative filter once — shared across all replicates
-    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+    S = filter_matrix
+    if S is None:
+        S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+
+    # rates = H @ S.T.  Compute as (S @ H.T).T so the sparse operand is on the
+    # left of the product (the efficient form for CSR) and the result is a dense
+    # ndarray of shape (n_pairs, n_T).
+    rates = np.asarray((S @ H.T).T)
+
+    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
+
+    # Clip negative rates caused by numerical noise in non-monotone empirical H(t)
+    rates_df = rates_df.clip(lower=MIN_RATE)
+
+    if not phased:
+        if sample_individal_ids is None or "individual_id" not in sample_individal_ids.columns:
+            # ASSUMPTION: sample IDs are zero-indexed consecutive integers; IDs
+            # 2k and 2k+1 belong to individual k.  Will silently mis-assign
+            # individuals if IDs are non-contiguous or non-zero-indexed.
+            # print(
+            #     "Mapping from sample IDs to individual IDs not provided. "
+            #     "Assuming consecutive sample IDs (0,1), (2,3), ... belong to "
+            #     "the same diploid individual."
+            # )
+            sample_ids = rates_df.index.values
+            sample_ids = np.unique([item for sample_id in sample_ids for item in sample_id])
+            individual_ids = sample_ids // 2
+            # Two-column form expected by compute_between_individual_rates.
+            sample_individal_ids = pd.DataFrame(
+                {"sample_id": sample_ids, "individual_id": individual_ids}
+            )
+        rates_df = compute_between_individual_rates(rates_df, sample_individal_ids)
+    return rates_df
+
+
+def compute_between_individual_rates(
+    rates_df: pd.DataFrame,
+    sample_individal_ids: pd.DataFrame,
+) -> pd.DataFrame:
+    """Average per-sample-pair rates to produce per-individual-pair rates.
+
+    For each ordered pair (ind1, ind2) with ind1 < ind2, all cross-individual
+    sample-pair rates are averaged.
+
+    Parameters
+    ----------
+    rates_df : pd.DataFrame
+        Per-sample-pair rates.  Index is a MultiIndex of (sample_id_1,
+        sample_id_2) tuples; columns are time points.
+    sample_individal_ids : pd.DataFrame
+        Must have two columns, ``sample_id`` and ``individual_id``, mapping each
+        sample to its individual.
+
+    Returns
+    -------
+    between_individual_rates : pd.DataFrame
+        Per-individual-pair rates with a MultiIndex of (individual_1,
+        individual_2) and the same time-point columns.
+
+    Notes
+    -----
+    If any cross-individual sample pair is absent from ``rates_df`` (e.g.,
+    because only i < j pairs were computed), it is silently dropped from the
+    mean.  Ensure ``rates_df`` contains all required pairs before calling.
+    """
+    active_samples_pairs = rates_df.index.values
+    active_samples = np.unique([item for pair in active_samples_pairs for item in pair])
+
+    # Look up the individual_id of every active sample via the sample_id column
+    active_map = sample_individal_ids[sample_individal_ids["sample_id"].isin(active_samples)]
+    active_individuals = active_map["individual_id"].unique()
+    active_individuals_pairs = [(i1, i2) for i1 in active_individuals for i2 in active_individuals if i1 < i2]
+
+    # Pre-allocate as float; an empty DataFrame defaults to object dtype, which
+    # would propagate through .values and break downstream numerical ufuncs.
+    between_individual_rates = pd.DataFrame(
+        np.empty((len(active_individuals_pairs), len(rates_df.columns)), dtype=float),
+        columns=rates_df.columns,
+        index=pd.MultiIndex.from_tuples(active_individuals_pairs, names=["individual_1", "individual_2"]),
+    )
+    for ind1, ind2 in active_individuals_pairs:
+        samples_ind1 = sample_individal_ids.loc[sample_individal_ids["individual_id"] == ind1, "sample_id"].values
+        samples_ind2 = sample_individal_ids.loc[sample_individal_ids["individual_id"] == ind2, "sample_id"].values
+        pairs = [(s1, s2) for s1 in samples_ind1 for s2 in samples_ind2]
+        # Pairs absent from rates_df are silently dropped; see docstring note.
+        between_individual_rates.loc[(ind1, ind2)] = rates_df.loc[pairs].mean()
+    return between_individual_rates
+
+def compute_coal_rates_bootstrap_se(
+    bootstrap_dir: str,
+    minimum_window_size: float,
+    maximum_window_size: float,
+    n_replicates: int = 100,
+    subsample_size: int = None,
+    phased: bool = False,
+    sample_individal_ids: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Estimate the SE of full-data coalescent rate estimates by delete-d jackknife.
+
+    The data are split across ``N`` count files (one per contig/tree file) in
+    ``bootstrap_dir``.  For each of ``n_replicates`` replicates, ``subsample_size``
+    (= ``m``) files are drawn **without replacement**; their counts and coverage
+    are pooled into a bootstrap PDF, from which rates are computed via
+    ``compute_coal_rates``.
+
+    The raw across-replicate variance estimates the variance of an ``m``-contig
+    rate estimate, not of the full ``N``-contig estimate that the caller actually
+    reports.  The delete-d jackknife (Shao & Wu 1989, ``d = N - m`` deleted per
+    replicate) rescales it to the full-data variance:
+
+        Var[r_N] = (m / (N - m)) * Var_replicates[r_m]
+
+    The ``m / (N - m)`` factor simultaneously rescales for the data budget and
+    cancels the finite-population correction of without-replacement sampling, so
+    the returned SE is the SE of the estimate computed on **all** ``N`` contigs.
+
+    Validity requires both ``m`` and ``d = N - m`` to be reasonably large (the
+    1/n variance scaling must hold); ``m`` near ``N/2`` is the robust default.
+    The scaling treats each contig as an exchangeable unit of information; if
+    contig coverages are highly heterogeneous the contig-count scaling is only
+    approximate.
+
+    Parameters
+    ----------
+    bootstrap_dir : str
+        Directory containing per-file ``.parquet`` count files and a
+        ``coverage.parquet`` file, as written by
+        ``CountCoalEvents.compute_coal_time_pdf``.  The pair index and time grid
+        are taken from these files.
+    minimum_window_size : float
+        Passed to ``compute_coal_rates``.
+    maximum_window_size : float
+        Passed to ``compute_coal_rates``.
+    n_replicates : int
+        Number of jackknife replicates (Monte Carlo subsamples).
+    subsample_size : int
+        Number of count files (``m``) drawn without replacement per replicate.
+        Must satisfy ``0 < m < N``; ``m ~ N/2`` recommended.
+    phased : bool
+        Passed to ``compute_coal_rates``.  If False, the returned SE DataFrame
+        has an individual-pair index.
+    sample_individal_ids : pd.DataFrame or None
+        Passed to ``compute_coal_rates``.  Required when ``phased=False`` and
+        the sample-to-individual mapping is non-trivial.
+
+    Returns
+    -------
+    pd.DataFrame
+        SE of the full-data rate estimates, with the same (pair) index and
+        (time) columns as the output of ``compute_coal_rates``.
+    """
+    coverage_df = pd.read_parquet(os.path.join(bootstrap_dir, "coverage.parquet"))
 
     # Discover available count files (exclude coverage.parquet)
     available_files = sorted(
@@ -149,267 +334,71 @@ def compute_coal_rates_bootstrap_se(
     if missing:
         raise ValueError(f"coverage_df is missing columns for files: {missing}")
 
-    # Align coverage_df columns to the order of discovered files
-    coverage_df = coverage_df[file_basenames]
-    coverage_vals = coverage_df.values  # (n_pairs, n_files)
-
-    if subsample_size > n_files:
+    if subsample_size is None:
+        subsample_size = n_files // 2
+    # Delete-d jackknife needs 0 < m < N so that d = N - m > 0.
+    if not (0 < subsample_size < n_files):
         raise ValueError(
-            f"subsample_size={subsample_size} exceeds the number of available count files ({n_files})."
+            f"subsample_size must satisfy 0 < subsample_size < n_files; got "
+            f"subsample_size={subsample_size}, n_files={n_files}. (m ~ n_files/2 recommended.)"
         )
 
-    # Load all count files once into a (n_files, n_pairs, n_T) array
+    # Take the pair index and time grid from the first count file; all files and
+    # coverage_df are then aligned to this index so row order is consistent.
+    template = pd.read_parquet(os.path.join(bootstrap_dir, available_files[0]))
+    pair_index = template.index
+    times      = template.columns.astype(float)
+    n_T        = len(times)
+    n_sample_pairs = len(pair_index)
+
+    coverage_df = coverage_df.loc[pair_index, file_basenames]
+    coverage_vals = coverage_df.values  # (n_sample_pairs, n_files)
+
+    # The derivative-filter matrix depends only on the time grid, so build it once
+    # and reuse it across all replicates rather than rebuilding it each call.
+    time_step = times[1] - times[0]
+    filter_matrix = adaptive_local_linear_filter(
+        minimum_window_size, maximum_window_size, n_T, time_step
+    )
+
+    # Load all count files into (n_files, n_sample_pairs, n_T), reindexing each
+    # file to the template pair index so row order is guaranteed consistent.
     print("Loading all bootstrap count files into memory …")
-    n_pairs = len(pdf_df)
-    all_counts = np.zeros((n_files, n_pairs, n_T))
+    all_counts = np.empty((n_files, n_sample_pairs, n_T))
     for i, fname in enumerate(tqdm(available_files, desc="Loading count files")):
-        all_counts[i] = pd.read_parquet(os.path.join(bootstrap_dir, fname)).values
+        file_df = pd.read_parquet(os.path.join(bootstrap_dir, fname))
+        all_counts[i] = file_df.loc[pair_index].values
 
-    replicate_rates = np.zeros((n_replicates, n_pairs, n_T))
+    replicate_rates_list: list[np.ndarray] = []
 
-    for rep in tqdm(range(n_replicates), desc="Bootstrap replicates"):
+    for _ in tqdm(range(n_replicates), desc="Bootstrap replicates"):
         sampled_idxs = np.random.choice(n_files, size=subsample_size, replace=False)
 
-        # Sum counts and coverage for sampled files
-        counts_sum = all_counts[sampled_idxs].sum(axis=0)          # (n_pairs, n_T)
-        total_len  = coverage_vals[:, sampled_idxs].sum(axis=1)     # (n_pairs,)
+        # Sum counts and coverage over sampled files
+        counts_sum = all_counts[sampled_idxs].sum(axis=0)       # (n_sample_pairs, n_T)
+        total_len  = coverage_vals[:, sampled_idxs].sum(axis=1)  # (n_sample_pairs,)
 
         with np.errstate(invalid="ignore"):
-            pdf_rep = counts_sum / total_len[:, np.newaxis]
+            pdf_rep = pd.DataFrame(
+                counts_sum / total_len[:, np.newaxis],
+                index=pair_index,
+                columns=times,
+            )
 
-        # Survival → cumulative hazard → rates
-        survival_rep = 1 - np.cumsum(pdf_rep, axis=1)
-        H_rep = -np.log(survival_rep.clip(1e-10))
-        replicate_rates[rep] = H_rep @ S.T
+        rates_rep = compute_coal_rates(
+            pdf_rep, minimum_window_size, maximum_window_size, phased,
+            sample_individal_ids, filter_matrix=filter_matrix,
+        )
+        replicate_rates_list.append(rates_rep.values)
 
-    # SE = std across replicates
-    se = np.std(replicate_rates, axis=0)   # (n_pairs, n_T)
+    # Stack replicates; index comes from the last replicate (consistent across all)
+    replicate_rates = np.stack(replicate_rates_list, axis=0).astype(float)  # (n_replicates, n_pairs, n_T)
 
-    return pd.DataFrame(se, columns=times, index=pdf_df.index)
-#%%
-# def adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_timepoints, time_step):
-#     # -------------------------
-#     # Window sizes (in indices)
-#     # -------------------------
-#     minimum_num_idxs = int(minimum_window_size // time_step)
-#     if minimum_num_idxs % 2 == 0:
-#         minimum_num_idxs += 1
-#     if minimum_num_idxs < 7:
-#         minimum_num_idxs = 7
+    # Delete-d jackknife: rescale the m-contig replicate variance to the full-N
+    # variance by the factor m / (N - m), then take the square root for the SE.
+    m = subsample_size
+    N = n_files
+    subsample_var = replicate_rates.var(axis=0, ddof=1)   # Var[r_m] across replicates
+    se = np.sqrt((m / (N - m)) * subsample_var)            # SE of the full-N estimate
 
-#     maximum_num_idxs = int(maximum_window_size // time_step)
-#     if maximum_num_idxs % 2 == 0:
-#         maximum_num_idxs += 1
-#     if maximum_num_idxs < minimum_num_idxs:
-#         maximum_num_idxs = minimum_num_idxs
-
-#     # -------------------------
-#     # Boundaries
-#     # -------------------------
-#     start_boundary = minimum_num_idxs // 2
-#     end_boundary = n_timepoints - maximum_num_idxs // 2
-
-#     window_sizes = np.linspace(
-#         minimum_num_idxs,
-#         maximum_num_idxs,
-#         end_boundary - start_boundary
-#     ).astype(int)
-
-#     S = np.zeros((n_timepoints, n_timepoints))
-
-#     # # =====================================================
-#     # # 1. Recent-time boundary: quadratic fit (y = a + b x + c x^2)
-#     # # =====================================================
-#     # idx = np.arange(start_boundary)
-#     # x = (idx - idx.mean()) * time_step
-
-#     # X = np.column_stack([np.ones(start_boundary), x, x**2])
-#     # XtX_inv = np.linalg.inv(X.T @ X)
-#     # P = XtX_inv @ X.T # P @ y gives coefficients [a,b,c]
-
-#     # # Filling in [0-start_boundary] rows of S
-#     # for t in range(start_boundary):
-#     #     xt = x[t]
-#     #     D = np.array([0.0, 1.0, 2.0 * xt])
-#     #     S[t, :start_boundary] = D @ P # Obtaining 2cx + b, the deivative at x=xt
-
-#     # =====================================================
-#     # 1. Recent-time boundary: one-sided local linear (forward)
-#     # =====================================================
-#     for t in range(start_boundary):
-#         h = minimum_num_idxs // 2
-#         right = min(n_timepoints, t + h + 1)
-
-#         idx = np.arange(t, right)
-#         xloc = (idx - t) * time_step   # forward offsets
-
-#         n = len(xloc)
-#         S1 = xloc.sum()
-#         S2 = (xloc**2).sum()
-
-#         coeffs = (n * xloc - S1) / (n * S2 - S1**2)
-#         S[t, t:right] = coeffs
-
-
-#     # =====================================================
-#     # 2. Interior: symmetric local linear
-#     # =====================================================
-#     # Filling in [start_boundary-end_boundary] rows of S
-#     for k, t in enumerate(range(start_boundary, end_boundary)):
-#         m = window_sizes[k]
-#         if m % 2 == 0:
-#             m += 1
-#         h = (m - 1) // 2
-
-#         j = np.arange(-h, h + 1)
-#         coeffs = (3 * j) / (h * (h + 1) * (2 * h + 1)) / time_step
-#         S[t, t - h : t + h + 1] = coeffs
-
-#     # =====================================================
-#     # 3. Deep-time boundary: one-sided local linear
-#     # =====================================================
-#     # Filling in [end_boundary-n_timepoints] rows of S
-#     for t in range(end_boundary, n_timepoints):
-#         h = maximum_num_idxs // 2
-#         left = max(0, t - h)
-
-#         idx = np.arange(left, n_timepoints)
-#         xloc = (idx - t) * time_step
-
-#         n = len(xloc)
-#         S1 = xloc.sum()
-#         S2 = (xloc**2).sum()
-
-#         coeffs = (n * xloc - S1) / (n * S2 - S1**2)
-#         S[t, left:] = coeffs
-#     return S
-
-# def compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, poly_deg = 1, min_rate = MIN_RATE):
-#     times = pdf_df.columns.astype(float)
-#     time_step = times[1]-times[0]
-#     survival_df = 1 - pdf_df.cumsum(axis=1)
-#     H = -np.log(survival_df)
-#     W = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, len(times), time_step, poly_deg)
-#     # assert np.all(H.iloc[:,1:] >= H.iloc[:,:-1]), "cumulative hazard must be non-decreasing"
-#     rates = H.values @ W.T
-#     rates[rates<min_rate] = 0
-#     rates_df = pd.DataFrame(rates,columns=times,index=survival_df.index)
-#     return rates_df
-# %%
-# def adaptive_local_poly_derivative_matrix(
-#     minimum_window_size,
-#     maximum_window_size,
-#     n_timepoints,
-#     time_step,
-#     poly_deg=1,
-# ):
-#     """
-#     Build weight matrix W such that h = H @ W.T gives the smoothed
-#     derivative of H at each time point.
-
-#     Interior points: symmetric local polynomial of growing bandwidth.
-#     Boundary points: single polynomial fit over the fixed boundary
-#                      window, derivative evaluated at each v within it.
-
-#     Parameters
-#     ----------
-#     minimum_window_size : float
-#         Minimum full window size in time units (start boundary window).
-#     maximum_window_size : float
-#         Maximum full window size in time units (end boundary window).
-#     n_timepoints : int
-#         Number of time points T (indices 0 .. T-1).
-#     time_step : float
-#         Grid spacing Δ_t.
-#     poly_deg : int
-#         Degree p of the local polynomial (must be >= 1).
-
-#     Returns
-#     -------
-#     W : np.ndarray, shape (T, T)
-#         Weight matrix. Smoothed derivative is h = H @ W.T.
-#     """
-#     assert poly_deg >= 1, "Polynomial degree must be >= 1"
-
-#     # -------------------------
-#     # Window sizes (in indices)
-#     # -------------------------
-#     minimum_num_idxs = int(minimum_window_size // time_step)
-#     if minimum_num_idxs % 2 == 0:
-#         minimum_num_idxs += 1
-#     if minimum_num_idxs < poly_deg + 2:  # Need at least p+1 points to fit, plus one more for derivative
-#         minimum_num_idxs = poly_deg + 2
-
-#     maximum_num_idxs = int(maximum_window_size // time_step)
-#     if maximum_num_idxs % 2 == 0:
-#         maximum_num_idxs += 1
-#     if maximum_num_idxs < minimum_num_idxs:
-#         maximum_num_idxs = minimum_num_idxs
-
-#     # -------------------------
-#     # Boundary cutoffs
-#     # -------------------------
-#     start_boundary = minimum_num_idxs // 2
-#     end_boundary   = n_timepoints - maximum_num_idxs // 2
-
-#     # Interior window sizes, forced odd
-#     window_sizes = np.linspace(
-#         minimum_num_idxs,
-#         maximum_num_idxs,
-#         end_boundary - start_boundary,
-#     ).astype(int)
-#     window_sizes = np.where(window_sizes % 2 == 0, window_sizes + 1, window_sizes)
-
-#     W = np.zeros((n_timepoints, n_timepoints))
-
-#     def _derivative_vector(t_eval, poly_deg):
-#         """
-#         Coefficient vector d(t) such that d(t)^T a = f'(t_eval),
-#         where f(t) = sum_k a_k t^k.
-#         d_k = k * t_eval^{k-1}
-#         """
-#         d = np.zeros(poly_deg + 1)
-#         for k in range(1, poly_deg + 1):
-#             d[k] = k * (t_eval ** (k - 1))
-#         return d
-
-#     # =====================================================
-#     # 1. Start boundary: single polynomial over [0, m_min)
-#     #    evaluated at each v in [0, start_boundary)
-#     # =====================================================
-#     indices_start = np.arange(minimum_num_idxs)
-#     t_start       = indices_start * time_step                          # absolute times
-#     Phi_start     = np.vander(t_start, N=poly_deg + 1, increasing=True)
-#     Phi_start_inv = np.linalg.pinv(Phi_start)                         # (p+1, m_min)
-
-#     for v in range(start_boundary):
-#         t_eval = v * time_step
-#         d      = _derivative_vector(t_eval, poly_deg)                  # (p+1,)
-#         W[v, indices_start] = d @ Phi_start_inv                        # (m_min,)
-
-#     # =====================================================
-#     # 2. Interior: symmetric window, growing bandwidth
-#     # =====================================================
-#     for k, v in enumerate(range(start_boundary, end_boundary)):
-#         m       = window_sizes[k]
-#         h       = (m - 1) // 2
-#         indices = np.arange(v - h, v + h + 1)
-#         tau     = (indices - v) * time_step                            # centered at v
-#         Phi     = np.vander(tau, N=poly_deg + 1, increasing=True)
-#         W[v, indices] = np.linalg.pinv(Phi)[1, :]                     # a_1 row
-
-#     # =====================================================
-#     # 3. End boundary: single polynomial over [T-m_max, T)
-#     #    evaluated at each v in [end_boundary, T)
-#     # =====================================================
-#     indices_end = np.arange(n_timepoints - maximum_num_idxs, n_timepoints)
-#     t_end       = indices_end * time_step                              # absolute times
-#     Phi_end     = np.vander(t_end, N=poly_deg + 1, increasing=True)
-#     Phi_end_inv = np.linalg.pinv(Phi_end)                             # (p+1, m_max)
-
-#     for v in range(end_boundary, n_timepoints):
-#         t_eval = v * time_step
-#         d      = _derivative_vector(t_eval, poly_deg)                  # (p+1,)
-#         W[v, indices_end] = d @ Phi_end_inv                            # (m_max,)
-
-#     return W
+    return pd.DataFrame(se, columns=times, index=rates_rep.index)

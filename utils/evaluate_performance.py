@@ -19,7 +19,7 @@ import argparse
 import matplotlib.pyplot as plt
 import os
 
-def compute_distance_df(embeddings):
+def compute_distance_df(embeddings, id_label="sample_id"):
     x_cols = [col for col in embeddings.columns if col.startswith("X")]
 
     embeddings_pairs = embeddings.merge(
@@ -27,7 +27,7 @@ def compute_distance_df(embeddings):
     )
 
     embeddings_pairs = embeddings_pairs[
-        embeddings_pairs["sample_id_1"] < embeddings_pairs["sample_id_2"]
+        embeddings_pairs[f"{id_label}_1"] < embeddings_pairs[f"{id_label}_2"]
     ]
 
     X1 = embeddings_pairs[[f"{c}_1" for c in x_cols]].values
@@ -37,7 +37,7 @@ def compute_distance_df(embeddings):
 
     D_df = (
         embeddings_pairs
-        .set_index(["sample_id_1", "sample_id_2", "time"])["distance"]
+        .set_index([f"{id_label}_1", f"{id_label}_2", "time"])["distance"]
         .unstack("time")
     )
 
@@ -47,7 +47,7 @@ def reconstruct_rates(D_df, N_min):
     reconstructed_rates,_ = compute_f(D_df, N_min)
     return reconstructed_rates
 
-def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max):
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
     input_rates = input_rates.copy()
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
@@ -57,7 +57,7 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
     pairs = input_rates.index
     n_times = len(input_rates.columns)
 
-    pop_map = pop_labels.set_index("sample_id")["population"]
+    pop_map = pop_labels.drop_duplicates(subset=id_label).set_index(id_label)["population"]
     color_map = pop_colors.set_index("population")["color"]
 
     pop1 = np.array([pop_map.get(p[0], "unknown") for p in pairs])
@@ -136,7 +136,7 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
 
     return fig
 
-def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, pop_labels, pop_colors, N_max):
+def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
     reconstructed_rates.columns = reconstructed_rates.columns.astype(float)
@@ -149,7 +149,7 @@ def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, po
     pair_mask = np.array([(sample_id in pair) for pair in pairs])
     pair_indices = np.where(pair_mask)[0]
     other_sample_ids = np.array([pair[0] if pair[1] == sample_id else pair[1] for pair in pairs[pair_mask]])
-    other_sample_labels = pop_labels.set_index("sample_id").loc[other_sample_ids]["population"].values
+    other_sample_labels = pop_labels.drop_duplicates(subset=id_label).set_index(id_label).loc[other_sample_ids]["population"].values
     other_sample_colors = pop_colors.set_index("population").loc[other_sample_labels]["color"].values
 
     filtered_input_rates = input_rates.iloc[pair_indices].values
@@ -181,7 +181,7 @@ def reconstructed_vs_input_query(sample_id, input_rates, reconstructed_rates, po
 
     return fig
 
-def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, top_k=2000, min_pairs_per_slice=10):
+def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, top_k=2000, min_pairs_per_slice=10, id_label="sample_id"):
     input_rates = input_rates.copy()
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
@@ -191,7 +191,7 @@ def reconstructed_vs_input_interactive(input_rates, reconstructed_rates, pop_lab
     pairs = input_rates.index
     times = input_rates.columns.values
 
-    pop_map   = pop_labels.set_index("sample_id")["population"]
+    pop_map   = pop_labels.drop_duplicates(subset=id_label).set_index(id_label)["population"]
     color_map = pop_colors.set_index("population")["color"]
 
     pop1      = np.array([pop_map.get(p[0], "unknown") for p in pairs])
@@ -334,9 +334,12 @@ def main():
     argparser.add_argument("--min_time", type=float, default=0, help="Minimum time for plotting")
     argparser.add_argument("--max_rate_plot", type=float, default=None, help="Maximum rate for plotting")
     argparser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
+    argparser.add_argument("--phased", type=str, default="False", help="Indicates whether the data is phased. If False, rates/embeddings are per-individual (individual_id) rather than per-haplotype (sample_id)")
     args = argparser.parse_args()
 
     # Loading data
+    phased = args.phased == "True"
+    id_label = "sample_id" if phased else "individual_id"
     N_min = args.N_min
     N_max = args.N_max
     rates = pd.read_parquet(args.rates)
@@ -352,7 +355,7 @@ def main():
         if args.embeddings is None:
             raise ValueError("Either --embeddings or --reconstructed_rates must be provided")
         embeddings = pd.read_parquet(args.embeddings)
-        D_df = compute_distance_df(embeddings)
+        D_df = compute_distance_df(embeddings, id_label=id_label)
         reconstructed_rates = reconstruct_rates(D_df, N_min=N_min)
         reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
@@ -363,12 +366,12 @@ def main():
 
     print(f"Evaluating performance: {args.rates}")
 
-    fig_interactive = reconstructed_vs_input_interactive(rates, reconstructed_rates, pop_labels, pop_colors, N_max)
+    fig_interactive = reconstructed_vs_input_interactive(rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label=id_label)
     interactive_output_name = args.plot_output_name.replace(".png", ".html")
     fig_interactive.write_html(f"{args.plot_output_path}/{interactive_output_name}")
 
     # True vs Reconstructed rates across all time points
-    tvr_fig = reconstructed_vs_input_all_times(rates, reconstructed_rates, pop_labels, pop_colors, N_max)
+    tvr_fig = reconstructed_vs_input_all_times(rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label=id_label)
     tvr_fig.savefig(f"{args.plot_output_path}/{args.plot_output_name}", dpi=500, bbox_inches="tight")
 
     # Percent error in reconstructed rates
@@ -377,7 +380,7 @@ def main():
 
     # Plotting reconstructed rates over time
     if len(pop_labels["population"].unique()) < 10: # only plot if there are less than 10 populations for better visualization
-        rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate")
+        rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate", phased=phased)
         rates_fig_single = plot_rates_single_fig(reconstructed_rates, min_time = args.min_time, max_rate_plot = args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate")
 
         rates_fig.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates")), dpi=500, bbox_inches="tight")

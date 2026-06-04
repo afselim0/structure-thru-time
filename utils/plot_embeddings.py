@@ -23,8 +23,11 @@ def main():
     parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
     parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
+    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, trajectories are per-individual (individual_id) rather than per-haplotype (sample_id)")
 
     args = parser.parse_args()
+    phased = args.phased == "True"
+    id_label = "sample_id" if phased else "individual_id"
     embeddings_df = pd.read_parquet(args.input)
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
@@ -39,8 +42,11 @@ def main():
         lims = float(args.lims)
     
     # subsetting labels_df and colors_df to active samples only
-    active_samples = embeddings_df.sample_id.unique()
-    labels_df = labels_df[labels_df['sample_id'].isin(active_samples)]
+    active_samples = embeddings_df[id_label].unique()
+    labels_df = labels_df[labels_df[id_label].isin(active_samples)]
+    # When unphased, each individual_id appears once per haplotype; collapse to one
+    # row per id so the merge in PlotEmbeddings does not duplicate trajectories.
+    labels_df = labels_df[[id_label, "population"]].drop_duplicates(subset=id_label)
     populations = labels_df['population'].unique()
     colors_df = colors_df[colors_df['population'].isin(populations)]
     # If ancient samples are detected (samples where the embedding is NaN), print who they are
@@ -56,7 +62,7 @@ def main():
     print(f"Building Embeddings plots for embeddings file: {args.input}")
 
     embeddings_df = embeddings_df[embeddings_df['time'] >= min_time]
-    plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=labels_df, colors_df=colors_df)#, generation_time=generation_time)
+    plotter = PlotEmbeddings(embeddings_df=embeddings_df, labels_df=labels_df, colors_df=colors_df, sample_id_col=id_label)#, generation_time=generation_time)
     plotter.init_plot(time_scale=args.time_scale, xy_lims=lims, min_time=min_time, max_time=max_time)
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
@@ -70,7 +76,7 @@ def main():
     try:
         smooth_embeddings = pd.read_parquet(f"{args.input.replace('embeddings', 'smooth_embeddings')}")
         print(f"Building Smoothed Embeddings plots for embeddings file: {args.input.replace('embeddings', 'smooth_embeddings')}")
-        plotter_smooth = PlotEmbeddings(embeddings_df=smooth_embeddings, labels_df=labels_df, colors_df=colors_df)#, generation_time=generation_time)
+        plotter_smooth = PlotEmbeddings(embeddings_df=smooth_embeddings, labels_df=labels_df, colors_df=colors_df, sample_id_col=id_label)#, generation_time=generation_time)
         plotter_smooth.init_plot(time_scale=args.time_scale, xy_lims=lims, min_time=min_time, max_time=max_time)
         plotter_smooth.add_sample_trajectories()
         # plotter_smooth.add_population_medians()

@@ -27,9 +27,18 @@ def run_pca(demes_file_path,n_samples_per_pop,sequence_length=1e7,recombination_
     pca_df["sample_id"] = pca_df["sample_id"].astype(int)
     return pca_df
 
-def plot_pca(pca_df, pop_labels, pop_colors):
+def plot_pca(pca_df, pop_labels, pop_colors, id_label="sample_id"):
     setup_plotting_style()
-    merged_df = pca_df.merge(pop_labels, on="sample_id").merge(pop_colors, on="population")
+    pc_cols = [c for c in pca_df.columns if c.startswith("PC")]
+    # When unphased, average the per-haplotype PCA coordinates within each
+    # individual so that one point is plotted per diploid individual.
+    if id_label != "sample_id":
+        pca_df = (
+            pca_df.merge(pop_labels[["sample_id", id_label]], on="sample_id")
+            .groupby(id_label, as_index=False)[pc_cols].mean()
+        )
+    label_cols = pop_labels[[id_label, "population"]].drop_duplicates(subset=id_label)
+    merged_df = pca_df.merge(label_cols, on=id_label).merge(pop_colors, on="population")
     fig, ax = plt.subplots(figsize=(6,6))
     pops = merged_df['population'].unique()
     for pop in pops:
@@ -55,6 +64,7 @@ def main():
     parser.add_argument("--colors", required=True, help="path to colors file", type=str)
     parser.add_argument("--labels", required=True, help="path to labels file", type=str)
     parser.add_argument("--n", required=True, help="Number of samples per population", type=int)
+    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the data is phased. If False, PCA coordinates are averaged per diploid individual (individual_id) rather than plotted per haplotype (sample_id)")
 
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
@@ -64,13 +74,15 @@ def main():
     labels_path = args.labels
     colors = pd.read_csv(colors_path)
     labels = pd.read_csv(labels_path)
+    phased = args.phased == "True"
+    id_label = "sample_id" if phased else "individual_id"
 
     sequence_length = 1e7
     recombination_rate = 1e-8
     num_components = 2
 
     pca_df = run_pca(demes_file_path, n, sequence_length, recombination_rate, num_components)
-    pca_fig = plot_pca(pca_df,labels,colors)
+    pca_fig = plot_pca(pca_df,labels,colors,id_label=id_label)
 
     pca_fig.savefig(os.path.join(output_path, "pca.png"), dpi=500)
     # pca_df.to_parquet(os.path.join(output_path, "pca_results.parquet"))

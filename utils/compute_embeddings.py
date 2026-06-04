@@ -23,8 +23,11 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
-    
+    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, embeddings are per-individual (indexed by individual_id) rather than per-haplotype (sample_id)")
+
     args = parser.parse_args()
+    phased = args.phased == "True"
+    id_label = "sample_id" if phased else "individual_id"
     input = args.input
     output_path = args.output_path
     print(f"computing embeddings for {input}")
@@ -50,6 +53,16 @@ def main():
     se_df = pd.read_parquet(se_path) if os.path.exists(se_path) else None
     # se_df = None
 
+    # Ignore a standard-errors file whose pair index does not match the rates
+    # (e.g. a stale per-haplotype se file left over from a phased run, while the
+    # current rates are per-individual). Using it would raise a KeyError downstream.
+    if se_df is not None and not se_df.index.equals(rates_df.index):
+        print(
+            f"Standard errors file {se_path} has a pair index that does not match "
+            "the rates (likely stale or computed with a different phased setting); ignoring it."
+        )
+        se_df = None
+
     rates_df.columns = rates_df.columns.astype(float)
     if se_df is not None:
         se_df.columns = se_df.columns.astype(float)
@@ -67,8 +80,10 @@ def main():
     # Parsing sample times if they exist in the population labels file, and checking if any sample times are non-zero (which would indicate ancient samples)
     if "sample_time" in pop_labels_df.columns:
         samples_in_rates = set(rates_df.index.get_level_values(0)).union(set(rates_df.index.get_level_values(1)))
-        sample_times_df = pop_labels_df[["sample_id", "sample_time"]]
-        sample_times_df = sample_times_df[sample_times_df['sample_id'].isin(samples_in_rates)]
+        # When unphased, rates are indexed by individual_id, so sample times are
+        # keyed on individual_id (taking the first sample time per individual).
+        sample_times_df = pop_labels_df[[id_label, "sample_time"]].drop_duplicates(subset=id_label)
+        sample_times_df = sample_times_df[sample_times_df[id_label].isin(samples_in_rates)]
         sample_times = sample_times_df.sample_time.values
         if np.any(sample_times != 0):
             print("Non-zero sample times detected:")
@@ -86,7 +101,7 @@ def main():
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
     X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init)
-    unsmoothed_embeddings_df = LSE.get_embeddings_df()
+    unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
 
@@ -94,7 +109,7 @@ def main():
         print("Computing smoothed embeddings...")
         # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
         X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8)
-        smoothed_embeddings_df = LSE.get_embeddings_df()
+        smoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
         smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
         # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
 

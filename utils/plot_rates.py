@@ -15,7 +15,11 @@ INDIVIDUAL_LINE_ALPHA = 0.2
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
-def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear"):
+def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear", phased=False):
+    if phased:
+        id_label = "sample_id"
+    else:
+        id_label = "individual_id"
     setup_plotting_style()
     populations = pop_labels['population'].unique()
 
@@ -41,8 +45,8 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
                 color = "grey"
             else:
                 color = pop_colors_dict[pop2]
-            pop1_samples = pop_labels[pop_labels['population'] == pop1]['sample_id'].values
-            pop2_samples = pop_labels[pop_labels['population'] == pop2]['sample_id'].values
+            pop1_samples = pop_labels[pop_labels['population'] == pop1][id_label].values
+            pop2_samples = pop_labels[pop_labels['population'] == pop2][id_label].values
             sample_pairs = []
             for s1 in pop1_samples:
                 for s2 in pop2_samples:
@@ -97,6 +101,7 @@ def main():
     parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
+    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If false, colors are based on individual_id rather than sample_id")
     
     args = parser.parse_args()
     rates_df = pd.read_parquet(args.input)
@@ -106,18 +111,23 @@ def main():
     output_name = args.output_name
     min_time = args.min_time
     max_rate_plot = args.max_rate_plot
+    phased = args.phased == "True"
 
     print(f"Plotting coalescence rates from file: {args.input}")
 
     # Subsetting labels_df and colors_df to active samples only
+    if phased:
+        id_label = "sample_id"
+    else:
+        id_label = "individual_id"
     active_pairs = rates_df.index.values
     active_samples = np.unique([item for sublist in active_pairs for item in sublist])
-    pop_labels = labels_df[labels_df['sample_id'].isin(active_samples)]
+    pop_labels = labels_df[labels_df[id_label].isin(active_samples)]
     populations = pop_labels['population'].unique()
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
     if len(populations) <= 6 and len(populations) > 1:
-        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
+        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale, phased=phased)
         rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
         rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:

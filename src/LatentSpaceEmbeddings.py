@@ -234,7 +234,15 @@ class LatentSpaceEmbeddings:
         self.embeddings = X_smooth
         return X_smooth
 
-    def get_embeddings_df(self):
+    def get_embeddings_df(self, id_label: str = "sample_id"):
+        """Return the embeddings as a long dataframe.
+
+        Args:
+            id_label (str): Name of the identifier column.  Use "sample_id" for
+                phased (per-haplotype) data and "individual_id" for unphased
+                (per-individual) data, so the column matches the entity that the
+                rates_df index referred to.
+        """
         assert self.embeddings is not None, (
             "Embeddings have not been computed yet. "
             "Please run compute_embeddings_through_time() first."
@@ -247,7 +255,7 @@ class LatentSpaceEmbeddings:
 
         # Base dataframe
         df = pd.DataFrame({
-            "sample_id": np.repeat(sample_ids, T),
+            id_label: np.repeat(sample_ids, T),
             "time": times,
         })
 
