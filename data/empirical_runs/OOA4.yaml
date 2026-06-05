@@ -1,0 +1,38 @@
+version: 1
+num_threads: 12
+
+# file paths
+output_path: ../results/empirical/Wohns/OOA4.npp20_test
+# trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/wohns_chopped/
+trees_dir: ../data/trees/wohns_chopped
+pop_colors: ../data/metadata/wohns_pop_colors.csv
+pop_labels: ../data/metadata/wohns_pop_labels.csv
+num_posterior_samples: 1
+
+# coal time pdf estimation
+n_samples_per_pop: 20
+pops: YRI,CEU,CHB,JPT
+max_time: 2000
+n_timepoints: 2000
+# fraction_samples - run if using more than 500 samps
+
+# rate estimation parameters
+min_window_size: 60
+max_window_size: 500
+
+# Embeddings estimation parameters
+N_min: 1000
+N_max: 10000000
+n_timepoints_emb: 1000
+# l1: [0.05,0.05] 
+# l2: [0.005,0.005]
+
+# Plotting parameters
+min_time: 30
+max_rate_plot: 0.00005
+#embeddings_plot_lims: 5000000
+#embeddings_max_time: 5000
+time_scale: log
+
+
+# link_function: exponential

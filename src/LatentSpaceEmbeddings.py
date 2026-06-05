@@ -11,11 +11,11 @@ class LatentSpaceEmbeddings:
                  sample_times:          list         = None,
                  N_min:                 float        = 1,
                  N_max:                 float        = np.inf,
-                 individuals:           bool         = False,
                  n_components:          int          = 2,
                  l1_strengths:         dict         = None,
                  l2_strengths:         dict         = None,
-                 weight_cap_percentile: float        = .95):
+                 weight_cap_percentile: float        = 95,
+                 default_weights:       int        = 1e6):
 
         rates_df.columns = rates_df.columns.astype(float)
 
@@ -53,22 +53,16 @@ class LatentSpaceEmbeddings:
             R[j, i, :] = r
             if se_df is not None:
                 se = se_df.loc[(s1, s2)].values
-                w = (r+1/self.N_max) / se ** 2
-                # with np.errstate(divide='ignore', invalid='ignore'):
-                #     w = np.where(
-                #         r > 0,
-                #         r / se ** 2,     # Poisson-motivated: λ/σ² = effective exposure
-                #         1.0 / se ** 2    # r=0 fallback: pure precision; se=0 → inf → capped
-                #     )
+                w = (r+(1/self.N_max)) / (se) ** 2 #Adding 1/N_max to avoid zero weights when r is zero
                 W[i, j, :] = w
                 W[j, i, :] = w
             else:
-                W[i, j, :] = 1.0
-                W[j, i, :] = 1.0
-
-        # --- Cap extreme weights ---
-        cap = np.nanpercentile(W, weight_cap_percentile)
-        W   = np.clip(W, 0, cap)
+                W[i, j, :] = default_weights
+                W[j, i, :] = default_weights
+            
+        W[np.isinf(W)] = np.nanmax(W)*10 # Cap infinite weights to be an order of magnitude higher than the maximum finite weight (can happen when se is zero)
+        w_cap = np.nanpercentile(W, weight_cap_percentile) # Cap weights at a high percentile to avoid extreme outliers dominating the optimization
+        W = np.clip(W, 0, w_cap)
 
         # --- Mask ancient samples in both R and W ---
         sampled_by_time = self.sample_times[:, np.newaxis] <= self.time_points
@@ -83,66 +77,26 @@ class LatentSpaceEmbeddings:
         self.R = R
         self.W = W
 
-        # --- Average over individuals ---
-        if individuals:
-            self._average_over_individuals()
-
         # --- Precompute reference loss and total weight for scale-matching ---
         ii, jj      = np.triu_indices(self.num_samples, k=1)
         r_upper     = self.R[ii, jj, :]              # (n_pairs, T)
         w_upper     = self.W[ii, jj, :]
         valid       = np.isfinite(r_upper) & np.isfinite(w_upper) & (r_upper > 0)
         r_v, w_v    = r_upper[valid], w_upper[valid]
-        self.w_tot  = w_v.sum()
-        self.saturated_loss = np.sum(w_v * r_v * (1 - np.log(r_v))) / self.w_tot
-
-        # Per-timepoint: used for ftol in stage-1 per-slice optimization
-        wl = np.where(valid, w_upper * r_upper * (1 - np.log(np.where(valid, r_upper, 1))), 0.0)
-        w  = np.where(valid, w_upper, 0.0)
-        w_tot_t       = w.sum(axis=0)                                         # (T,)
-        self.saturated_loss_t = np.where(w_tot_t > 0, wl.sum(axis=0) / w_tot_t, np.nan)  # (T,)
-        self.w_tot_t    = w_tot_t                                             # (T,)
+        
+        self.saturated_loss = np.sum(w_v * r_v * (1 - np.log(r_v)))
+        
+        # self.w_tot  = w_v.sum()
+        # # Per-timepoint: used for ftol in stage-1 per-slice optimization
+        # wl = np.where(valid, w_upper * r_upper * (1 - np.log(np.where(valid, r_upper, 1))), 0.0)
+        # w  = np.where(valid, w_upper, 0.0)
+        # w_tot_t       = w.sum(axis=0)                                         # (T,)
+        # self.saturated_loss_t = np.where(w_tot_t > 0, wl.sum(axis=0) / w_tot_t, np.nan)  # (T,)
+        # self.w_tot_t    = w_tot_t                   
+        #                           # (T,)
         self.l1_strengths = l1_strengths
         self.l2_strengths = l2_strengths
 
-    def _average_over_individuals(self):
-        """Average R and sum W over haplotype pairs within each individual."""
-        n_ind = self.num_samples // 2
-        T     = self.num_timepoints
-        R_ind = np.full((n_ind, n_ind, T), np.nan)
-        W_ind = np.full((n_ind, n_ind, T), np.nan)
-
-        for i in range(n_ind):
-            for j in range(i + 1, n_ind):
-                R_block = self.R[2*i:2*i+2, 2*j:2*j+2, :]
-                W_block = self.W[2*i:2*i+2, 2*j:2*j+2, :]
-                if not np.all(np.isnan(R_block)):
-                    R_ind[i, j, :] = np.nanmean(R_block, axis=(0, 1))
-                    R_ind[j, i, :] = R_ind[i, j, :]
-                    W_ind[i, j, :] = np.nansum(W_block, axis=(0, 1))
-                    W_ind[j, i, :] = W_ind[i, j, :]
-
-        self.R               = R_ind
-        self.W               = W_ind
-        self.num_samples     = n_ind
-        self.sampled_by_time = self.sampled_by_time[::2, :]
-
-    # def _parse_smoothing_params(self, l1_penalty, l2_penalty):
-    #     if l1_penalty is None and l2_penalty is None:
-    #         self.smoothing_params = None
-    #         return
-    #     assert l1_penalty is None or isinstance(l1_penalty, dict), "l1_penalty must be a dict"
-    #     assert l2_penalty is None or isinstance(l2_penalty, dict), "l2_penalty must be a dict"
-    #     max_order = max(
-    #         max(l1_penalty.keys()) if l1_penalty else 0,
-    #         max(l2_penalty.keys()) if l2_penalty else 0,
-    #     )
-    #     self.smoothing_params = {
-    #         "l1":            l1_penalty or {},
-    #         "l2":            l2_penalty or {},
-    #         "diff_operators": compute_difference_operators(
-    #                               self.num_timepoints, max_order, self.delta_t),
-    #     }
     def _parse_smoothing_params(self, l1_strengths, l2_strengths):
         """Compute smoothing weights from transferable strengths and the current embeddings.
 
