@@ -275,24 +275,25 @@ rule STT_replicates:
 # =====================================================
 
 # ______________________sim Rules______________________
-rule preprocess_data:
-    input:
-        demes_file_path = demes_file_path,
-        script = preprocess_demography_script
-    output:
-        pop_colors,
-        pop_labels
-    params:
-        outdir = data_output_path,
-        n_per_pop = n_sim_per_pop
-    shell:
-        """
-        mkdir -p {params.outdir}
-        python {input.script} \
-            --demes_file_path {input.demes_file_path} \
-            --output_path {params.outdir} \
-            --n {params.n_per_pop}
-        """
+if pop_colors ==  os.path.join(output_path,"data/pop_colors.csv") or pop_labels == os.path.join(output_path,"data/pop_colors.csv"):
+    rule preprocess_data:
+        input:
+            demes_file_path = demes_file_path,
+            script = preprocess_demography_script
+        output:
+            pop_colors,
+            pop_labels
+        params:
+            outdir = data_output_path,
+            n_per_pop = n_sim_per_pop
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --demes_file_path {input.demes_file_path} \
+                --output_path {params.outdir} \
+                --n {params.n_per_pop}
+            """
 rule plot_demography:
     input:
         demes_file_path = demes_file_path,
