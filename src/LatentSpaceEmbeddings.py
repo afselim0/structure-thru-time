@@ -151,20 +151,22 @@ class LatentSpaceEmbeddings:
     def compute_embeddings_through_time(self,
                                         X_init = None,
                                         target_precision = 1e-8,
-                                        compute_uncertainty = False):
+                                        compute_uncertainty = False,
+                                        exact_hessian = True):
         """Compute embeddings by coordinate descent over time points
 
         Args:
             X_init (_type_, optional): initial solution over all time points. Defaults to None.
             target_precision (float, optional): target precision for the optimization.
-            compute_uncertainty (bool): if True, compute per-sample Laplace covariances via the
-                L-BFGS inverse Hessian and store in self.covariances.
+            compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
+            exact_hessian (bool): if True (default), use exact analytical Hessian for
+                covariance estimation; if False, use L-BFGS approximation.
 
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
         # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, return_covariances = compute_uncertainty)#, ftol=ftol_t)
+        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
         if compute_uncertainty:
             X, loss_df, covariances = result
             self.covariances = covariances

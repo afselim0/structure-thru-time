@@ -36,23 +36,72 @@ from sklearn.manifold import smacof
 # General Functions
 ############################################################
 
-def extract_sample_covariances(hess_inv, n, d):
-    """Extract per-sample d×d covariance matrices from a L-BFGS inverse Hessian operator.
+def _compute_exact_hessian(X_t, R_t, W_t, N_min):
+    """Exact Hessian of the unpenalized timepoint loss w.r.t. flattened X_t.
 
-    Under the Laplace approximation the posterior covariance is H^{-1}. scipy's L-BFGS-B
-    result.hess_inv approximates H^{-1} as a LinearOperator. We materialise the dense matrix
-    and extract the d×d diagonal block for each sample's coordinates.
+    Uses the analytical second derivative of the Poisson loss under the default
+    inverse-distance link f(d) = 1/(d + N_min).  The result is symmetric with
+    exactly d zero eigenvalues (translation invariance).
+    """
+    n, d = X_t.shape
+    D = squareform(pdist(X_t, 'euclidean'))
+    f, f_prime = compute_f(D, N_min)
+    f_pp = 2.0 * f ** 3  # f'' = 2/(d+N_min)^3 = 2*f^3 for inverse_distance
+
+    valid = ~np.isnan(R_t) & (D > 0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        one_minus_rf = np.where(valid, 1.0 - R_t / f, 0.0)
+        M = np.where(valid, f_prime / D * one_minus_rf, 0.0)
+        A = np.where(valid, f_pp * one_minus_rf + R_t * f_prime**2 / f**2, 0.0)
+
+    WM    = W_t * M
+    alpha = W_t * (A - M)
+
+    D_safe = np.where(D > 0, D, 1.0)
+    diff   = X_t[:, None, :] - X_t[None, :, :]
+    U      = np.where(D[:, :, None] > 0, diff / D_safe[:, :, None], 0.0)
+
+    H, I_d = np.zeros((n * d, n * d)), np.eye(d)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if not valid[i, j]:
+                continue
+            block = alpha[i, j] * np.outer(U[i, j], U[i, j]) + WM[i, j] * I_d
+            si, sj = slice(i*d, (i+1)*d), slice(j*d, (j+1)*d)
+            H[si, si] += block
+            H[sj, sj] += block
+            H[si, sj] -= block
+            H[sj, si] -= block
+    return H
+
+
+def extract_sample_covariances(X_t, R_t, W_t, N_min, hess_inv=None, exact=True):
+    """Extract per-sample d×d Laplace covariance blocks.
 
     Args:
-        hess_inv: scipy LbfgsInvHessProduct — shape (n*d, n*d)
-        n (int): number of samples
-        d (int): number of embedding dimensions
+        X_t (np.ndarray): (n, d) coordinates at the optimum.
+        R_t (np.ndarray): (n, n) rate matrix used in optimization.
+        W_t (np.ndarray): (n, n) weight matrix.
+        N_min (float): link function parameter.
+        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct). Only used when exact=False.
+        exact (bool): If True (default), compute the exact Hessian analytically and
+            pseudoinvert it.  If False, materialise the L-BFGS approximation instead.
 
     Returns:
         np.ndarray: shape (n, d, d)
     """
-    n_params = n * d
-    H_inv = hess_inv @ np.eye(n_params)
+    n, d = X_t.shape
+    if exact:
+        H = _compute_exact_hessian(X_t, R_t, W_t, N_min)
+        # Eigendecompose (symmetric) and invert only positive eigenvalues.
+        # This correctly handles both the d translation-invariance zeros and any
+        # small negative eigenvalues that arise from numerical imprecision.
+        eigvals, eigvecs = np.linalg.eigh(H)
+        threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
+        inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
+        H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
+    else:
+        H_inv = hess_inv @ np.eye(n * d)
     return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
 
 def compute_f(D,
@@ -312,6 +361,7 @@ def coordinate_descent_over_time(
     gtol               = GTOL_TIMEPOINT,
     ftol               = FTOL_TIMEPOINT,
     return_covariances = False,
+    exact_hessian      = True,
 ):
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -329,6 +379,9 @@ def coordinate_descent_over_time(
     Returns:
         tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
                covariances has shape (n, d, d, T).
+        exact_hessian (bool): If True (default), compute the exact analytical Hessian for
+               covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
+               (faster but significantly less accurate — see extract_sample_covariances).
     """
     print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
     n_samples, _, n_timepoints = R.shape
@@ -374,16 +427,21 @@ def coordinate_descent_over_time(
             X_init_t, R_t, W_t, N_min, N_max)
 
         # --- Optimize ---
+        need_hess_inv = return_covariances and not exact_hessian
+        X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
+            X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol,
+            return_hess_inv=need_hess_inv)
+        hess_inv = _hess[0] if _hess else None
+
         if return_covariances:
-            X_t, loss_t_after, n_iter, message, hess_inv = optimize_timepoint(
-                X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol, return_hess_inv=True)
             try:
-                covs = extract_sample_covariances(hess_inv, len(extant_idx), n_components)
+                covs = extract_sample_covariances(
+                    X_t, R_t, W_t, N_min,
+                    hess_inv=hess_inv,
+                    exact=exact_hessian,
+                )
             except Exception:
                 covs = None
-        else:
-            X_t, loss_t_after, n_iter, message = optimize_timepoint(
-                X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol)
 
         # --- Center (first step only) and Procrustes align ---
         if step == 0:
