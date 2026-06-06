@@ -262,9 +262,9 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.i
     return loss, grad.ravel()
 
 
-def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init=False,
+def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf,
                        max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT,
-                       return_hess_inv=False):
+                       MDS_init=False, return_hess_inv=False):
     """Single L-BFGS-B step for one timepoint.
 
     Args:
