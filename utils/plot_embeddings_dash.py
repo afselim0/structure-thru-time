@@ -122,7 +122,7 @@ def load_and_pack(
     time_col = "time"
     x_col = "X1"
     y_col = "X2"
-    id_col = "sample_id"
+    id_col = "individual_id" if "individual_id" in df.columns else "sample_id"
 
     df = df[(df[time_col] >= min_time) & (df[time_col] <= max_time)].copy()
     if df.empty:
@@ -156,7 +156,7 @@ def load_and_pack(
     colors_df = pd.read_csv(colors_path)
 
     if id_col not in labels_df.columns or "population" not in labels_df.columns:
-        raise ValueError("labels CSV must contain columns: sample_id, population")
+        raise ValueError(f"labels CSV must contain columns: {id_col}, population")
     if "population" not in colors_df.columns or "color" not in colors_df.columns:
         raise ValueError("colors CSV must contain columns: population, color")
 
