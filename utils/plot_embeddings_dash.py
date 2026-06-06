@@ -94,7 +94,7 @@ def load_covariances(
     covariances = np.full((T, N, 2, 2), np.nan, dtype=np.float64)
 
     t_codes = pd.Categorical(df["time_bin"], categories=times, ordered=True).codes
-    s_codes = pd.Index(sample_order).get_indexer(df["sample_id"].astype(str).to_numpy())
+    s_codes = pd.Index(sample_order.astype(str)).get_indexer(df["sample_id"].astype(str).to_numpy())
 
     valid = (t_codes >= 0) & (s_codes >= 0)
     tc = t_codes[valid]
@@ -524,7 +524,12 @@ def load_rates(
 
     labels_df = pd.read_csv(labels_path)
     colors_df = pd.read_csv(colors_path)
-    pop_map = dict(zip(labels_df["sample_id"].astype(str), labels_df["population"].astype(str)))
+    # Map the rate-pair index to populations using whichever id the rates are
+    # indexed by: per-individual rates (phased=False) use individual_id, while
+    # per-haplotype rates use sample_id.
+    idx_name = str(input_rates.index.names[0] or "")
+    id_col = "individual_id" if ("individual" in idx_name and "individual_id" in labels_df.columns) else "sample_id"
+    pop_map = dict(zip(labels_df[id_col].astype(str), labels_df["population"].astype(str)))
     pop_color_map = dict(zip(colors_df["population"].astype(str), colors_df["color"].astype(str)))
 
     sid1 = input_rates.index.get_level_values(0).astype(str)
@@ -814,16 +819,27 @@ def make_app(
         Output("axis_store", "data"),
         Input("fit_axes", "n_clicks"),
         Input("reset_axes", "n_clicks"),
+        Input("graph2d", "relayoutData"),
         State("t_idx", "value"),
         prevent_initial_call=True,
     )
-    def update_axis_store(fit_clicks, reset_clicks, t_idx):
+    def update_axis_store(fit_clicks, reset_clicks, relayout_data, t_idx):
         trig = ctx.triggered_id
         if trig == "reset_axes":
             return None
         if trig == "fit_axes":
             return _fit_axes_to_frame(data, int(t_idx))
-        return None
+        if trig == "graph2d" and relayout_data:
+            if "xaxis.range[0]" in relayout_data:
+                return {
+                    "xlo": relayout_data["xaxis.range[0]"],
+                    "xhi": relayout_data["xaxis.range[1]"],
+                    "ylo": relayout_data["yaxis.range[0]"],
+                    "yhi": relayout_data["yaxis.range[1]"],
+                }
+            if "xaxis.autorange" in relayout_data or "autosize" in relayout_data:
+                return None
+        return no_update
 
     @app.callback(
         Output("play_interval", "disabled"),
