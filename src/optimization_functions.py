@@ -36,6 +36,25 @@ from sklearn.manifold import smacof
 # General Functions
 ############################################################
 
+def extract_sample_covariances(hess_inv, n, d):
+    """Extract per-sample d×d covariance matrices from a L-BFGS inverse Hessian operator.
+
+    Under the Laplace approximation the posterior covariance is H^{-1}. scipy's L-BFGS-B
+    result.hess_inv approximates H^{-1} as a LinearOperator. We materialise the dense matrix
+    and extract the d×d diagonal block for each sample's coordinates.
+
+    Args:
+        hess_inv: scipy LbfgsInvHessProduct — shape (n*d, n*d)
+        n (int): number of samples
+        d (int): number of embedding dimensions
+
+    Returns:
+        np.ndarray: shape (n, d, d)
+    """
+    n_params = n * d
+    H_inv = hess_inv @ np.eye(n_params)
+    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+
 def compute_f(D,
               N_min,
               link="inverse_distance"): 
@@ -80,7 +99,7 @@ def procrustes_single_time(X_reference, Y):
     U, _, Vt = np.linalg.svd(cov_matrix)
     rotation_matrix = np.dot(U, Vt)
     Y_rotated = np.dot(Y_centered, rotation_matrix)
-    return Y_rotated
+    return Y_rotated, rotation_matrix
 
 def procrustes_alignment(X):
     X_aligned = np.zeros_like(X)
@@ -90,7 +109,7 @@ def procrustes_alignment(X):
     X_aligned[:,:,0] = X_reference
     for t in range(1,n_timepoints):
         Y = X[:,:,t]
-        Y_aligned = procrustes_single_time(X_reference,Y)
+        Y_aligned, _ = procrustes_single_time(X_reference,Y)
         X_aligned[:,:,t] = Y_aligned
     return X_aligned
 
@@ -243,8 +262,9 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.i
     return loss, grad.ravel()
 
 
-def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init = False,
-                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT):
+def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init=False,
+                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT,
+                       return_hess_inv=False):
     """Single L-BFGS-B step for one timepoint.
 
     Args:
@@ -254,9 +274,11 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init 
         N_min, N_max (float): Link function parameters.
         max_iter (int): Maximum L-BFGS-B iterations.
         gtol, ftol (float): Convergence tolerances.
+        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
 
     Returns:
-        tuple: (X_opt, loss, n_iterations, message)
+        tuple: (X_opt, loss, n_iterations, message) or
+               (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
     """
     if MDS_init:
         n_components = X_t_init.shape[1]
@@ -271,21 +293,25 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init 
         jac=True,
         options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
     )
-    return result.x.reshape(X_t_init.shape), result.fun, result.nit, result.message
+    X_opt = result.x.reshape(X_t_init.shape)
+    if return_hess_inv:
+        return X_opt, result.fun, result.nit, result.message, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
 
 
 def coordinate_descent_over_time(
     R,
-    W              = None,
-    N_min          = 1,
-    N_max          = np.inf,
-    n_components   = 2,
-    X_init         = None,
-    sampled_by_time = None,
-    direction      = "backward",
-    max_iter       = MAX_ITER_TIMEPOINT,
-    gtol           = GTOL_TIMEPOINT,
-    ftol           = FTOL_TIMEPOINT,
+    W                  = None,
+    N_min              = 1,
+    N_max              = np.inf,
+    n_components       = 2,
+    X_init             = None,
+    sampled_by_time    = None,
+    direction          = "backward",
+    max_iter           = MAX_ITER_TIMEPOINT,
+    gtol               = GTOL_TIMEPOINT,
+    ftol               = FTOL_TIMEPOINT,
+    return_covariances = False,
 ):
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -301,7 +327,8 @@ def coordinate_descent_over_time(
         direction (str): "backward" (default) or "forward".
 
     Returns:
-        tuple: (X, loss_df)
+        tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
+               covariances has shape (n, d, d, T).
     """
     print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
     n_samples, _, n_timepoints = R.shape
@@ -316,6 +343,8 @@ def coordinate_descent_over_time(
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
     loss_before, loss_after, n_iters, messages = [], [], [], []
+    if return_covariances:
+        covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
 
     time_order = range(n_timepoints) if direction == "forward" \
                  else range(n_timepoints - 1, -1, -1)
@@ -345,14 +374,26 @@ def coordinate_descent_over_time(
             X_init_t, R_t, W_t, N_min, N_max)
 
         # --- Optimize ---
-        X_t, loss_t_after, n_iter, message = optimize_timepoint(
-            X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol)
+        if return_covariances:
+            X_t, loss_t_after, n_iter, message, hess_inv = optimize_timepoint(
+                X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol, return_hess_inv=True)
+            try:
+                covs = extract_sample_covariances(hess_inv, len(extant_idx), n_components)
+            except Exception:
+                covs = None
+        else:
+            X_t, loss_t_after, n_iter, message = optimize_timepoint(
+                X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol)
 
         # --- Center (first step only) and Procrustes align ---
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
-        X_t = procrustes_single_time(X_global[extant_idx, :], X_t)
+        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
         X[extant_idx, :, t_idx] = X_t
+
+        if return_covariances and covs is not None:
+            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
+            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
 
         loss_before.append(loss_t_before)
         loss_after.append(loss_t_after)
@@ -368,6 +409,8 @@ def coordinate_descent_over_time(
         "n_iterations": n_iters,
         "message":      messages,
     })
+    if return_covariances:
+        return X, loss_df, covariances
     return X, loss_df
 
     
