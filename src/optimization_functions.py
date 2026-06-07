@@ -36,17 +36,23 @@ from sklearn.manifold import smacof
 # General Functions
 ############################################################
 
-def _compute_exact_hessian(X_t, R_t, W_t, N_min):
+def _compute_exact_hessian(X_t, R_t, W_t, N_min, link="inverse_distance"):
     """Exact Hessian of the unpenalized timepoint loss w.r.t. flattened X_t.
 
-    Uses the analytical second derivative of the Poisson loss under the default
-    inverse-distance link f(d) = 1/(d + N_min).  The result is symmetric with
-    exactly d zero eigenvalues (translation invariance).
+    The result is symmetric with exactly d zero eigenvalues (translation invariance).
+    link must match the link function used in compute_loss_gradient_timepoint.
     """
     n, d = X_t.shape
     D = squareform(pdist(X_t, 'euclidean'))
-    f, f_prime = compute_f(D, N_min)
-    f_pp = 2.0 * f ** 3  # f'' = 2/(d+N_min)^3 = 2*f^3 for inverse_distance
+    f, f_prime = compute_f(D, N_min, link=link)
+    if link == "inverse_distance":       # f = 1/(D+N_min)
+        f_pp = 2.0 * f**3
+    elif link == "inverse_sq_distance":  # f = 1/(D^2+N_min)
+        f_pp = (6*D**2 - 2*N_min) * f**3
+    elif link == "exponential":          # f = (1/N_min)*exp(-D)
+        f_pp = f
+    else:
+        raise ValueError(f"Unsupported link for Hessian: {link}")
 
     valid = ~np.isnan(R_t) & (D > 0)
     with np.errstate(divide='ignore', invalid='ignore'):
