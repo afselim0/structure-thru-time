@@ -752,31 +752,11 @@ def make_app(
                     ),
                     dcc.Checklist(
                         id="show_ellipses",
-                        options=[{"label": " Ellipses", "value": "yes",
+                        options=[{"label": " 95% Ellipses", "value": "yes",
                                   "disabled": not has_covariances}],
                         value=[],
                         style={"whiteSpace": "nowrap",
                                "display": "inline" if has_covariances else "none"},
-                    ),
-                    html.Div(
-                        id="conf_level_container",
-                        style={"display": "flex" if has_covariances else "none",
-                               "flexDirection": "column", "alignItems": "center",
-                               "minWidth": "90px"},
-                        children=[
-                            html.Label("Conf. level", style={"fontSize": "12px", "marginBottom": "2px"}),
-                            dcc.Dropdown(
-                                id="confidence_level_dropdown",
-                                options=[
-                                    {"label": "68%", "value": 0.68},
-                                    {"label": "90%", "value": 0.90},
-                                    {"label": "95%", "value": 0.95},
-                                ],
-                                value=confidence_level,
-                                clearable=False,
-                                style={"width": "70px", "fontSize": "12px"},
-                            ),
-                        ],
                     ),
                     dcc.Checklist(
                         id="show_rates",
@@ -884,13 +864,12 @@ def make_app(
         Input("show_labels", "value"),
         Input("axis_store", "data"),
         Input("show_ellipses", "value"),
-        Input("confidence_level_dropdown", "value"),
     )
-    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val, conf_level):
+    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val):
         t_idx = int(t_idx)
         show = "yes" in (show_labels_val or [])
         ellipses = "yes" in (show_ellipses_val or [])
-        level = float(conf_level) if conf_level is not None else confidence_level
+        level = 0.95
         t_val = float(times[t_idx])
 
         fig_2d = make_figure(
@@ -918,10 +897,9 @@ def make_app(
         Output("graph2d", "figure", allow_duplicate=True),
         Input("graph2d", "hoverData"),
         State("t_idx", "value"),
-        State("confidence_level_dropdown", "value"),
         prevent_initial_call=True,
     )
-    def highlight_on_hover(hover_data, t_idx_val, conf_level_val):
+    def highlight_on_hover(hover_data, t_idx_val):
         if not has_covariances:
             return no_update
         if not hover_data or not hover_data.get("points"):
@@ -929,7 +907,7 @@ def make_app(
 
         point = hover_data["points"][0]
         curve_num = point.get("curveNumber", -1)
-        level = float(conf_level_val) if conf_level_val is not None else confidence_level
+        level = 0.95
         t_int = int(t_idx_val)
 
         patched = Patch()
