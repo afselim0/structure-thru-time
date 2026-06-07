@@ -170,16 +170,12 @@ class LatentSpaceEmbeddings:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
         # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-<<<<<<< HEAD
-        X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, k = self.k, link = self.link, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time)#, ftol=ftol_t)
-=======
-        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
+        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, k = self.k, link = self.link, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
         if compute_uncertainty:
             X, loss_df, covariances = result
             self.covariances = covariances
         else:
             X, loss_df = result
->>>>>>> f4587c1e176ad1112818a0706147b8321c49232a
         # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
