@@ -24,7 +24,7 @@ Input assumptions
 
 CLI flags
 - --time-scale  log|linear  (default log)
-- --time-stride N           subsample time points for 3D trajectories (default 5)
+- --time-stride N           subsample time points for 3D trajectories (default 1)
 - --lims        float       symmetric XY axis limit (both views)
 
 Example run: 
@@ -673,6 +673,7 @@ def make_app(
     xy_lims: float | None = None,
     rates_data: dict | None = None,
     confidence_level: float = 0.68,
+    meta: dict | None = None,
 ):
     app = Dash(__name__)
     times = data["times"]
@@ -790,6 +791,18 @@ def make_app(
                 style={"display": "none", "marginTop": "4px"},
                 children=[
                     dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "260px"}),
+                ],
+            ),
+            html.Hr(style={"marginTop": "12px", "borderColor": "#ddd"}),
+            html.Div(
+                style={"fontSize": "11px", "color": "#888", "lineHeight": "1.8",
+                       "padding": "4px 0 8px 0"},
+                children=[
+                    html.Div(html.Span("Settings", style={"fontWeight": "bold"})),
+                    *[
+                        html.Div(f"{k}: {v}")
+                        for k, v in (meta or {}).items()
+                    ],
                 ],
             ),
         ],
@@ -1056,8 +1069,8 @@ if __name__ == "__main__":
                    help="Do not round XY to integers")
     p.add_argument("--time_scale", type=str, default="linear", choices=["log", "linear"],
                    help="Z-axis scale for 3D view (default linear)")
-    p.add_argument("--time_stride", type=int, default=5,
-                   help="Keep every Nth time point in 3D trajectories (default 5)")
+    p.add_argument("--time_stride", type=int, default=1,
+                   help="Keep every Nth time point in 3D trajectories (default 1; increase for very large datasets)")
     p.add_argument("--lims", type=str, default="None",
                    help="Symmetric XY axis limit (both views), or 'None'")
     p.add_argument("--generation_time", type=float, default=None,
@@ -1101,6 +1114,19 @@ if __name__ == "__main__":
             colors_path=args.colors,
         )
 
+    meta = {
+        "embeddings": args.parquet,
+        "labels":     args.labels,
+        "colors":     args.colors,
+        "rates":      args.rates or "—",
+        "recon. rates": args.reconstructed_rates or "—",
+        "covariances": args.covariances or "—",
+        "N_max":      args.N_max,
+        "time_scale": args.time_scale,
+        "min_time":   args.min_time,
+        "max_time":   args.max_time,
+    }
+
     app = make_app(
         data,
         time_scale=args.time_scale,
@@ -1108,6 +1134,7 @@ if __name__ == "__main__":
         xy_lims=lims,
         rates_data=rates_data,
         confidence_level=args.confidence_level,
+        meta=meta,
     )
     import socket
 
