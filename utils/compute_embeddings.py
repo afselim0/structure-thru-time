@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
+    parser.add_argument("--k", type=int, default=1, help="Exponent of the distance in the link function")
+    parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential)")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
     parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
@@ -96,7 +98,7 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, k=args.k, link=args.link, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
