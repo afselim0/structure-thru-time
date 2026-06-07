@@ -38,6 +38,80 @@ from sklearn.manifold import smacof
 # General Functions
 ############################################################
 
+def _compute_exact_hessian(X_t, R_t, W_t, N_min, link="inverse_distance"):
+    """Exact Hessian of the unpenalized timepoint loss w.r.t. flattened X_t.
+
+    The result is symmetric with exactly d zero eigenvalues (translation invariance).
+    link must match the link function used in compute_loss_gradient_timepoint.
+    """
+    n, d = X_t.shape
+    D = squareform(pdist(X_t, 'euclidean'))
+    f, f_prime = compute_f(D, N_min, link=link)
+    if link == "inverse_distance":       # f = 1/(D+N_min)
+        f_pp = 2.0 * f**3
+    elif link == "inverse_sq_distance":  # f = 1/(D^2+N_min)
+        f_pp = (6*D**2 - 2*N_min) * f**3
+    elif link == "exponential":          # f = (1/N_min)*exp(-D)
+        f_pp = f
+    else:
+        raise ValueError(f"Unsupported link for Hessian: {link}")
+
+    valid = ~np.isnan(R_t) & (D > 0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        one_minus_rf = np.where(valid, 1.0 - R_t / f, 0.0)
+        M = np.where(valid, f_prime / D * one_minus_rf, 0.0)
+        A = np.where(valid, f_pp * one_minus_rf + R_t * f_prime**2 / f**2, 0.0)
+
+    WM    = W_t * M
+    alpha = W_t * (A - M)
+
+    D_safe = np.where(D > 0, D, 1.0)
+    diff   = X_t[:, None, :] - X_t[None, :, :]
+    U      = np.where(D[:, :, None] > 0, diff / D_safe[:, :, None], 0.0)
+
+    H, I_d = np.zeros((n * d, n * d)), np.eye(d)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if not valid[i, j]:
+                continue
+            block = alpha[i, j] * np.outer(U[i, j], U[i, j]) + WM[i, j] * I_d
+            si, sj = slice(i*d, (i+1)*d), slice(j*d, (j+1)*d)
+            H[si, si] += block
+            H[sj, sj] += block
+            H[si, sj] -= block
+            H[sj, si] -= block
+    return H
+
+
+def extract_sample_covariances(X_t, R_t, W_t, N_min, hess_inv=None, exact=True):
+    """Extract per-sample d×d Laplace covariance blocks.
+
+    Args:
+        X_t (np.ndarray): (n, d) coordinates at the optimum.
+        R_t (np.ndarray): (n, n) rate matrix used in optimization.
+        W_t (np.ndarray): (n, n) weight matrix.
+        N_min (float): link function parameter.
+        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct). Only used when exact=False.
+        exact (bool): If True (default), compute the exact Hessian analytically and
+            pseudoinvert it.  If False, materialise the L-BFGS approximation instead.
+
+    Returns:
+        np.ndarray: shape (n, d, d)
+    """
+    n, d = X_t.shape
+    if exact:
+        H = _compute_exact_hessian(X_t, R_t, W_t, N_min)
+        # Eigendecompose (symmetric) and invert only positive eigenvalues.
+        # This correctly handles both the d translation-invariance zeros and any
+        # small negative eigenvalues that arise from numerical imprecision.
+        eigvals, eigvecs = np.linalg.eigh(H)
+        threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
+        inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
+        H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
+    else:
+        H_inv = hess_inv @ np.eye(n * d)
+    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+
 def compute_f(D,
               N_min,
               k=1,
@@ -78,7 +152,7 @@ def procrustes_single_time(X_reference, Y):
     U, _, Vt = np.linalg.svd(cov_matrix)
     rotation_matrix = np.dot(U, Vt)
     Y_rotated = np.dot(Y_centered, rotation_matrix)
-    return Y_rotated
+    return Y_rotated, rotation_matrix
 
 def procrustes_alignment(X):
     X_aligned = np.zeros_like(X)
@@ -88,7 +162,7 @@ def procrustes_alignment(X):
     X_aligned[:,:,0] = X_reference
     for t in range(1,n_timepoints):
         Y = X[:,:,t]
-        Y_aligned = procrustes_single_time(X_reference,Y)
+        Y_aligned, _ = procrustes_single_time(X_reference,Y)
         X_aligned[:,:,t] = Y_aligned
     return X_aligned
 
@@ -241,8 +315,14 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.i
     return loss, grad.ravel()
 
 
+<<<<<<< HEAD
 def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance", MDS_init = False,
                        max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT):
+=======
+def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf,
+                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT,
+                       MDS_init=False, return_hess_inv=False):
+>>>>>>> f4587c1e176ad1112818a0706147b8321c49232a
     """Single L-BFGS-B step for one timepoint.
 
     Args:
@@ -254,9 +334,11 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, k=1, link
         link (str): Link function type.
         max_iter (int): Maximum L-BFGS-B iterations.
         gtol, ftol (float): Convergence tolerances.
+        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
 
     Returns:
-        tuple: (X_opt, loss, n_iterations, message)
+        tuple: (X_opt, loss, n_iterations, message) or
+               (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
     """
     if MDS_init:
         n_components = X_t_init.shape[1]
@@ -271,11 +353,15 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, k=1, link
         jac=True,
         options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
     )
-    return result.x.reshape(X_t_init.shape), result.fun, result.nit, result.message
+    X_opt = result.x.reshape(X_t_init.shape)
+    if return_hess_inv:
+        return X_opt, result.fun, result.nit, result.message, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
 
 
 def coordinate_descent_over_time(
     R,
+<<<<<<< HEAD
     W              = None,
     N_min          = 1,
     N_max          = np.inf,
@@ -288,6 +374,20 @@ def coordinate_descent_over_time(
     max_iter       = MAX_ITER_TIMEPOINT,
     gtol           = GTOL_TIMEPOINT,
     ftol           = FTOL_TIMEPOINT,
+=======
+    W                  = None,
+    N_min              = 1,
+    N_max              = np.inf,
+    n_components       = 2,
+    X_init             = None,
+    sampled_by_time    = None,
+    direction          = "backward",
+    max_iter           = MAX_ITER_TIMEPOINT,
+    gtol               = GTOL_TIMEPOINT,
+    ftol               = FTOL_TIMEPOINT,
+    return_covariances = False,
+    exact_hessian      = True,
+>>>>>>> f4587c1e176ad1112818a0706147b8321c49232a
 ):
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -303,7 +403,11 @@ def coordinate_descent_over_time(
         direction (str): "backward" (default) or "forward".
 
     Returns:
-        tuple: (X, loss_df)
+        tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
+               covariances has shape (n, d, d, T).
+        exact_hessian (bool): If True (default), compute the exact analytical Hessian for
+               covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
+               (faster but significantly less accurate — see extract_sample_covariances).
     """
     print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
     n_samples, _, n_timepoints = R.shape
@@ -318,6 +422,8 @@ def coordinate_descent_over_time(
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
     loss_before, loss_after, n_iters, messages = [], [], [], []
+    if return_covariances:
+        covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
 
     time_order = range(n_timepoints) if direction == "forward" \
                  else range(n_timepoints - 1, -1, -1)
@@ -346,13 +452,35 @@ def coordinate_descent_over_time(
         loss_t_before, _ = compute_loss_gradient_timepoint(X_init_t, R_t, W_t, N_min, N_max, k, link)
 
         # --- Optimize ---
+<<<<<<< HEAD
         X_t, loss_t_after, n_iter, message = optimize_timepoint(X_t, R_t, W_t, N_min, N_max, k, link, max_iter=max_iter, gtol=gtol, ftol=ftol)
+=======
+        need_hess_inv = return_covariances and not exact_hessian
+        X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
+            X_t, R_t, W_t, N_min, N_max, max_iter, gtol, ftol,
+            return_hess_inv=need_hess_inv)
+        hess_inv = _hess[0] if _hess else None
+
+        if return_covariances:
+            try:
+                covs = extract_sample_covariances(
+                    X_t, R_t, W_t, N_min,
+                    hess_inv=hess_inv,
+                    exact=exact_hessian,
+                )
+            except Exception:
+                covs = None
+>>>>>>> f4587c1e176ad1112818a0706147b8321c49232a
 
         # --- Center (first step only) and Procrustes align ---
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
-        X_t = procrustes_single_time(X_global[extant_idx, :], X_t)
+        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
         X[extant_idx, :, t_idx] = X_t
+
+        if return_covariances and covs is not None:
+            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
+            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
 
         loss_before.append(loss_t_before)
         loss_after.append(loss_t_after)
@@ -368,6 +496,8 @@ def coordinate_descent_over_time(
         "n_iterations": n_iters,
         "message":      messages,
     })
+    if return_covariances:
+        return X, loss_df, covariances
     return X, loss_df
 
     

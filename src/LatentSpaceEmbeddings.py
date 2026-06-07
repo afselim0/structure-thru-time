@@ -100,6 +100,7 @@ class LatentSpaceEmbeddings:
         #                           # (T,)
         self.l1_strengths = l1_strengths
         self.l2_strengths = l2_strengths
+        self.covariances  = None
 
     def _parse_smoothing_params(self, l1_strengths, l2_strengths):
         """Compute smoothing weights from transferable strengths and the current embeddings.
@@ -153,24 +154,37 @@ class LatentSpaceEmbeddings:
 
     def compute_embeddings_through_time(self,
                                         X_init = None,
-                                        target_precision = 1e-8):
+                                        target_precision = 1e-8,
+                                        compute_uncertainty = False,
+                                        exact_hessian = True):
         """Compute embeddings by coordinate descent over time points
 
         Args:
             X_init (_type_, optional): initial solution over all time points. Defaults to None.
             target_precision (float, optional): target precision for the optimization.
-            n_epochs (int, optional): number of cycles to pass over timepoints. Defaults to 1.
+            compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
+            exact_hessian (bool): if True (default), use exact analytical Hessian for
+                covariance estimation; if False, use L-BFGS approximation.
 
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
         # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
+<<<<<<< HEAD
         X, loss_df = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, k = self.k, link = self.link, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time)#, ftol=ftol_t)
+=======
+        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
+        if compute_uncertainty:
+            X, loss_df, covariances = result
+            self.covariances = covariances
+        else:
+            X, loss_df = result
+>>>>>>> f4587c1e176ad1112818a0706147b8321c49232a
         # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
         print(self.smoothing_params)
-        return X, loss_df  
+        return X, loss_df
 
     def compute_embeddings_sample_coordinate_descent(self, X_init = None, n_epochs = 1):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
@@ -222,6 +236,23 @@ class LatentSpaceEmbeddings:
             df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
 
         df.columns = df.columns.astype(str) # To ensure safe parquet saving with multi-index columns
+        return df
+
+    def get_covariances_df(self):
+        assert self.covariances is not None, (
+            "Covariances have not been computed. "
+            "Run compute_embeddings_through_time(compute_uncertainty=True) first."
+        )
+        n, d, _, T = self.covariances.shape
+        sample_ids = [self.idx_sample_map[i] for i in range(n)]
+        df = pd.DataFrame({
+            "sample_id": np.repeat(sample_ids, T),
+            "time":      np.tile(self.time_points, n),
+        })
+        for i in range(d):
+            for j in range(d):
+                df[f"C{i+1}{j+1}"] = self.covariances[:, i, j, :].flatten()
+        df.columns = df.columns.astype(str)
         return df
 
 def compute_smoothing_weights(X, saturated_loss, l1_strengths, l2_strengths, diff_operators):

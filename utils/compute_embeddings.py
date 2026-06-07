@@ -26,7 +26,8 @@ def main():
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
     parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, embeddings are per-individual (indexed by individual_id) rather than per-haplotype (sample_id)")
-
+    parser.add_argument("--compute_uncertainty", action="store_true", help="Compute per-sample Laplace covariance ellipses")
+    parser.add_argument("--no_exact_hessian", action="store_true", help="Use L-BFGS inverse Hessian approximation instead of the exact analytical Hessian (not recommended)")
     args = parser.parse_args()
     phased = args.phased == "True"
     id_label = "sample_id" if phased else "individual_id"
@@ -102,10 +103,16 @@ def main():
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
-    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init)
+    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init, compute_uncertainty=args.compute_uncertainty, exact_hessian=not args.no_exact_hessian)
     unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
+
+    if args.compute_uncertainty:
+        covariances_df = LSE.get_covariances_df()
+        cov_name = args.output_name.replace("embeddings.", "covariances.")
+        covariances_df.to_parquet(f"{args.output_path}/{cov_name}")
+        print(f"Covariances saved to {args.output_path}/{cov_name}")
 
     if LSE.smoothing_params is not None:
         print("Computing smoothed embeddings...")
