@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, embeddings are per-individual (indexed by individual_id) rather than per-haplotype (sample_id)")
     parser.add_argument("--compute_uncertainty", action="store_true", help="Compute per-sample Laplace covariance ellipses")
     parser.add_argument("--no_exact_hessian", action="store_true", help="Use L-BFGS inverse Hessian approximation instead of the exact analytical Hessian (not recommended)")
+
     args = parser.parse_args()
     phased = args.phased == "True"
     id_label = "sample_id" if phased else "individual_id"
@@ -99,11 +100,11 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, k=args.k, link=args.link, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
-    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init, compute_uncertainty=args.compute_uncertainty, exact_hessian=not args.no_exact_hessian)
+    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init, k=args.k, link=args.link, compute_uncertainty=args.compute_uncertainty, exact_hessian=not args.no_exact_hessian)
     unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
@@ -117,7 +118,7 @@ def main():
     if LSE.smoothing_params is not None:
         print("Computing smoothed embeddings...")
         # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
-        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8)
+        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, k=args.k, link=args.link, precision = 1e-8)
         smoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
         smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
         # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")

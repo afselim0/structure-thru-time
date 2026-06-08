@@ -47,7 +47,13 @@ def reconstruct_rates(D_df, N_min, k=1, link="inverse_distance"):
     reconstructed_rates,_ = compute_f(D_df, N_min, k=k, link=link)
     return reconstructed_rates
 
-def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):
+    # When an ax is supplied, draw onto it (for embedding in a grid); otherwise make a standalone figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
     input_rates = input_rates.copy()
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
@@ -89,7 +95,6 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
     rng   = np.random.default_rng(seed=0)
     order = rng.permutation(len(x_v))
 
-    fig, ax = plt.subplots(figsize=(6, 4))
     lims = [min(x_v.min(), y_v.min()), max(x_v.max(), y_v.max())]
     ax.plot(lims, lims, 'k--', lw=1.5, zorder=0)
     ax.scatter(x_v[order], y_v[order], facecolors=fc_v[order], edgecolors=ec_v[order],

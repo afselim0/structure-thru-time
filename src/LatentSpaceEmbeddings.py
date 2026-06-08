@@ -11,8 +11,6 @@ class LatentSpaceEmbeddings:
                  sample_times:          list         = None,
                  N_min:                 float        = 1,
                  N_max:                 float        = np.inf,
-                 k:                     int          = 1,
-                 link:                  str          = "inverse_distance",
                  n_components:          int          = 2,
                  l1_strengths:         dict         = None,
                  l2_strengths:         dict         = None,
@@ -32,9 +30,7 @@ class LatentSpaceEmbeddings:
         self.delta_t         = self.time_points[1] - self.time_points[0]
         self.N_min           = N_min
         self.N_max           = N_max
-        self.k               = k
-        self.link            = link
-
+        
         # --- Sample times ---
         if sample_times is None:
             self.sample_times = np.zeros(self.num_samples, dtype=float)
@@ -155,6 +151,8 @@ class LatentSpaceEmbeddings:
     def compute_embeddings_through_time(self,
                                         X_init = None,
                                         target_precision = 1e-8,
+                                        k = 1,
+                                        link = "inverse_distance",
                                         compute_uncertainty = False,
                                         exact_hessian = True):
         """Compute embeddings by coordinate descent over time points
@@ -170,7 +168,7 @@ class LatentSpaceEmbeddings:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
         """
         # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, k = self.k, link = self.link, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
+        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time, k = k, link = link, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
         if compute_uncertainty:
             X, loss_df, covariances = result
             self.covariances = covariances
@@ -182,17 +180,17 @@ class LatentSpaceEmbeddings:
         print(self.smoothing_params)
         return X, loss_df
 
-    def compute_embeddings_sample_coordinate_descent(self, X_init = None, n_epochs = 1):
+    def compute_embeddings_sample_coordinate_descent(self, X_init = None, k = 1, link = "inverse_distance", n_epochs = 1):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, self.k, self.link, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)
+        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, k, link, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)
         # X = procrustes_alignment(X)
         self.embeddings = X
         return X, loss_df
     
-    def compute_embeddings_jointly(self, X_init=None, precision=1e-5):
+    def compute_embeddings_jointly(self, X_init=None, k=1, link="inverse_distance", precision=1e-5):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
         ftol = precision * min(self.saturated_loss, 1.0)
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, self.k, self.link, self.smoothing_params, self.sampled_by_time, ftol=ftol)
+        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, k, link, self.smoothing_params, self.sampled_by_time, ftol=ftol)
         self.embeddings = X
         X = procrustes_alignment(X)
         return X, loss_df

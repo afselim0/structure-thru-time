@@ -9,8 +9,8 @@ Loss and gradient can be computed for:
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
 
-GTOL_TIMEPOINT     = 1e-16
-FTOL_TIMEPOINT     = 1e-16
+GTOL_TIMEPOINT     = 1e-32
+FTOL_TIMEPOINT     = 1e-32
 MAX_ITER_TIMEPOINT = 12000
 
 GTOL_SAMPLE        = 1e-16
@@ -127,7 +127,8 @@ def extract_sample_covariances(X_t, R_t, W_t, N_min, k=1, link="inverse_distance
 def compute_f(D,
               N_min,
               k=1,
-              link="inverse_distance"): 
+              link="inverse_distance",
+              eps=1e-16): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
     Args:
@@ -143,7 +144,7 @@ def compute_f(D,
     if link == "inverse_distance":                  # f = 1/(D + N_min)                         
         inverse_distance = 1/(D**k + N_min)            
         f = inverse_distance 
-        f_prime = -(inverse_distance**2) * k * D**(k-1)
+        f_prime = -(inverse_distance**2) * k * (D+eps)**(k-1)
     elif link == "exponential":                     # f = 1/N_min * exp(-D)
         f = (1/N_min)*np.exp(-D)
         f_prime = -f
@@ -376,12 +377,13 @@ def coordinate_descent_over_time(
     n_components       = 2,
     X_init             = None,
     sampled_by_time    = None,
+    MDS_init           =False,
     direction          = "backward",
     max_iter           = MAX_ITER_TIMEPOINT,
     gtol               = GTOL_TIMEPOINT,
     ftol               = FTOL_TIMEPOINT,
     return_covariances = False,
-    exact_hessian      = True,
+    exact_hessian      = True
 ):
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -455,14 +457,29 @@ def coordinate_descent_over_time(
         X_init_t = X_init[extant_idx, :, t_idx]
 
         # --- Loss before ---
-        loss_t_before, _ = compute_loss_gradient_timepoint(X_init_t, R_t, W_t, N_min, N_max, k, link)
+        loss_t_before, _ = compute_loss_gradient_timepoint(
+            X_t_flat = X_t.ravel(),
+            R_t      = R_t,
+            W_t      = W_t,
+            N_min    = N_min,
+            N_max    = N_max,
+            k        = k,
+            link     = link
+        )
 
         # --- Optimize ---
         need_hess_inv = return_covariances and not exact_hessian
         X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
-            X_t, R_t, W_t, N_min, N_max, k, link,
+            X_t_init = X_t,
+            R_t = R_t,
+            W_t=W_t,
+            N_min=N_min,
+            N_max=N_max,
+            k=k,
+            link=link,
             max_iter=max_iter, gtol=gtol, ftol=ftol,
-            return_hess_inv=need_hess_inv)
+            MDS_init=False, return_hess_inv=need_hess_inv
+        )
         hess_inv = _hess[0] if _hess else None
 
         if return_covariances:
