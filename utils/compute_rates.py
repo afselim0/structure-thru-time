@@ -40,7 +40,10 @@ def main():
     # consecutive sample-ID fallback, which is invalid for subsampled empirical data.
     sample_individal_ids = None
     if not phased and args.pop_labels is not None:
-        sample_individal_ids = pd.read_csv(args.pop_labels)[["sample_id", "individual_id"]]
+        _ldf = pd.read_csv(args.pop_labels)
+        if "individual_id" in _ldf.columns:
+            sample_individal_ids = _ldf[["sample_id", "individual_id"]]
+        # else: fall back to consecutive-pair assumption (sample_id // 2 → individual)
 
     rates_df = compute_coal_rates(pdf_df, minimum_window_size, maximum_window_size, phased=phased, sample_individal_ids=sample_individal_ids)
     rates_df.columns = rates_df.columns.astype(str)

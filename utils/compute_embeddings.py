@@ -36,6 +36,9 @@ def main():
     l1_penalties = args.l1_penalties
     l2_penalties = args.l2_penalties
     pop_labels_df = pd.read_csv(args.pop_labels) if args.pop_labels is not None else pd.DataFrame()
+    if not phased and "individual_id" not in pop_labels_df.columns and "sample_id" in pop_labels_df.columns:
+        pop_labels_df = pop_labels_df.copy()
+        pop_labels_df["individual_id"] = pop_labels_df["sample_id"] // 2
 
     # Parsing l1 and l2 penalties
     if l1_penalties == "None":

@@ -37,8 +37,9 @@ max_window_size                   = read_config("max_window_size", default = 500
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 phased                            = read_config("phased", default = "False") # If "False", coalescent rates (and embeddings, plots) are per-individual rather than per-haplotype
+embedding_seed                    = read_config("embedding_seed", default = 0)
 
-# STT Parameters 
+# STT Parameters
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 link_function                     = read_config("link_function", default = "inverse_distance")
@@ -176,6 +177,8 @@ relative_div_plot_summary         = os.path.join(plot_output_path, relative_div_
 
 embeddings_data                   = os.path.join(data_output_path, embeddings_data_file_name)
 embeddings_plot                   = os.path.join(plot_output_path, embeddings_plot_file_name)
+slice_2d_file_name                = f"2d_slice{PLOT_TAG}.png"
+slice_2d                          = os.path.join(plot_output_path, slice_2d_file_name)
 performance_data                  = os.path.join(data_output_path, performance_data_file_name)
 performance_plot                  = os.path.join(plot_output_path, performance_plot_file_name)
 performance_interactive           = os.path.join(plot_output_path, performance_interactive_file_name)
@@ -226,6 +229,7 @@ STT_targets = [
     rates_data, rates_plot,
     relative_div_plot, relative_div_plot_summary,
     embeddings_data, embeddings_plot,
+    slice_2d,
     performance_plot, performance_data, performance_interactive,
     dash_launch,
     ]
@@ -243,8 +247,7 @@ replicates_targets = ([rates_data]
                       + ([replicates_panel]                  if seeds else [])
                       + ([replicates_2d_slice]               if seeds else [])
                       + ([replicates_ggpairs]                if len(seeds) > 1 else [])
-                      + ([replicates_performance_panel]      if seeds else [])
-                      + replicate_comparison_plots)
+                      + ([replicates_performance_panel]      if seeds else []))
 
 # =====================================================
 # General Rules
@@ -722,7 +725,8 @@ rule compute_embeddings:
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
-        phased = phased
+        phased = phased,
+        embedding_seed = embedding_seed
     shell:
         """
         mkdir -p {params.outdir}
@@ -738,7 +742,8 @@ rule compute_embeddings:
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
-            --phased {params.phased}
+            --phased {params.phased} \
+            --seed {params.embedding_seed}
         """
 rule plot_embeddings:
     input:
@@ -793,6 +798,34 @@ python plot_embeddings_dash.py \\
 DASHEOF
         chmod +x {output.dash_script}
         """
+rule plot_2d_slice:
+    input:
+        embeddings = embeddings_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script     = "plot_2d_slice.py"
+    output:
+        slice_2d
+    params:
+        outdir               = plot_output_path,
+        output_name          = slice_2d_file_name,
+        min_time             = min_time,
+        embeddings_max_time  = embeddings_max_time,
+        embeddings_plot_lims = embeddings_plot_lims,
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.embeddings} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --lims {params.embeddings_plot_lims}
+        """
+
 # Not in STT_targets yet — run explicitly with: snakemake plot_embeddings_pyvista
 rule plot_embeddings_pyvista:
     input:
