@@ -41,7 +41,9 @@ or run it through Snakemake (same output path):
 ```
 snakemake bundle_dash --configfile PATH/TO/CONFIG.yaml --cores 1
 ```
-The collaborator then unzips, `conda env create -f environment.yml && conda activate stt_dash`, and runs `./run.sh`. `bundle_dash.py` also accepts explicit `--rates/--colors/...` paths (and `--covariances` for uncertainty ellipses) for embeddings produced outside the pipeline; explicit flags override config-derived values. Bundle size tracks the rates parquets, so for many-sample runs omit `--rates`/`--reconstructed_rates` (or use a sample subset) to keep it small.
+The collaborator then unzips, `conda env create -f environment.yml && conda activate stt_dash`, and runs `./run.sh`. `bundle_dash.py` also accepts explicit `--rates/--colors/...` paths (and `--covariances` for uncertainty ellipses) for embeddings produced outside the pipeline; explicit flags override config-derived values.
+
+Bundle size is dominated by the rate parquets (they grow ~quadratically in sample count — e.g. ~3 GB for a 332-sample run). To keep bundles shareable, `bundle_dash.py` automatically omits the rate parquets (with a warning) when their combined size exceeds 100 MB, producing an embeddings-only bundle (the interactive embedding still works; only the rates panel is unavailable). Pass `--force-rates-export` to include them regardless, or `--max-rates-mb N` to change the threshold. For a full rates panel on a many-sample dataset, bundle a sample subset instead.
 
 # Snakemake modes
 To run a particular mode of the pipeline, specify the rule associated with that mode. For each mode, certain input parameters are relevant

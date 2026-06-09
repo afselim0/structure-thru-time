@@ -35,6 +35,10 @@ DASH_APP = os.path.join(THIS_DIR, "plot_embeddings_dash.py")
 # Minimal runtime deps for plot_embeddings_dash.py (NOT the full STT env).
 DASH_DEPS = ["dash", "plotly", "pandas", "numpy", "scipy", "pyarrow"]
 
+# Rate parquets dominate bundle size and grow ~quadratically in sample count.
+# Above this combined size they are excluded unless --force-rates-export is set.
+DEFAULT_MAX_RATES_MB = 100
+
 
 def _environment_yml(env_name="stt_dash"):
     """Build a minimal conda environment.yml pinned to the current interpreter's
@@ -129,15 +133,28 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
 def build_bundle(embeddings, labels, colors, output, rates=None,
                  reconstructed_rates=None, covariances=None, N_max=None,
                  time_scale="log", min_time=None, max_time=None, lims=None,
-                 generation_time=None):
+                 generation_time=None, force_rates_export=False,
+                 max_rates_mb=DEFAULT_MAX_RATES_MB):
     """Assemble the self-contained zip from resolved paths and params."""
     # (dest-basename, source-path, dash-flag-or-None-for-positional)
     items = [("embeddings.parquet", embeddings, None),
              ("pop_labels.csv", labels, "--labels"),
              ("pop_colors.csv", colors, "--colors")]
-    for dest, src, flag in [("rates.parquet", rates, "--rates"),
-                            ("reconstructed_rates.parquet", reconstructed_rates, "--reconstructed_rates"),
-                            ("covariances.parquet", covariances, "--covariances")]:
+
+    # The rate parquets dominate bundle size (they grow ~quadratically in the
+    # number of samples). Skip them when their combined size exceeds the limit,
+    # unless forced. Without them the bundle still has the interactive embedding;
+    # only the input-vs-reconstructed rates panel is unavailable.
+    rate_files = [("rates.parquet", rates, "--rates"),
+                  ("reconstructed_rates.parquet", reconstructed_rates, "--reconstructed_rates")]
+    rate_bytes = sum(os.path.getsize(s) for _, s, _ in rate_files if s and os.path.exists(s))
+    include_rates = force_rates_export or rate_bytes <= max_rates_mb * 1e6
+    if rate_bytes and not include_rates:
+        print(f"WARNING: rate parquets total {rate_bytes / 1e6:.0f} MB, exceeding the "
+              f"{max_rates_mb:.0f} MB limit — EXCLUDING them from the bundle (the dash "
+              f"rates panel will be unavailable). Pass --force-rates-export to include them.")
+    optional = (rate_files if include_rates else []) + [("covariances.parquet", covariances, "--covariances")]
+    for dest, src, flag in optional:
         if src:
             items.append((dest, src, flag))
 
@@ -210,7 +227,7 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
                 ## Contents
                 - `plot_embeddings_dash.py` — the app
                 - `environment.yml` — pinned conda env (`stt_dash`)
-                - `data/` — embeddings, rates, reconstructed rates, pop labels & colors
+                - `data/` — {", ".join(dest for dest, _, _ in items)}
                 - `run.sh` — launch command (time_scale={time_scale})
                 """))
 
@@ -242,6 +259,10 @@ def main():
     p.add_argument("--max_time", type=float, default=None)
     p.add_argument("--lims", default=None)
     p.add_argument("--generation_time", type=float, default=None)
+    p.add_argument("--force-rates-export", action="store_true",
+                   help=f"Include the rate parquets even if they exceed the {DEFAULT_MAX_RATES_MB} MB limit")
+    p.add_argument("--max-rates-mb", type=float, default=DEFAULT_MAX_RATES_MB,
+                   help=f"Combined rate-parquet size (MB) above which they are excluded unless forced (default: {DEFAULT_MAX_RATES_MB})")
     p.add_argument("-o", "--output", default=None, help="Output .zip path (default: <output_path>/plots/dash_bundle<TAG>.zip in --config mode)")
     args = p.parse_args()
 
@@ -256,6 +277,8 @@ def main():
     ).items() if v is not None}
     vals.update(explicit)
     vals.setdefault("time_scale", "log")
+    vals["force_rates_export"] = args.force_rates_export
+    vals["max_rates_mb"] = args.max_rates_mb
 
     missing = [k for k in ("embeddings", "labels", "colors", "output") if not vals.get(k)]
     if missing:
