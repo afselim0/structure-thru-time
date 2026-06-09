@@ -26,6 +26,23 @@ Running STT itself generates the following files:
 3. Inferred embeddings of samples over time + plots of embeddings
 4. Performance evaluation data + plots
 
+# Interactive embedding & sharing it
+Each STT run writes a `launch_dash*.sh` script in its `plots/` directory. Run it to open an interactive [Dash](https://dash.plotly.com/) app (time slider over the embedding + an input-vs-reconstructed rates panel):
+```
+bash results/<run>/plots/launch_dash<TAG>.sh   # open the printed http://127.0.0.1:<port> URL
+```
+
+To send the interactive plot to a collaborator who doesn't have this repo, package it into a self-contained zip (the app, its data, a pinned `environment.yml`, a `run.sh`, and a README) with `utils/bundle_dash.py`. The easiest way is to point it at the run's config:
+```
+cd utils
+python bundle_dash.py --config PATH/TO/CONFIG.yaml   # writes <output_path>/plots/dash_bundle<TAG>.zip
+```
+or run it through Snakemake (same output path):
+```
+snakemake bundle_dash --configfile PATH/TO/CONFIG.yaml --cores 1
+```
+The collaborator then unzips, `conda env create -f environment.yml && conda activate stt_dash`, and runs `./run.sh`. `bundle_dash.py` also accepts explicit `--rates/--colors/...` paths (and `--covariances` for uncertainty ellipses) for embeddings produced outside the pipeline; explicit flags override config-derived values. Bundle size tracks the rates parquets, so for many-sample runs omit `--rates`/`--reconstructed_rates` (or use a sample subset) to keep it small.
+
 # Snakemake modes
 To run a particular mode of the pipeline, specify the rule associated with that mode. For each mode, certain input parameters are relevant
 
