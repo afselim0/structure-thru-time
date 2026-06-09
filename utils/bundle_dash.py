@@ -21,6 +21,13 @@ Two ways to use it (run from the `utils/` directory):
         -o ../results/.../dash_bundle.zip
 
 CLI flags override values derived from --config.
+
+Rate parquets dominate bundle size; by default their timepoint columns are
+auto-thinned to ~the embeddings timepoint count (near-lossless — the viewer
+snaps the slider to the nearest rate column and can't resolve finer than the
+embeddings grid). Use --rates-time-stride N for an explicit divisor, or 1 to
+disable. Rates still exceeding the (post-thin) size limit are dropped with a
+warning unless --force-rates-export is set.
 """
 import argparse
 import os
@@ -36,8 +43,8 @@ DASH_APP = os.path.join(THIS_DIR, "plot_embeddings_dash.py")
 DASH_DEPS = ["dash", "plotly", "pandas", "numpy", "scipy", "pyarrow"]
 
 # Rate parquets dominate bundle size and grow ~quadratically in sample count.
-# Above this combined size they are excluded unless --force-rates-export is set.
-DEFAULT_MAX_RATES_MB = 100
+# Above this combined (post-thinning) size they are excluded unless forced.
+DEFAULT_MAX_RATES_MB = 500
 
 
 def _environment_yml(env_name="stt_dash"):
@@ -54,6 +61,49 @@ def _environment_yml(env_name="stt_dash"):
         except md.PackageNotFoundError:
             lines.append(f"  - {dep}")
     return "\n".join(lines) + "\n"
+
+
+def _timepoint_columns(parquet_path):
+    """Return a rate parquet's timepoint data-column names in file order,
+    excluding the (Multi)Index columns. Read from the schema only (no data)."""
+    import pyarrow.parquet as pq
+    schema = pq.read_schema(parquet_path)
+    md = schema.pandas_metadata or {}
+    index_cols = {ic for ic in md.get("index_columns", []) if isinstance(ic, str)}
+    return [name for name in schema.names if name not in index_cols]
+
+
+def _emb_timepoint_count(embeddings_path):
+    """Number of distinct embedding timepoints (the dash slider grid size).
+    The embeddings parquet is long-format with a 'time' column."""
+    import pandas as pd
+    return int(pd.read_parquet(embeddings_path, columns=["time"])["time"].nunique())
+
+
+def _resolve_stride(rates_time_stride, parquet_path, emb_n_timepoints):
+    """Resolve a per-parquet integer stride. 'auto' picks a stride so the kept
+    timepoint count ~= the embeddings count (near-lossless); otherwise int>=1."""
+    if rates_time_stride == "auto":
+        if not emb_n_timepoints or emb_n_timepoints <= 0:
+            return 1
+        n = len(_timepoint_columns(parquet_path))
+        return max(1, round(n / emb_n_timepoints))
+    return max(1, int(rates_time_stride))
+
+
+def _thin_rate_parquet(src, dest, stride):
+    """Write a copy of rate parquet `src` to `dest` keeping every `stride`-th
+    timepoint COLUMN, preserving the pair MultiIndex. Always retains the last
+    timepoint. Columns kept as their original (string) names; no value changes."""
+    import pandas as pd
+    cols = _timepoint_columns(src)
+    keep = cols[::stride]
+    if keep and keep[-1] != cols[-1]:
+        keep.append(cols[-1])
+    # pandas' pyarrow engine restores index columns from the parquet metadata
+    # regardless of `columns=`, so passing only the kept timepoint columns keeps
+    # the MultiIndex intact while reading just those columns (columnar/efficient).
+    pd.read_parquet(src, columns=keep).to_parquet(dest)
 
 
 def derive_from_config(config_path, base_dir=THIS_DIR):
@@ -134,7 +184,7 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
                  reconstructed_rates=None, covariances=None, N_max=None,
                  time_scale="log", min_time=None, max_time=None, lims=None,
                  generation_time=None, force_rates_export=False,
-                 max_rates_mb=DEFAULT_MAX_RATES_MB):
+                 max_rates_mb=DEFAULT_MAX_RATES_MB, rates_time_stride="auto"):
     """Assemble the self-contained zip from resolved paths and params."""
     # (dest-basename, source-path, dash-flag-or-None-for-positional)
     items = [("embeddings.parquet", embeddings, None),
@@ -142,17 +192,26 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
              ("pop_colors.csv", colors, "--colors")]
 
     # The rate parquets dominate bundle size (they grow ~quadratically in the
-    # number of samples). Skip them when their combined size exceeds the limit,
-    # unless forced. Without them the bundle still has the interactive embedding;
-    # only the input-vs-reconstructed rates panel is unavailable.
+    # number of samples). First thin their timepoint columns (see _thin_rate_parquet
+    # / 'auto'), then skip them entirely when the thinned combined size still
+    # exceeds the limit, unless forced. Without them the bundle still has the
+    # interactive embedding; only the input-vs-reconstructed rates panel is lost.
     rate_files = [("rates.parquet", rates, "--rates"),
                   ("reconstructed_rates.parquet", reconstructed_rates, "--reconstructed_rates")]
-    rate_bytes = sum(os.path.getsize(s) for _, s, _ in rate_files if s and os.path.exists(s))
+    emb_n_tp = _emb_timepoint_count(embeddings) if rates_time_stride == "auto" else None
+    rate_strides = {dest: _resolve_stride(rates_time_stride, s, emb_n_tp)
+                    for dest, s, _ in rate_files if s and os.path.exists(s)}
+    # Estimate thinned size (~ original / stride) for the gate without reading data.
+    rate_bytes = sum(os.path.getsize(s) / rate_strides[dest]
+                     for dest, s, _ in rate_files if s and os.path.exists(s))
     include_rates = force_rates_export or rate_bytes <= max_rates_mb * 1e6
     if rate_bytes and not include_rates:
-        print(f"WARNING: rate parquets total {rate_bytes / 1e6:.0f} MB, exceeding the "
-              f"{max_rates_mb:.0f} MB limit — EXCLUDING them from the bundle (the dash "
-              f"rates panel will be unavailable). Pass --force-rates-export to include them.")
+        thinned = any(v > 1 for v in rate_strides.values())
+        note = "even after thinning " if thinned else ""
+        print(f"WARNING: rate parquets total ~{rate_bytes / 1e6:.0f} MB {note}"
+              f"(estimated), exceeding the {max_rates_mb:.0f} MB limit — EXCLUDING them "
+              f"from the bundle (the dash rates panel will be unavailable). Increase "
+              f"--rates-time-stride, raise --max-rates-mb, or pass --force-rates-export.")
     optional = (rate_files if include_rates else []) + [("covariances.parquet", covariances, "--covariances")]
     for dest, src, flag in optional:
         if src:
@@ -172,7 +231,14 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
 
         shutil.copy2(DASH_APP, os.path.join(root, "plot_embeddings_dash.py"))
         for dest, src, _ in items:
-            shutil.copy2(src, os.path.join(data_dir, dest))
+            out = os.path.join(data_dir, dest)
+            stride = rate_strides.get(dest, 1)
+            if stride > 1:
+                _thin_rate_parquet(src, out, stride)
+                print(f"Thinned {dest}: stride {stride}, "
+                      f"{os.path.getsize(src) / 1e6:.0f} -> {os.path.getsize(out) / 1e6:.0f} MB")
+            else:
+                shutil.copy2(src, out)
 
         # build the run command (paths relative to bundle root)
         cmd = ["python plot_embeddings_dash.py data/embeddings.parquet",
@@ -263,6 +329,18 @@ def main():
                    help=f"Include the rate parquets even if they exceed the {DEFAULT_MAX_RATES_MB} MB limit")
     p.add_argument("--max-rates-mb", type=float, default=DEFAULT_MAX_RATES_MB,
                    help=f"Combined rate-parquet size (MB) above which they are excluded unless forced (default: {DEFAULT_MAX_RATES_MB})")
+
+    def _stride_arg(s):
+        if str(s).lower() == "auto":
+            return "auto"
+        v = int(s)
+        if v < 1:
+            raise argparse.ArgumentTypeError("must be an integer >= 1 or 'auto'")
+        return v
+    p.add_argument("--rates-time-stride", type=_stride_arg, default="auto",
+                   help="Subsample rate-parquet timepoint COLUMNS to shrink the bundle: keep "
+                        "every Nth timepoint (1 = no thinning). 'auto' (default) picks a per-file "
+                        "stride so the kept count ~= the embeddings timepoint count (near-lossless).")
     p.add_argument("-o", "--output", default=None, help="Output .zip path (default: <output_path>/plots/dash_bundle<TAG>.zip in --config mode)")
     args = p.parse_args()
 
@@ -279,6 +357,7 @@ def main():
     vals.setdefault("time_scale", "log")
     vals["force_rates_export"] = args.force_rates_export
     vals["max_rates_mb"] = args.max_rates_mb
+    vals["rates_time_stride"] = args.rates_time_stride
 
     missing = [k for k in ("embeddings", "labels", "colors", "output") if not vals.get(k)]
     if missing:

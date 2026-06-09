@@ -43,7 +43,11 @@ snakemake bundle_dash --configfile PATH/TO/CONFIG.yaml --cores 1
 ```
 The collaborator then unzips, `conda env create -f environment.yml && conda activate stt_dash`, and runs `./run.sh`. `bundle_dash.py` also accepts explicit `--rates/--colors/...` paths (and `--covariances` for uncertainty ellipses) for embeddings produced outside the pipeline; explicit flags override config-derived values.
 
-Bundle size is dominated by the rate parquets (they grow ~quadratically in sample count — e.g. ~3 GB for a 332-sample run). To keep bundles shareable, `bundle_dash.py` automatically omits the rate parquets (with a warning) when their combined size exceeds 100 MB, producing an embeddings-only bundle (the interactive embedding still works; only the rates panel is unavailable). Pass `--force-rates-export` to include them regardless, or `--max-rates-mb N` to change the threshold. For a full rates panel on a many-sample dataset, bundle a sample subset instead.
+Bundle size is dominated by the rate parquets (they grow ~quadratically in sample count — e.g. ~3 GB for a 332-sample run). To keep bundles shareable, `bundle_dash.py` does two things by default:
+1. **Auto-thins** the rate parquets' timepoint columns down to ~the embeddings timepoint count (`--rates-time-stride auto`). This is near-lossless — the dash app snaps the time slider to the nearest rate column and can't resolve finer than the embeddings grid — and shrinks a 332-sample `rates.parquet` ~10× (2.5 GB → ~0.2 GB). Use `--rates-time-stride N` for an explicit divisor, or `1` to disable.
+2. **Omits** the rate parquets entirely (with a warning, embeddings-only bundle) if their thinned combined size still exceeds 500 MB. Pass `--force-rates-export` to include them anyway, or `--max-rates-mb N` to change the threshold.
+
+The `snakemake bundle_dash` rule applies the same defaults; set `rates_time_stride: N` in a config to override.
 
 # Snakemake modes
 To run a particular mode of the pipeline, specify the rule associated with that mode. For each mode, certain input parameters are relevant

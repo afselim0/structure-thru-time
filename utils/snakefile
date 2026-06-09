@@ -48,6 +48,7 @@ if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_pe
 if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
 n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
 n_timepoints_emb                  = read_config("n_timepoints_emb", default = 400)
+rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -771,7 +772,8 @@ rule bundle_dash:
         N_max = N_max,
         time_scale = time_scale,
         min_time = min_time,
-        embeddings_max_time = embeddings_max_time
+        embeddings_max_time = embeddings_max_time,
+        rates_time_stride = rates_time_stride
     shell:
         """
         python {input.script} {input.embeddings} \
@@ -783,6 +785,7 @@ rule bundle_dash:
             --time_scale {params.time_scale} \
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
+            --rates-time-stride {params.rates_time_stride} \
             -o {output}
         """
 rule evaluate_performance:
