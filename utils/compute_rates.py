@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--bootstrap_subsample_size", type=int, required=False, help="number of count files sampled per bootstrap replicate (without replacement)")
     parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased.  If False, rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.  If True, per-sample-pair rates are returned.")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv (with sample_id and individual_id columns). Used to map haploid samples to diploid individuals when phased=False. If omitted, consecutive sample IDs (2k, 2k+1) are assumed to belong to individual k.")
+    parser.add_argument("--compute_se", action="store_true", help="Compute jackknife SE of rate estimates from per-contig bootstrap samples in <output_path>/bootstrap_pdf_samples/. Requires compute_pdf to have been run first.")
     args = parser.parse_args()
 
     pdf_path = args.pdf_path
@@ -49,17 +50,26 @@ def main():
     rates_df.columns = rates_df.columns.astype(str)
     rates_df.to_parquet(f"{output_path}/{output_name}")
 
-    # if os.path.exists(bootstrap_dir) and len(os.listdir(bootstrap_dir)) > 0:
-    #     n_files = len([f for f in os.listdir(bootstrap_dir) if f.endswith(".parquet") and f != "coverage.parquet"])
-    #     subsample_size = bootstrap_subsample_size if bootstrap_subsample_size is not None else n_files // 2
-    #     se_df = compute_coal_rates_bootstrap_se(
-    #         bootstrap_dir,
-    #         minimum_window_size, maximum_window_size,
-    #         n_replicates=n_bootstrap_replicates,
-    #         subsample_size=subsample_size,
-    #     )
-    #     se_df.columns = se_df.columns.astype(str)
-    #     se_df.to_parquet(f"{output_path}/se_{output_name}")
+    if args.compute_se:
+        if not os.path.exists(bootstrap_dir) or len(os.listdir(bootstrap_dir)) == 0:
+            raise RuntimeError(
+                f"--compute_se requested but no bootstrap count files found in {bootstrap_dir}. "
+                "Re-run compute_pdf.py first to generate per-contig count files."
+            )
+        n_files = len([f for f in os.listdir(bootstrap_dir) if f.endswith(".parquet") and f != "coverage.parquet"])
+        subsample_size = bootstrap_subsample_size if bootstrap_subsample_size is not None else n_files // 2
+        print(f"Computing jackknife SE from {n_files} contig files (subsample_size={subsample_size}, n_replicates={n_bootstrap_replicates}) ...")
+        se_df = compute_coal_rates_bootstrap_se(
+            bootstrap_dir,
+            minimum_window_size, maximum_window_size,
+            n_replicates=n_bootstrap_replicates,
+            subsample_size=subsample_size,
+            phased=phased,
+            sample_individal_ids=sample_individal_ids,
+        )
+        se_df.columns = se_df.columns.astype(str)
+        se_df.to_parquet(f"{output_path}/se_{output_name}")
+        print(f"SE saved to {output_path}/se_{output_name}")
 
 if __name__ == "__main__":
     main()

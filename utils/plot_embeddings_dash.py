@@ -24,7 +24,7 @@ Input assumptions
 
 CLI flags
 - --time-scale  log|linear  (default log)
-- --time-stride N           subsample time points for 3D trajectories (default 5)
+- --time-stride N           subsample time points for 3D trajectories (default 1)
 - --lims        float       symmetric XY axis limit (both views)
 
 Example run: 
@@ -94,7 +94,7 @@ def load_covariances(
     covariances = np.full((T, N, 2, 2), np.nan, dtype=np.float64)
 
     t_codes = pd.Categorical(df["time_bin"], categories=times, ordered=True).codes
-    s_codes = pd.Index(sample_order).get_indexer(df["sample_id"].astype(str).to_numpy())
+    s_codes = pd.Index(sample_order.astype(str)).get_indexer(df["sample_id"].astype(str).to_numpy())
 
     valid = (t_codes >= 0) & (s_codes >= 0)
     tc = t_codes[valid]
@@ -122,7 +122,7 @@ def load_and_pack(
     time_col = "time"
     x_col = "X1"
     y_col = "X2"
-    id_col = "sample_id"
+    id_col = "individual_id" if "individual_id" in df.columns else "sample_id"
 
     df = df[(df[time_col] >= min_time) & (df[time_col] <= max_time)].copy()
     if df.empty:
@@ -156,7 +156,7 @@ def load_and_pack(
     colors_df = pd.read_csv(colors_path)
 
     if id_col not in labels_df.columns or "population" not in labels_df.columns:
-        raise ValueError("labels CSV must contain columns: sample_id, population")
+        raise ValueError(f"labels CSV must contain columns: {id_col}, population")
     if "population" not in colors_df.columns or "color" not in colors_df.columns:
         raise ValueError("colors CSV must contain columns: population, color")
 
@@ -524,7 +524,12 @@ def load_rates(
 
     labels_df = pd.read_csv(labels_path)
     colors_df = pd.read_csv(colors_path)
-    pop_map = dict(zip(labels_df["sample_id"].astype(str), labels_df["population"].astype(str)))
+    # Map the rate-pair index to populations using whichever id the rates are
+    # indexed by: per-individual rates (phased=False) use individual_id, while
+    # per-haplotype rates use sample_id.
+    idx_name = str(input_rates.index.names[0] or "")
+    id_col = "individual_id" if ("individual" in idx_name and "individual_id" in labels_df.columns) else "sample_id"
+    pop_map = dict(zip(labels_df[id_col].astype(str), labels_df["population"].astype(str)))
     pop_color_map = dict(zip(colors_df["population"].astype(str), colors_df["color"].astype(str)))
 
     sid1 = input_rates.index.get_level_values(0).astype(str)
@@ -668,6 +673,7 @@ def make_app(
     xy_lims: float | None = None,
     rates_data: dict | None = None,
     confidence_level: float = 0.68,
+    meta: dict | None = None,
 ):
     app = Dash(__name__)
     times = data["times"]
@@ -747,31 +753,11 @@ def make_app(
                     ),
                     dcc.Checklist(
                         id="show_ellipses",
-                        options=[{"label": " Ellipses", "value": "yes",
+                        options=[{"label": " 95% Ellipses", "value": "yes",
                                   "disabled": not has_covariances}],
                         value=[],
                         style={"whiteSpace": "nowrap",
                                "display": "inline" if has_covariances else "none"},
-                    ),
-                    html.Div(
-                        id="conf_level_container",
-                        style={"display": "flex" if has_covariances else "none",
-                               "flexDirection": "column", "alignItems": "center",
-                               "minWidth": "90px"},
-                        children=[
-                            html.Label("Conf. level", style={"fontSize": "12px", "marginBottom": "2px"}),
-                            dcc.Dropdown(
-                                id="confidence_level_dropdown",
-                                options=[
-                                    {"label": "68%", "value": 0.68},
-                                    {"label": "90%", "value": 0.90},
-                                    {"label": "95%", "value": 0.95},
-                                ],
-                                value=confidence_level,
-                                clearable=False,
-                                style={"width": "70px", "fontSize": "12px"},
-                            ),
-                        ],
                     ),
                     dcc.Checklist(
                         id="show_rates",
@@ -807,6 +793,18 @@ def make_app(
                     dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "260px"}),
                 ],
             ),
+            html.Hr(style={"marginTop": "12px", "borderColor": "#ddd"}),
+            html.Div(
+                style={"fontSize": "11px", "color": "#888", "lineHeight": "1.8",
+                       "padding": "4px 0 8px 0"},
+                children=[
+                    html.Div(html.Span("Settings", style={"fontWeight": "bold"})),
+                    *[
+                        html.Div(f"{k}: {v}")
+                        for k, v in (meta or {}).items()
+                    ],
+                ],
+            ),
         ],
     )
 
@@ -814,16 +812,27 @@ def make_app(
         Output("axis_store", "data"),
         Input("fit_axes", "n_clicks"),
         Input("reset_axes", "n_clicks"),
+        Input("graph2d", "relayoutData"),
         State("t_idx", "value"),
         prevent_initial_call=True,
     )
-    def update_axis_store(fit_clicks, reset_clicks, t_idx):
+    def update_axis_store(fit_clicks, reset_clicks, relayout_data, t_idx):
         trig = ctx.triggered_id
         if trig == "reset_axes":
             return None
         if trig == "fit_axes":
             return _fit_axes_to_frame(data, int(t_idx))
-        return None
+        if trig == "graph2d" and relayout_data:
+            if "xaxis.range[0]" in relayout_data:
+                return {
+                    "xlo": relayout_data["xaxis.range[0]"],
+                    "xhi": relayout_data["xaxis.range[1]"],
+                    "ylo": relayout_data["yaxis.range[0]"],
+                    "yhi": relayout_data["yaxis.range[1]"],
+                }
+            if "xaxis.autorange" in relayout_data or "autosize" in relayout_data:
+                return None
+        return no_update
 
     @app.callback(
         Output("play_interval", "disabled"),
@@ -868,13 +877,12 @@ def make_app(
         Input("show_labels", "value"),
         Input("axis_store", "data"),
         Input("show_ellipses", "value"),
-        Input("confidence_level_dropdown", "value"),
     )
-    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val, conf_level):
+    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val):
         t_idx = int(t_idx)
         show = "yes" in (show_labels_val or [])
         ellipses = "yes" in (show_ellipses_val or [])
-        level = float(conf_level) if conf_level is not None else confidence_level
+        level = 0.95
         t_val = float(times[t_idx])
 
         fig_2d = make_figure(
@@ -902,10 +910,9 @@ def make_app(
         Output("graph2d", "figure", allow_duplicate=True),
         Input("graph2d", "hoverData"),
         State("t_idx", "value"),
-        State("confidence_level_dropdown", "value"),
         prevent_initial_call=True,
     )
-    def highlight_on_hover(hover_data, t_idx_val, conf_level_val):
+    def highlight_on_hover(hover_data, t_idx_val):
         if not has_covariances:
             return no_update
         if not hover_data or not hover_data.get("points"):
@@ -913,7 +920,7 @@ def make_app(
 
         point = hover_data["points"][0]
         curve_num = point.get("curveNumber", -1)
-        level = float(conf_level_val) if conf_level_val is not None else confidence_level
+        level = 0.95
         t_int = int(t_idx_val)
 
         patched = Patch()
@@ -1062,8 +1069,8 @@ if __name__ == "__main__":
                    help="Do not round XY to integers")
     p.add_argument("--time_scale", type=str, default="linear", choices=["log", "linear"],
                    help="Z-axis scale for 3D view (default linear)")
-    p.add_argument("--time_stride", type=int, default=5,
-                   help="Keep every Nth time point in 3D trajectories (default 5)")
+    p.add_argument("--time_stride", type=int, default=1,
+                   help="Keep every Nth time point in 3D trajectories (default 1; increase for very large datasets)")
     p.add_argument("--lims", type=str, default="None",
                    help="Symmetric XY axis limit (both views), or 'None'")
     p.add_argument("--generation_time", type=float, default=None,
@@ -1107,6 +1114,19 @@ if __name__ == "__main__":
             colors_path=args.colors,
         )
 
+    meta = {
+        "embeddings": args.parquet,
+        "labels":     args.labels,
+        "colors":     args.colors,
+        "rates":      args.rates or "—",
+        "recon. rates": args.reconstructed_rates or "—",
+        "covariances": args.covariances or "—",
+        "N_max":      args.N_max,
+        "time_scale": args.time_scale,
+        "min_time":   args.min_time,
+        "max_time":   args.max_time,
+    }
+
     app = make_app(
         data,
         time_scale=args.time_scale,
@@ -1114,6 +1134,7 @@ if __name__ == "__main__":
         xy_lims=lims,
         rates_data=rates_data,
         confidence_level=args.confidence_level,
+        meta=meta,
     )
     import socket
 

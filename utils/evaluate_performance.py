@@ -41,11 +41,19 @@ def compute_distance_df(embeddings, id_label="sample_id"):
     )
     return pd.DataFrame(distances, index=pair_index, columns=times)
 
-def reconstruct_rates(D_df, N_min, link_function="inverse_distance"):
-    reconstructed_rates,_ = compute_f(D_df, N_min, link=link_function)
+    return D_df
+
+def reconstruct_rates(D_df, N_min, k=1, link="inverse_distance"):
+    reconstructed_rates,_ = compute_f(D_df, N_min, k=k, link=link)
     return reconstructed_rates
 
-def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):
+    # When an ax is supplied, draw onto it (for embedding in a grid); otherwise make a standalone figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
     input_rates = input_rates.copy()
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
@@ -87,7 +95,6 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
     rng   = np.random.default_rng(seed=0)
     order = rng.permutation(len(x_v))
 
-    fig, ax = plt.subplots(figsize=(6, 4))
     lims = [min(x_v.min(), y_v.min()), max(x_v.max(), y_v.max())]
     ax.plot(lims, lims, 'k--', lw=1.5, zorder=0)
     ax.scatter(x_v[order], y_v[order], facecolors=fc_v[order], edgecolors=ec_v[order],
@@ -325,7 +332,8 @@ def main():
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
     argparser.add_argument("--N_max", type=float, default=None, help="N_max used to compute embeddings")
-    argparser.add_argument("--link_function", type=str, default="inverse_distance", help="Link function type used to compute embeddings")
+    argparser.add_argument("--k", type=int, default=1, help="Link function exponent used to compute embeddings")
+    argparser.add_argument("--link", type=str, default="inverse_distance", help="Link function used to compute embeddings")
     argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--data_output_name", type=str, required=True, help="Name of the output file")
@@ -341,6 +349,8 @@ def main():
     id_label = "sample_id" if phased else "individual_id"
     N_min = args.N_min
     N_max = args.N_max
+    k = args.k
+    link = args.link
     rates = pd.read_parquet(args.rates)
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
@@ -355,7 +365,7 @@ def main():
             raise ValueError("Either --embeddings or --reconstructed_rates must be provided")
         embeddings = pd.read_parquet(args.embeddings)
         D_df = compute_distance_df(embeddings, id_label=id_label)
-        reconstructed_rates = reconstruct_rates(D_df, N_min=N_min, link_function=args.link_function)
+        reconstructed_rates = reconstruct_rates(D_df, N_min=N_min, k=k, link=link)
         reconstructed_rates.to_parquet(f"{args.data_output_path}/{args.data_output_name}", index=True)
 
     # Align to common timepoints (embeddings may have been subsampled)

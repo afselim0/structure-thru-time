@@ -9,8 +9,8 @@ Loss and gradient can be computed for:
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
 
-GTOL_TIMEPOINT     = 1e-16
-FTOL_TIMEPOINT     = 1e-16
+GTOL_TIMEPOINT     = 1e-32
+FTOL_TIMEPOINT     = 1e-32
 MAX_ITER_TIMEPOINT = 12000
 
 GTOL_SAMPLE        = 1e-16
@@ -36,14 +36,103 @@ from sklearn.manifold import smacof
 # General Functions
 ############################################################
 
+def _compute_exact_hessian(X_t, R_t, W_t, N_min, k=1, link="inverse_distance"):
+    """Exact Hessian of the unpenalized timepoint loss w.r.t. flattened X_t.
+
+    The result is symmetric with exactly d zero eigenvalues (translation invariance).
+    link must match the link function used in compute_loss_gradient_timepoint.
+
+    The second-derivative (f'') formulas below are derived only for k=1.  A general-k
+    derivation has not been worked out, so k != 1 is rejected to avoid silently
+    returning incorrect covariances.
+    """
+    if k != 1:
+        raise NotImplementedError(
+            "_compute_exact_hessian only supports k=1; the f'' formulas have not "
+            "been derived for general k. Use exact_hessian=False (L-BFGS approximation) "
+            "or extend the f'' formulas for your k before requesting exact covariances."
+        )
+    n, d = X_t.shape
+    D = squareform(pdist(X_t, 'euclidean'))
+    f, f_prime = compute_f(D, N_min, k=k, link=link)
+    if link == "inverse_distance":       # f = 1/(D+N_min)
+        f_pp = 2.0 * f**3
+    elif link == "inverse_sq_distance":  # f = 1/(D^2+N_min)
+        f_pp = (6*D**2 - 2*N_min) * f**3
+    elif link == "exponential":          # f = (1/N_min)*exp(-D)
+        f_pp = f
+    else:
+        raise ValueError(f"Unsupported link for Hessian: {link}")
+
+    valid = ~np.isnan(R_t) & (D > 0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        one_minus_rf = np.where(valid, 1.0 - R_t / f, 0.0)
+        M = np.where(valid, f_prime / D * one_minus_rf, 0.0)
+        A = np.where(valid, f_pp * one_minus_rf + R_t * f_prime**2 / f**2, 0.0)
+
+    WM    = W_t * M
+    alpha = W_t * (A - M)
+
+    D_safe = np.where(D > 0, D, 1.0)
+    diff   = X_t[:, None, :] - X_t[None, :, :]
+    U      = np.where(D[:, :, None] > 0, diff / D_safe[:, :, None], 0.0)
+
+    H, I_d = np.zeros((n * d, n * d)), np.eye(d)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if not valid[i, j]:
+                continue
+            block = alpha[i, j] * np.outer(U[i, j], U[i, j]) + WM[i, j] * I_d
+            si, sj = slice(i*d, (i+1)*d), slice(j*d, (j+1)*d)
+            H[si, si] += block
+            H[sj, sj] += block
+            H[si, sj] -= block
+            H[sj, si] -= block
+    return H
+
+
+def extract_sample_covariances(X_t, R_t, W_t, N_min, k=1, link="inverse_distance", hess_inv=None, exact=True):
+    """Extract per-sample d×d Laplace covariance blocks.
+
+    Args:
+        X_t (np.ndarray): (n, d) coordinates at the optimum.
+        R_t (np.ndarray): (n, n) rate matrix used in optimization.
+        W_t (np.ndarray): (n, n) weight matrix.
+        N_min (float): link function parameter.
+        k (int): link function exponent. Must match the value used in optimization.
+        link (str): link function type. Must match the value used in optimization.
+        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct). Only used when exact=False.
+        exact (bool): If True (default), compute the exact Hessian analytically and
+            pseudoinvert it.  If False, materialise the L-BFGS approximation instead.
+
+    Returns:
+        np.ndarray: shape (n, d, d)
+    """
+    n, d = X_t.shape
+    if exact:
+        H = _compute_exact_hessian(X_t, R_t, W_t, N_min, k=k, link=link)
+        # Eigendecompose (symmetric) and invert only positive eigenvalues.
+        # This correctly handles both the d translation-invariance zeros and any
+        # small negative eigenvalues that arise from numerical imprecision.
+        eigvals, eigvecs = np.linalg.eigh(H)
+        threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
+        inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
+        H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
+    else:
+        H_inv = hess_inv @ np.eye(n * d)
+    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+
 def compute_f(D,
               N_min,
-              link="inverse_distance"): 
+              k=1,
+              link="inverse_distance",
+              eps=1e-16): 
     """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
 
     Args:
         D (np.ndarray): Distance matrix between pairs of samples.
         N_min (float): Minimum rate that could be modelled, where samples with rate = 1/N_min or higher will have zero distances between them.
+        k (int, optional): exponent of the distance in the inverse link functions. Defaults to 1.
         link (str, optional): Type of link function to compute. Defaults to "inverse_distance".
 
     Returns:
@@ -51,24 +140,18 @@ def compute_f(D,
     """  
     assert link in ["inverse_distance", "inverse_sq_distance", "exponential"], "Unsupported link function"
     if link == "inverse_distance":                  # f = 1/(D + N_min)                         
-        inverse_distance = 1/(D + N_min)            
+        inverse_distance = 1/(D**k + N_min)            
         f = inverse_distance 
-        f_prime = -inverse_distance**2
-    elif link == "inverse_sq_distance":             # f = 1/(D^2 + N_min)
-        inverse_distance_sq = 1/(D**2 + N_min)
-        f = inverse_distance_sq
-        f_prime = -2*D*inverse_distance_sq**2
+        f_prime = -(inverse_distance**2) * k * (D+eps)**(k-1)
     elif link == "exponential":                     # f = 1/N_min * exp(-D)
         f = (1/N_min)*np.exp(-D)
         f_prime = -f
     return f,f_prime
 
-def compute_f_inverse(f, N_min, link="inverse_distance"):
+def compute_f_inverse(f, N_min, k=1, link="inverse_distance"):
     assert link in ["inverse_distance", "inverse_sq_distance", "exponential"], "Unsupported link function"
     if link == "inverse_distance":
-        x = 1/f - N_min
-    elif link == "inverse_sq_distance":
-        x = np.sqrt(1/f - N_min)
+        x = (1/f - N_min)**(1/k)
     elif link == "exponential":
         x = -np.log(f * N_min)
     return x
@@ -80,7 +163,7 @@ def procrustes_single_time(X_reference, Y):
     U, _, Vt = np.linalg.svd(cov_matrix)
     rotation_matrix = np.dot(U, Vt)
     Y_rotated = np.dot(Y_centered, rotation_matrix)
-    return Y_rotated
+    return Y_rotated, rotation_matrix
 
 def procrustes_alignment(X):
     X_aligned = np.zeros_like(X)
@@ -90,7 +173,7 @@ def procrustes_alignment(X):
     X_aligned[:,:,0] = X_reference
     for t in range(1,n_timepoints):
         Y = X[:,:,t]
-        Y_aligned = procrustes_single_time(X_reference,Y)
+        Y_aligned, _ = procrustes_single_time(X_reference,Y)
         X_aligned[:,:,t] = Y_aligned
     return X_aligned
 
@@ -156,7 +239,7 @@ def compute_unpenalized_loss(f,R,W=None,valid_mask=None):
     loss_values = W[valid_mask] * (f[valid_mask] - R[valid_mask] * np.log(f[valid_mask]))
     return 0.5 * np.sum(loss_values)
 
-def compute_total_unpenalized_loss(X,R,N_min,N_max,W=None,link="inverse_distance"):
+def compute_total_unpenalized_loss(X,R,W=None,N_min=1,N_max=np.inf, k=1, link="inverse_distance"):
     """Computes the total unpenalized loss function over all time points.
 
     Args:
@@ -177,7 +260,7 @@ def compute_total_unpenalized_loss(X,R,N_min,N_max,W=None,link="inverse_distance
     R += 1/N_max
     n,_,T = R.shape
     D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
-    f,_ = compute_f(D,N_min,link=link)
+    f,_ = compute_f(D = D,N_min = N_min, k = k, link = link)
     valid_mask = ~np.isnan(R)
     loss = compute_unpenalized_loss(f,R,W,valid_mask)
 
@@ -215,7 +298,7 @@ def compute_unpenalized_gradient_timepoint(X_t, f_t, f_prime_t, D_t, R_t, W_t = 
     return (np.sum(WM, axis=1)[:, np.newaxis] * X_t - WM @ X_t)
 
 
-def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.inf, link="inverse_distance"):
+def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance"):
     """Loss and gradient for a single timepoint.
 
     Args:
@@ -238,15 +321,16 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.i
     X_t        = X_t_flat.reshape((n, -1))
     valid_mask = ~np.isnan(R_t)
     D_t        = squareform(pdist(X_t, 'euclidean'))
-    f_t, f_prime_t = compute_f(D_t, N_min, link=link)
+    f_t, f_prime_t = compute_f(D = D_t, N_min = N_min, k = k, link = link)
     loss = compute_unpenalized_loss(f_t, R_t, W_t, valid_mask)
     grad = compute_unpenalized_gradient_timepoint(
                X_t, f_t, f_prime_t, D_t, R_t, W_t, valid_mask)
     return loss, grad.ravel()
 
 
-def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init = False,
-                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT, link="inverse_distance"):
+def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance",
+                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT,
+                       MDS_init=False, return_hess_inv=False):
     """Single L-BFGS-B step for one timepoint.
 
     Args:
@@ -254,42 +338,52 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, MDS_init 
         R_t (np.ndarray): Rate matrix. (n, n)
         W_t (np.ndarray): Weight matrix. (n, n)
         N_min, N_max (float): Link function parameters.
+        k (int): Link function parameter.
+        link (str): Link function type.
         max_iter (int): Maximum L-BFGS-B iterations.
         gtol, ftol (float): Convergence tolerances.
-        link (str): Link function type.
+        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
 
     Returns:
-        tuple: (X_opt, loss, n_iterations, message)
+        tuple: (X_opt, loss, n_iterations, message) or
+               (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
     """
     if MDS_init:
         n_components = X_t_init.shape[1]
-        D = compute_f_inverse(R_t + 1/N_max, N_min)
+        D = compute_f_inverse(f = R_t + 1/N_max, N_min = N_min, k = k, link = link)
         D[np.isnan(D)] = 0
         X_t_init,_ = smacof(D, init=X_t_init, n_components=n_components, n_init = 1)
     result = minimize(
         compute_loss_gradient_timepoint,
         X_t_init.ravel(),
-        args=(R_t, W_t, N_min, N_max, link),
+        args=(R_t, W_t, N_min, N_max, k, link),
         method='L-BFGS-B',
         jac=True,
         options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
     )
-    return result.x.reshape(X_t_init.shape), result.fun, result.nit, result.message
+    X_opt = result.x.reshape(X_t_init.shape)
+    if return_hess_inv:
+        return X_opt, result.fun, result.nit, result.message, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
 
 
 def coordinate_descent_over_time(
     R,
-    W              = None,
-    N_min          = 1,
-    N_max          = np.inf,
-    n_components   = 2,
-    X_init         = None,
-    sampled_by_time = None,
-    direction      = "backward",
-    max_iter       = MAX_ITER_TIMEPOINT,
-    gtol           = GTOL_TIMEPOINT,
-    ftol           = FTOL_TIMEPOINT,
-    link           = "inverse_distance",
+    W                  = None,
+    N_min              = 1,
+    N_max              = np.inf,
+    k                  = 1,
+    link               = "inverse_distance",
+    n_components       = 2,
+    X_init             = None,
+    sampled_by_time    = None,
+    MDS_init           =False,
+    direction          = "backward",
+    max_iter           = MAX_ITER_TIMEPOINT,
+    gtol               = GTOL_TIMEPOINT,
+    ftol               = FTOL_TIMEPOINT,
+    return_covariances = False,
+    exact_hessian      = True
 ):
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -297,6 +391,8 @@ def coordinate_descent_over_time(
         R (np.ndarray): Rate tensor. (n, n, T)
         W (np.ndarray): Weight tensor. (n, n, T)
         N_min, N_max (float): Link function parameters.
+        k (int): Link function exponent.
+        link (str): Link function type.
         n_components (int): Latent space dimensionality.
         max_iter (int): Maximum L-BFGS-B iterations per timepoint.
         gtol, ftol (float): Convergence tolerances.
@@ -305,9 +401,23 @@ def coordinate_descent_over_time(
         direction (str): "backward" (default) or "forward".
 
     Returns:
-        tuple: (X, loss_df)
+        tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
+               covariances has shape (n, d, d, T).
+        exact_hessian (bool): If True (default), compute the exact analytical Hessian for
+               covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
+               (faster but significantly less accurate — see extract_sample_covariances).
     """
     print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
+
+    # Exact covariances rely on _compute_exact_hessian, whose f'' formulas are only
+    # derived for k=1. Fail loudly up front rather than letting the per-timepoint
+    # try/except silently return all-NaN covariances.
+    if return_covariances and exact_hessian and k != 1:
+        raise NotImplementedError(
+            "exact_hessian=True covariances are only supported for k=1; "
+            "use exact_hessian=False (L-BFGS approximation) for k != 1."
+        )
+
     n_samples, _, n_timepoints = R.shape
 
     if W is None:
@@ -320,6 +430,8 @@ def coordinate_descent_over_time(
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
     loss_before, loss_after, n_iters, messages = [], [], [], []
+    if return_covariances:
+        covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
 
     time_order = range(n_timepoints) if direction == "forward" \
                  else range(n_timepoints - 1, -1, -1)
@@ -346,17 +458,49 @@ def coordinate_descent_over_time(
 
         # --- Loss before ---
         loss_t_before, _ = compute_loss_gradient_timepoint(
-            X_init_t, R_t, W_t, N_min, N_max, link=link)
+            X_t_flat = X_t.ravel(),
+            R_t      = R_t,
+            W_t      = W_t,
+            N_min    = N_min,
+            N_max    = N_max,
+            k        = k,
+            link     = link
+        )
 
         # --- Optimize ---
-        X_t, loss_t_after, n_iter, message = optimize_timepoint(
-            X_t, R_t, W_t, N_min, N_max, max_iter=max_iter, gtol=gtol, ftol=ftol, link=link)
+        need_hess_inv = return_covariances and not exact_hessian
+        X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
+            X_t_init = X_t,
+            R_t = R_t,
+            W_t=W_t,
+            N_min=N_min,
+            N_max=N_max,
+            k=k,
+            link=link,
+            max_iter=max_iter, gtol=gtol, ftol=ftol,
+            MDS_init=False, return_hess_inv=need_hess_inv
+        )
+        hess_inv = _hess[0] if _hess else None
+
+        if return_covariances:
+            try:
+                covs = extract_sample_covariances(
+                    X_t, R_t, W_t, N_min, k=k, link=link,
+                    hess_inv=hess_inv,
+                    exact=exact_hessian,
+                )
+            except Exception:
+                covs = None
 
         # --- Center (first step only) and Procrustes align ---
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
-        X_t = procrustes_single_time(X_global[extant_idx, :], X_t)
+        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
         X[extant_idx, :, t_idx] = X_t
+
+        if return_covariances and covs is not None:
+            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
+            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
 
         loss_before.append(loss_t_before)
         loss_after.append(loss_t_after)
@@ -372,6 +516,8 @@ def coordinate_descent_over_time(
         "n_iterations": n_iters,
         "message":      messages,
     })
+    if return_covariances:
+        return X, loss_df, covariances
     return X, loss_df
 
     
@@ -442,8 +588,8 @@ def compute_unpenalized_gradient_sample(X_i, X, f_i, f_i_prime, D_i, R_i, W_i = 
                   - (X * WM[:, np.newaxis, :]).sum(axis=0))# / w_tot
 
 
-def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i=None, N_min=1, N_max=np.inf,
-                                  smoothing_params=None, link="inverse_distance"):
+def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance",
+                                  smoothing_params=None):
     """Loss and gradient for sample i's trajectory over all timepoints.
 
     Args:
@@ -465,7 +611,7 @@ def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i=None, N_min=1, N_max=np.i
     n, d, T   = X.shape
     X_i       = X_i_flat.reshape((d, T))
     D_i       = np.linalg.norm(X_i - X, axis=1)        # (n, T)
-    f_i, f_i_prime = compute_f(D_i, N_min, link=link)
+    f_i, f_i_prime = compute_f(D_i, N_min, k=k, link=link)
     valid_mask_i   = ~np.isnan(R_i)
 
     loss = compute_unpenalized_loss(f_i, R_i, W_i, valid_mask_i)
@@ -480,9 +626,8 @@ def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i=None, N_min=1, N_max=np.i
     return loss, grad.ravel()
 
 
-def optimize_sample(X_i_init, X, R_i, W_i=None, N_min=1, N_max=np.inf, smoothing_params=None,
-                    gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE, max_iter=MAX_ITER_SAMPLE,
-                    link="inverse_distance"):
+def optimize_sample(X_i_init, X, R_i, W_i=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance", smoothing_params=None,
+                    gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE, max_iter=MAX_ITER_SAMPLE):
     """L-BFGS-B step for one sample's trajectory.
 
     Args:
@@ -504,7 +649,7 @@ def optimize_sample(X_i_init, X, R_i, W_i=None, N_min=1, N_max=np.inf, smoothing
     result = minimize(
         compute_loss_gradient_sample,
         X_i_init.ravel(),
-        args=(X, R_i, W_i, N_min, N_max, smoothing_params, link),
+        args=(X, R_i, W_i, N_min, N_max, k, link, smoothing_params),
         method='L-BFGS-B',
         jac=True,
         options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
@@ -512,11 +657,10 @@ def optimize_sample(X_i_init, X, R_i, W_i=None, N_min=1, N_max=np.inf, smoothing
     return result.x.reshape(X_i_init.shape), result.fun, result.nit, result.message
 
 
-def coordinate_descent_over_samples(X_init, R, W=None, N_min=1, N_max=np.inf,
+def coordinate_descent_over_samples(X_init, R, W=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance",
                                      smoothing_params=None, sampled_by_time=None,
                                      n_epochs=1, max_iter=MAX_ITER_SAMPLE,
-                                     gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE,
-                                     link="inverse_distance"):
+                                     gtol=GTOL_SAMPLE, ftol=FTOL_SAMPLE):
     """Coordinate descent over samples, optimizing each trajectory independently.
 
     Args:
@@ -553,11 +697,11 @@ def coordinate_descent_over_samples(X_init, R, W=None, N_min=1, N_max=np.inf,
             X_slice  = X[:, :, time_mask]
 
             loss_before_i, _ = compute_loss_gradient_sample(
-                X_i_init.ravel(), X_slice, R_i, W_i, N_min, N_max, smoothing_params, link=link)
+                X_i_init.ravel(), X_slice, R_i, W_i, N_min, N_max, k, link, smoothing_params)
 
             X_i_opt, loss_after_i, n_iter, message = optimize_sample(
-                X_i_init, X_slice, R_i, W_i, N_min, N_max, smoothing_params,
-                gtol=gtol, ftol=ftol, max_iter=max_iter, link=link)
+                X_i_init, X_slice, R_i, W_i, N_min, N_max, k, link, smoothing_params,
+                gtol=gtol, ftol=ftol, max_iter=max_iter)
 
             X[i][:, time_mask] = X_i_opt          # only update present timepoints
             loss_before.append(loss_before_i)
@@ -583,9 +727,8 @@ def coordinate_descent_over_samples(X_init, R, W=None, N_min=1, N_max=np.inf,
 # Joint optimization over all samples and time points
 ############################################################
 
-def compute_loss_gradient_all(X_flat, R, W=None, N_min=1, N_max=np.inf,
-                               sampled_by_time=None, smoothing_params=None,
-                               link="inverse_distance"):
+def compute_loss_gradient_all(X_flat, R, W=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance",
+                               sampled_by_time=None, smoothing_params=None):
     """Total weighted loss and gradient over all samples and timepoints.
 
     Sums per-sample contributions; the 0.5 factor inside compute_loss_gradient_sample
@@ -620,16 +763,16 @@ def compute_loss_gradient_all(X_flat, R, W=None, N_min=1, N_max=np.inf,
         X_obs = X[:, :, time_mask]              
 
         loss_i, grad_i = compute_loss_gradient_sample(
-            X_i.ravel(), X_obs, R_i, W_i, N_min, N_max, smoothing_params, link=link)
+            X_i.ravel(), X_obs, R_i, W_i, N_min, N_max, k, link, smoothing_params)
 
         total_loss += loss_i
         total_grad[i][:, time_mask] += grad_i.reshape(X_i.shape)   
     return total_loss, total_grad.ravel()
 
 
-def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, smoothing_params=None,
+def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, k=1, link="inverse_distance", smoothing_params=None,
                      sampled_by_time=None, max_iter=MAX_ITER_JOINT,
-                     gtol=GTOL_JOINT, ftol=FTOL_JOINT, link="inverse_distance"):
+                     gtol=GTOL_JOINT, ftol=FTOL_JOINT):
     """Joint L-BFGS-B optimization over all samples and timepoints.
 
     Args:
@@ -637,6 +780,8 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, smoothing_params=
         R (np.ndarray): Rate tensor. (n, n, T)
         W (np.ndarray, optional): Weight tensor. (n, n, T) Defaults to all ones.
         N_min, N_max (float): Link function parameters.
+        k (float): Link function parameter.
+        link (str): Link function name.
         smoothing_params (dict, optional): Smoothing configuration.
         sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
         max_iter (int): Maximum iterations.
@@ -651,7 +796,7 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, smoothing_params=
 
     def callback(x):
         loss, grad = compute_loss_gradient_all(
-            x, R, W, N_min, N_max, sampled_by_time, smoothing_params, link=link)
+            x, R, W, N_min, N_max, k, link, sampled_by_time, smoothing_params)
         progress.append({
             "iteration":    len(progress) + 1,
             "loss":         loss,
@@ -664,7 +809,7 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, smoothing_params=
     result = minimize(
         compute_loss_gradient_all,
         X_init.ravel(),
-        args=(R, W, N_min, N_max, sampled_by_time, smoothing_params, link),
+        args=(R, W, N_min, N_max, k, link, sampled_by_time, smoothing_params),
         method='L-BFGS-B',
         jac=True,
         callback=callback,
