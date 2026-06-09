@@ -26,6 +26,29 @@ Running STT itself generates the following files:
 3. Inferred embeddings of samples over time + plots of embeddings
 4. Performance evaluation data + plots
 
+# Interactive embedding & sharing it
+Each STT run writes a `launch_dash*.sh` script in its `plots/` directory. Run it to open an interactive [Dash](https://dash.plotly.com/) app (time slider over the embedding + an input-vs-reconstructed rates panel):
+```
+bash results/<run>/plots/launch_dash<TAG>.sh   # open the printed http://127.0.0.1:<port> URL
+```
+
+To send the interactive plot to a collaborator who doesn't have this repo, package it into a self-contained zip (the app, its data, a pinned `environment.yml`, a `run.sh`, and a README) with `utils/bundle_dash.py`. The easiest way is to point it at the run's config:
+```
+cd utils
+python bundle_dash.py --config PATH/TO/CONFIG.yaml   # writes <output_path>/plots/dash_bundle<TAG>.zip
+```
+or run it through Snakemake (same output path):
+```
+snakemake bundle_dash --configfile PATH/TO/CONFIG.yaml --cores 1
+```
+The collaborator then unzips, `conda env create -f environment.yml && conda activate stt_dash`, and runs `./run.sh`. `bundle_dash.py` also accepts explicit `--rates/--colors/...` paths (and `--covariances` for uncertainty ellipses) for embeddings produced outside the pipeline; explicit flags override config-derived values.
+
+Bundle size is dominated by the rate parquets (they grow ~quadratically in sample count — e.g. ~3 GB for a 332-sample run). To keep bundles shareable, `bundle_dash.py` does two things by default:
+1. **Auto-thins** the rate parquets' timepoint columns down to ~the embeddings timepoint count (`--rates-time-stride auto`). This is near-lossless — the dash app snaps the time slider to the nearest rate column and can't resolve finer than the embeddings grid — and shrinks a 332-sample `rates.parquet` ~10× (2.5 GB → ~0.2 GB). Use `--rates-time-stride N` for an explicit divisor, or `1` to disable.
+2. **Omits** the rate parquets entirely (with a warning, embeddings-only bundle) if their thinned combined size still exceeds 500 MB. Pass `--force-rates-export` to include them anyway, or `--max-rates-mb N` to change the threshold.
+
+The `snakemake bundle_dash` rule applies the same defaults; set `rates_time_stride: N` in a config to override.
+
 # Snakemake modes
 To run a particular mode of the pipeline, specify the rule associated with that mode. For each mode, certain input parameters are relevant
 

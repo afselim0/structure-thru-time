@@ -48,6 +48,7 @@ if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_pe
 if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
 n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
 n_timepoints_emb                  = read_config("n_timepoints_emb", default = 400)
+rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -93,6 +94,8 @@ plot_embeddings_wrapper_script         = "plot_embeddings.py"
 plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
 evaluate_performance_script       = "evaluate_performance.py"
 run_population_combs_script       = "run_pop_combs.py"
+bundle_dash_script                = "bundle_dash.py"
+dash_app_script                   = "plot_embeddings_dash.py"
 
 # =====================================================
 # File Names
@@ -137,6 +140,7 @@ performance_interactive_file_name      = f"performance{STT_TAG}.html"
 embeddings_pyvista_plot_file_name      = f"embeddings_pyvista{PLOT_TAG}.html"
 dash_launch_file_name                  = f"launch_dash{STT_TAG}.sh"
 dash_launch_true_file_name             = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
+dash_bundle_file_name                  = f"dash_bundle{STT_TAG}.zip"
 
 # Target file paths
 pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
@@ -163,6 +167,7 @@ performance_interactive           = os.path.join(plot_output_path, performance_i
 embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
+dash_bundle                       = os.path.join(plot_output_path, dash_bundle_file_name)
 
 combs_data_dir                    = os.path.join(output_path, "combs/data")
 combs_plot_dir                    = os.path.join(output_path, "combs/plots")
@@ -748,6 +753,40 @@ rule plot_embeddings_pyvista:
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
             --time_scale {params.time_scale}
+        """
+# Not in STT_targets — run explicitly to package a self-contained, shareable
+# interactive dash bundle (.zip with the app, data, pinned env, and run.sh):
+#   snakemake bundle_dash --configfile <config> --cores 1
+rule bundle_dash:
+    input:
+        embeddings = embeddings_data,
+        rates = rates_data,
+        reconstructed_rates = performance_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = bundle_dash_script,
+        dash_app = dash_app_script
+    output:
+        dash_bundle
+    params:
+        N_max = N_max,
+        time_scale = time_scale,
+        min_time = min_time,
+        embeddings_max_time = embeddings_max_time,
+        rates_time_stride = rates_time_stride
+    shell:
+        """
+        python {input.script} {input.embeddings} \
+            --labels {input.pop_labels} \
+            --colors {input.pop_colors} \
+            --rates {input.rates} \
+            --reconstructed_rates {input.reconstructed_rates} \
+            --N_max {params.N_max} \
+            --time_scale {params.time_scale} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --rates-time-stride {params.rates_time_stride} \
+            -o {output}
         """
 rule evaluate_performance:
     input:
