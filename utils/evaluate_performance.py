@@ -332,7 +332,7 @@ def main():
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
     argparser.add_argument("--N_max", type=float, default=None, help="N_max used to compute embeddings")
-    argparser.add_argument("--k", type=int, default=1, help="Link function exponent used to compute embeddings")
+    argparser.add_argument("--k", type=float, default=1, help="Link function exponent used to compute embeddings")
     argparser.add_argument("--link", type=str, default="inverse_distance", help="Link function used to compute embeddings")
     argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")

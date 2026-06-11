@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
-    parser.add_argument("--k", type=int, default=1, help="Exponent of the distance in the link function")
+    parser.add_argument("--k", type=float, default=1, help="Exponent of the distance in the link function")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential)")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")

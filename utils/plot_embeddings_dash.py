@@ -376,6 +376,25 @@ def make_figure(
         )
     )
 
+    # 6. Outlier over-estimated edges (red solid) — n_pops + 4
+    # go.Scatter (SVG) used instead of Scattergl so hover detects along the full line segment
+    traces.append(go.Scatter(
+        x=[], y=[], mode="lines+markers", customdata=[],
+        line=dict(color="#d62728", width=3, dash="solid"),
+        marker=dict(size=6, color="#d62728"),
+        opacity=0.75, showlegend=False, name="outlier_over",
+        hovertemplate="pair: %{customdata[0]}<br>pops: %{customdata[2]}<br>log ratio: %{customdata[1]:.2f}<extra></extra>",
+    ))
+
+    # 7. Outlier under-estimated edges (blue dashed) — n_pops + 5
+    traces.append(go.Scatter(
+        x=[], y=[], mode="lines+markers", customdata=[],
+        line=dict(color="#1f77b4", width=3, dash="dash"),
+        marker=dict(size=6, color="#1f77b4"),
+        opacity=0.75, showlegend=False, name="outlier_under",
+        hovertemplate="pair: %{customdata[0]}<br>pops: %{customdata[2]}<br>log ratio: %{customdata[1]:.2f}<extra></extra>",
+    ))
+
     fig = go.Figure(data=traces)
     fig.update_layout(
         title=f"t = {t:.2f}",
@@ -391,11 +410,17 @@ def make_3d_base_figure(
     time_scale: str = "log",
     time_stride: int = 1,
     xy_lims: float | None = None,
+    t_start_idx: int | None = None,
+    t_stop_idx: int | None = None,
 ) -> tuple[go.Figure, int]:
     """Build the 3D trajectory figure.
 
     Returns (figure, n_pop_traces) so the caller knows the indices of the
     two mutable traces (highlighted points and plane) appended at the end.
+
+    t_start_idx/t_stop_idx restrict the drawn time range to a [start, stop]
+    index window (into ``times``); this both clips the trajectories and tightens
+    the z-axis to the window. Defaults to the full range.
     """
     times = data["times"]
     xy = data["xy"]          # (T, N, 2)
@@ -403,7 +428,13 @@ def make_3d_base_figure(
     colors = data["color"]
     sample_ids = data["sample_ids"]
 
-    t_indices = np.arange(0, len(times), max(1, time_stride))
+    lo = 0 if t_start_idx is None else max(0, int(t_start_idx))
+    hi = len(times) - 1 if t_stop_idx is None else min(len(times) - 1, int(t_stop_idx))
+    if hi < lo:
+        lo, hi = hi, lo
+    t_indices = np.arange(lo, hi + 1, max(1, time_stride))
+    if len(t_indices) == 0:
+        t_indices = np.array([lo])
     times_sub = times[t_indices]
     xy_sub = xy[t_indices]   # (T_sub, N, 2)
 
@@ -426,10 +457,12 @@ def make_3d_base_figure(
         xs: list = []
         ys: list = []
         zs: list = []
+        ts: list = []
         for si in pop_indices:
             xs.extend(_to_list_none(xy_sub[:, si, 0]) + [None])
             ys.extend(_to_list_none(xy_sub[:, si, 1]) + [None])
             zs.extend(z_vals.tolist() + [None])
+            ts.extend(times_sub.tolist() + [None])
 
         traces.append(go.Scatter3d(
             x=xs, y=ys, z=zs,
@@ -438,6 +471,8 @@ def make_3d_base_figure(
             name=str(pop),
             legendgroup=str(pop),
             opacity=0.7,
+            customdata=ts,
+            hovertemplate="%{fullData.name}<br>x = %{x:.2f}, y = %{y:.2f}<br>t = %{customdata:.1f}<extra></extra>",
         ))
 
     n_pop_traces = len(traces)
@@ -462,7 +497,8 @@ def make_3d_base_figure(
         marker=dict(size=4, color=colors.tolist(), opacity=1.0),
         showlegend=False,
         name="current_time",
-        hovertemplate="%{text}<extra></extra>",
+        customdata=[float(times[0])] * len(pts_x),
+        hovertemplate="%{text}<br>x = %{x:.2f}, y = %{y:.2f}<br>t = %{customdata:.1f}<extra></extra>",
         text=sample_ids.tolist(),
     ))
 
@@ -560,11 +596,25 @@ def load_rates(
     rate_min = float(np.min(all_vals[valid]))
     rate_max = float(np.max(all_vals[valid]))
 
+    # Pre-compute log(reconstructed/input) per pair per time — aligned to reconstructed_times
+    recon_times = reconstructed_rates.columns.values.astype(float)
+    in_times    = input_rates.columns.values.astype(float)
+    recon_arr   = reconstructed_rates.values.astype(float)           # (n_pairs, T_recon)
+    in_col_idxs = np.array([int(np.argmin(np.abs(in_times - t))) for t in recon_times])
+    in_arr_aln  = input_rates.values.astype(float)[:, in_col_idxs]  # (n_pairs, T_recon)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        log_ratio = np.where(
+            np.isfinite(recon_arr) & np.isfinite(in_arr_aln) & (recon_arr > 0) & (in_arr_aln > 0),
+            np.log(recon_arr / in_arr_aln),
+            np.nan,
+        )
+
     return dict(
         input=input_rates,
         reconstructed=reconstructed_rates,
         input_times=input_rates.columns.values,
         reconstructed_times=reconstructed_rates.columns.values,
+        log_ratio=log_ratio,
         pair_colors=pair_colors,
         pair_pop_label=pair_pop_label,
         pair_ids=pair_ids,
@@ -655,6 +705,13 @@ def make_rates_figure(time_val: float, rates_data: dict) -> go.Figure:
         ),
         showlegend=False,
     ))
+    # trace 3: highlighted pair from outlier edge hover (starts empty)
+    fig.add_trace(go.Scattergl(
+        x=[], y=[], mode="markers",
+        marker=dict(size=14, color=[], symbol="circle",
+                    line=dict(color="black", width=2)),
+        hoverinfo="skip", showlegend=False, name="outlier_highlight",
+    ))
     fig.update_layout(
         title=f"Rate comparison (t ≈ {t_actual:.2f})",
         margin=dict(l=50, r=20, t=30, b=40),
@@ -685,15 +742,16 @@ def make_app(
     pts_trace_idx = n_pop_traces
     plane_trace_idx = n_pop_traces + 1
 
-    z_for_time = np.array([_z_from_time(t, time_scale) for t in times])
-
     has_covariances = data.get("covariances") is not None
+    win_time_units = "years" if data.get("generation_time") is not None else "generations"
 
     # Stable 2D trace indices (determined by number of populations in dataset)
     n_pops_2d = len(data.get("unique_pops", []))
-    scatter_trace_idx_2d = n_pops_2d
-    highlight_trace_idx_2d = n_pops_2d + 2   # labels always at n_pops_2d + 1
-    pair_edge_trace_idx_2d = n_pops_2d + 3   # pair edge for rate-panel hover
+    scatter_trace_idx_2d       = n_pops_2d
+    highlight_trace_idx_2d    = n_pops_2d + 2   # labels always at n_pops_2d + 1
+    pair_edge_trace_idx_2d    = n_pops_2d + 3   # pair edge for rate-panel hover
+    outlier_over_trace_idx_2d = n_pops_2d + 4   # over-estimated outlier edges
+    outlier_under_trace_idx_2d = n_pops_2d + 5  # under-estimated outlier edges
 
     fig_rates_base = (
         make_rates_figure(float(times[0]), rates_data)
@@ -704,7 +762,7 @@ def make_app(
         style={"maxWidth": "1400px", "margin": "0 auto", "fontFamily": "system-ui",
                "padding": "0 8px"},
         children=[
-            html.H3("Structure Through Time — 3D + 2D Linked View",
+            html.H3("Coalescent Structure Through Time — 3D + 2D Linked View",
                     style={"margin": "6px 0 4px 0"}),
 
             html.Div(
@@ -715,22 +773,63 @@ def make_app(
                         figure=fig_3d,
                         style={"flex": "1", "height": "400px"},
                     ),
-                    dcc.Graph(
-                        id="graph2d",
-                        figure=make_figure(0, data, confidence_level=confidence_level),
-                        style={"flex": "1", "height": "400px"},
+                    html.Div(
+                        style={"flex": "1", "display": "flex", "flexDirection": "column"},
+                        children=[
+                            html.Div(
+                                style={"display": "flex", "justifyContent": "flex-end",
+                                       "alignItems": "center", "marginBottom": "2px"},
+                                children=[
+                                    dcc.Checklist(
+                                        id="log_time_toggle",
+                                        options=[{"label": " Log time", "value": "log"}],
+                                        value=["log"] if time_scale == "log" else [],
+                                        inline=True,
+                                        style={"fontSize": "12px"},
+                                    ),
+                                ],
+                            ),
+                            dcc.Graph(
+                                id="graph2d",
+                                figure=make_figure(0, data, confidence_level=confidence_level),
+                                style={"flex": "1", "height": "376px"},
+                                clear_on_unhover=True,
+                            ),
+                        ],
                     ),
                 ],
             ),
 
             dcc.Store(id="axis_store", data=None),
+            dcc.Store(id="time_scale_store", data=time_scale),
+            dcc.Store(id="camera3d_store", data=None),
+            dcc.Store(id="key_event", data=None),
+            dcc.Store(id="time_window", data=[0, T - 1]),
             dcc.Interval(id="play_interval", interval=200, disabled=True, n_intervals=0),
+            dcc.Interval(id="key_poll", interval=100, disabled=False, n_intervals=0),
 
             html.Div(
                 style={"display": "flex", "gap": "16px", "alignItems": "center", "marginTop": "4px"},
                 children=[
                     html.Button("▶ Play", id="play_pause_btn", n_clicks=0,
                                 style={"whiteSpace": "nowrap", "fontWeight": "bold"}),
+                    html.Div(
+                        style={"display": "flex", "flexDirection": "column", "minWidth": "150px"},
+                        children=[
+                            html.Label(f"3D time window ({win_time_units})",
+                                       style={"fontSize": "12px", "marginBottom": "2px"}),
+                            html.Div(
+                                style={"display": "flex", "gap": "4px", "alignItems": "center"},
+                                children=[
+                                    dcc.Input(id="win_start", type="number", value=float(times[0]),
+                                              debounce=True, style={"width": "70px", "fontSize": "12px"}),
+                                    html.Span("→", style={"fontSize": "12px"}),
+                                    dcc.Input(id="win_stop", type="number", value=float(times[-1]),
+                                              debounce=True, style={"width": "70px", "fontSize": "12px"}),
+                                ],
+                            ),
+                        ],
+                    ),
                     html.Div(
                         style={"flex": "1"},
                         children=[
@@ -763,7 +862,7 @@ def make_app(
                         id="show_rates",
                         options=[{"label": " Rate panel", "value": "yes",
                                   "disabled": rates_data is None}],
-                        value=[],
+                        value=["yes"] if rates_data is not None else [],
                         style={"whiteSpace": "nowrap",
                                "display": "inline" if rates_data is not None else "none"},
                     ),
@@ -774,9 +873,9 @@ def make_app(
                             html.Label("Speed", style={"fontSize": "12px", "marginBottom": "2px"}),
                             dcc.Slider(
                                 id="speed_slider",
-                                min=0, max=4, step=None,
-                                value=2,
-                                marks={0: "1×", 1: "2×", 2: "10×", 3: "20×", 4: "30×"},
+                                min=0, max=2, step=None,
+                                value=1,
+                                marks={0: "0.1×", 1: "1×", 2: "100×"},
                                 updatemode="mouseup",
                             ),
                         ],
@@ -788,9 +887,33 @@ def make_app(
 
             html.Div(
                 id="rates_panel",
-                style={"display": "none", "marginTop": "4px"},
+                style={"display": "block" if rates_data is not None else "none",
+                       "marginTop": "4px"},
                 children=[
-                    dcc.Graph(id="graph_rates", figure=fig_rates_base, style={"height": "260px"}),
+                    dcc.Graph(id="graph_rates", figure=fig_rates_base,
+                              style={"height": "360px"},
+                              clear_on_unhover=True),
+                    html.Div(
+                        style={"display": "flex", "alignItems": "center",
+                               "gap": "8px", "marginTop": "4px"},
+                        children=[
+                            html.Label("Outlier pairs:", style={"fontSize": "12px"}),
+                            dcc.Dropdown(
+                                id="n_outliers_dropdown",
+                                options=[
+                                    {"label": "Off", "value": 0},
+                                    {"label": "3",   "value": 3},
+                                    {"label": "5",   "value": 5},
+                                    {"label": "10",  "value": 10},
+                                ],
+                                value=0,
+                                clearable=False,
+                                style={"width": "80px", "fontSize": "12px"},
+                            ),
+                            html.Span("Red solid = over-estimated  |  Blue dashed = under-estimated",
+                                      style={"fontSize": "11px", "color": "#888"}),
+                        ],
+                    ),
                 ],
             ),
             html.Hr(style={"marginTop": "12px", "borderColor": "#ddd"}),
@@ -798,6 +921,11 @@ def make_app(
                 style={"fontSize": "11px", "color": "#888", "lineHeight": "1.8",
                        "padding": "4px 0 8px 0"},
                 children=[
+                    html.Div([
+                        html.Span("Available time range: ", style={"fontWeight": "bold"}),
+                        f"{times[0]:.2f} – {times[-1]:.2f} {win_time_units} "
+                        f"(the limits for the 3D time-window boxes above)",
+                    ]),
                     html.Div(html.Span("Settings", style={"fontWeight": "bold"})),
                     *[
                         html.Div(f"{k}: {v}")
@@ -835,6 +963,16 @@ def make_app(
         return no_update
 
     @app.callback(
+        Output("camera3d_store", "data"),
+        Input("graph3d", "relayoutData"),
+        prevent_initial_call=True,
+    )
+    def store_camera(relayout):
+        if relayout and "scene.camera" in relayout:
+            return relayout["scene.camera"]
+        return no_update
+
+    @app.callback(
         Output("play_interval", "disabled"),
         Output("play_pause_btn", "children"),
         Input("play_pause_btn", "n_clicks"),
@@ -847,7 +985,7 @@ def make_app(
             return False, "⏸ Pause"
         return True, "▶ Play"
 
-    _SPEED_MS = {0: 200, 1: 100, 2: 20, 3: 10, 4: 7}
+    _SPEED_MS = {0: 2000, 1: 200, 2: 2}  # 0.1×/1×/100× (1× ≈ 5fps)
 
     @app.callback(
         Output("play_interval", "interval"),
@@ -857,18 +995,147 @@ def make_app(
         return _SPEED_MS.get(int(level), 200)
 
     @app.callback(
-        Output("t_idx", "value"),
+        Output("t_idx", "value", allow_duplicate=True),
         Output("play_interval", "disabled", allow_duplicate=True),
         Output("play_pause_btn", "children", allow_duplicate=True),
         Input("play_interval", "n_intervals"),
         State("t_idx", "value"),
+        State("time_window", "data"),
         prevent_initial_call=True,
     )
-    def advance_slider(_n_intervals, t_idx):
+    def advance_slider(_n_intervals, t_idx, window):
         t_idx = int(t_idx)
-        if t_idx >= T - 1:
-            return 0, True, "▶ Play"  # stop and reset to start
+        start_idx, stop_idx = int(window[0]), int(window[1])
+        # Loop continuously within [start, stop]: at/after stop, jump back to start.
+        if t_idx >= stop_idx or t_idx < start_idx:
+            return start_idx, no_update, no_update
         return t_idx + 1, no_update, no_update
+
+    # Arrow-key support: set up document listener once on page load
+    app.clientside_callback(
+        """
+        function(id) {
+            window._stt_arrow = null;
+            document.addEventListener('keydown', function(e) {
+                var tag = (document.activeElement && document.activeElement.tagName) || '';
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+                if (e.key === 'ArrowRight') { window._stt_arrow = 1;  e.preventDefault(); }
+                else if (e.key === 'ArrowLeft')  { window._stt_arrow = -1; e.preventDefault(); }
+            });
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("key_event", "data"),
+        Input("key_event", "id"),
+        prevent_initial_call=False,
+    )
+
+    # Arrow-key support: poll global state every 100ms and advance slider
+    app.clientside_callback(
+        """
+        function(n, t_val, t_min, t_max) {
+            var dir = window._stt_arrow;
+            if (!dir) return window.dash_clientside.no_update;
+            window._stt_arrow = null;
+            var lo = parseInt(t_min), hi = parseInt(t_max);
+            var new_t = Math.max(lo, Math.min(hi, parseInt(t_val) + dir));
+            return new_t;
+        }
+        """,
+        Output("t_idx", "value", allow_duplicate=True),
+        Input("key_poll", "n_intervals"),
+        [State("t_idx", "value"), State("t_idx", "min"), State("t_idx", "max")],
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("time_scale_store", "data"),
+        Input("log_time_toggle", "value"),
+    )
+    def update_time_scale(val):
+        return "log" if "log" in (val or []) else "linear"
+
+    @app.callback(
+        Output("graph3d", "figure", allow_duplicate=True),
+        Input("time_scale_store", "data"),
+        State("t_idx", "value"),
+        State("camera3d_store", "data"),
+        prevent_initial_call=True,
+    )
+    def rebuild_3d_on_scale_change(ts, t_idx_val, camera):
+        fig, _ = make_3d_base_figure(data, time_scale=ts, time_stride=time_stride, xy_lims=xy_lims)
+        t_int = int(t_idx_val)
+        z0 = float(_z_from_time(float(times[t_int]), ts))
+        pts_x = _to_list_none(data["xy"][t_int, :, 0])
+        pts_y = _to_list_none(data["xy"][t_int, :, 1])
+        t_val_3d = float(times[t_int])
+        fig.data[pts_trace_idx]["x"] = pts_x
+        fig.data[pts_trace_idx]["y"] = pts_y
+        fig.data[pts_trace_idx]["z"] = [z0] * len(pts_x)
+        fig.data[pts_trace_idx]["customdata"] = [t_val_3d] * len(pts_x)
+        fig.data[plane_trace_idx]["z"] = [z0, z0, z0, z0]
+        if camera:
+            fig.update_layout(scene_camera=camera)
+        return fig
+
+    @app.callback(
+        Output("time_window", "data"),
+        Output("t_idx", "min"),
+        Output("t_idx", "max"),
+        Output("t_idx", "marks"),
+        Output("t_idx", "value", allow_duplicate=True),
+        Output("win_start", "value"),
+        Output("win_stop", "value"),
+        Input("win_start", "value"),
+        Input("win_stop", "value"),
+        State("t_idx", "value"),
+        prevent_initial_call=True,
+    )
+    def set_time_window(start_val, stop_val, cur_t):
+        # Map entered times -> nearest indices; default blanks to the data ends.
+        if start_val is None:
+            start_val = float(times[0])
+        if stop_val is None:
+            stop_val = float(times[-1])
+        start_idx = int(np.argmin(np.abs(times - float(start_val))))
+        stop_idx = int(np.argmin(np.abs(times - float(stop_val))))
+        if stop_idx <= start_idx:                       # force a non-empty window
+            if start_idx >= T - 1:
+                start_idx = max(0, T - 2)
+            stop_idx = min(T - 1, start_idx + 1)
+        start_idx = max(0, min(start_idx, T - 1))
+        stop_idx = max(0, min(stop_idx, T - 1))
+        marks = {start_idx: f"{times[start_idx]:.2f}", stop_idx: f"{times[stop_idx]:.2f}"}
+        new_t = int(min(max(int(cur_t), start_idx), stop_idx))   # clamp current frame
+        return ([start_idx, stop_idx], start_idx, stop_idx, marks, new_t,
+                float(times[start_idx]), float(times[stop_idx]))
+
+    @app.callback(
+        Output("graph3d", "figure", allow_duplicate=True),
+        Input("time_window", "data"),
+        State("t_idx", "value"),
+        State("time_scale_store", "data"),
+        State("camera3d_store", "data"),
+        prevent_initial_call=True,
+    )
+    def rebuild_3d_on_window(window, t_idx_val, ts, camera):
+        start_idx, stop_idx = int(window[0]), int(window[1])
+        fig, _ = make_3d_base_figure(data, time_scale=ts or time_scale, time_stride=time_stride,
+                                     xy_lims=xy_lims, t_start_idx=start_idx, t_stop_idx=stop_idx)
+        t_int = int(min(max(int(t_idx_val), start_idx), stop_idx))
+        z0 = float(_z_from_time(float(times[t_int]), ts or time_scale))
+        pts_x = _to_list_none(data["xy"][t_int, :, 0])
+        pts_y = _to_list_none(data["xy"][t_int, :, 1])
+        t_val_3d = float(times[t_int])
+        fig.data[pts_trace_idx]["x"] = pts_x
+        fig.data[pts_trace_idx]["y"] = pts_y
+        fig.data[pts_trace_idx]["z"] = [z0] * len(pts_x)
+        fig.data[pts_trace_idx]["customdata"] = [t_val_3d] * len(pts_x)
+        fig.data[plane_trace_idx]["z"] = [z0, z0, z0, z0]
+        fig.update_layout(title=f"3D Trajectories (t = {t_val_3d:.2f})")
+        if camera:
+            fig.update_layout(scene_camera=camera)
+        return fig
 
     @app.callback(
         Output("graph2d", "figure"),
@@ -877,12 +1144,19 @@ def make_app(
         Input("show_labels", "value"),
         Input("axis_store", "data"),
         Input("show_ellipses", "value"),
+        Input("show_rates", "value"),
+        Input("n_outliers_dropdown", "value"),
+        State("time_scale_store", "data"),
+        State("camera3d_store", "data"),
     )
-    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val):
+    def update_figs(t_idx, show_labels_val, axis_store, show_ellipses_val, show_rates_val, n_outliers_val, ts, camera):
         t_idx = int(t_idx)
         show = "yes" in (show_labels_val or [])
         ellipses = "yes" in (show_ellipses_val or [])
         level = 0.95
+        n_outliers = int(n_outliers_val or 0)
+        rates_open = "yes" in (show_rates_val or [])
+        show_outliers = n_outliers > 0 and rates_open and rates_data is not None
         t_val = float(times[t_idx])
 
         fig_2d = make_figure(
@@ -893,7 +1167,50 @@ def make_app(
             confidence_level=level,
         )
 
-        z0 = float(z_for_time[t_idx])
+        # --- Outlier edges ---
+        if show_outliers:
+            rec_col_idx = int(np.argmin(np.abs(rates_data["reconstructed_times"] - t_val)))
+            lr = rates_data["log_ratio"][:, rec_col_idx]
+            valid_mask = np.isfinite(lr)
+            valid_idx = np.where(valid_mask)[0]
+            sorted_by_lr = valid_idx[np.argsort(lr[valid_idx])]
+            under_pairs = sorted_by_lr[:n_outliers]           # most negative (under-estimated)
+            over_pairs  = sorted_by_lr[-n_outliers:][::-1]    # most positive (over-estimated)
+
+            pos     = data["xy_float"][t_idx]
+            sid_arr = data["sample_ids"]
+
+            def _edge_lists(pair_indices):
+                xs, ys, cds = [], [], []
+                for pi in pair_indices:
+                    pair_id  = rates_data["pair_ids"][pi]
+                    lr_val   = float(lr[pi])
+                    pop_label = rates_data["pair_pop_label"][pi]
+                    s1, s2   = pair_id.split(" × ")
+                    i1 = np.where(sid_arr == s1)[0]
+                    i2 = np.where(sid_arr == s2)[0]
+                    if not len(i1) or not len(i2):
+                        continue
+                    p1, p2 = pos[int(i1[0])], pos[int(i2[0])]
+                    if np.any(np.isnan(p1)) or np.any(np.isnan(p2)):
+                        continue
+                    xs  += [float(p1[0]), float(p2[0]), None]
+                    ys  += [float(p1[1]), float(p2[1]), None]
+                    cds += [[pair_id, lr_val, pop_label],
+                            [pair_id, lr_val, pop_label],
+                            [None, None, None]]
+                return xs, ys, cds
+
+            over_x,  over_y,  over_cd  = _edge_lists(over_pairs)
+            under_x, under_y, under_cd = _edge_lists(under_pairs)
+            fig_2d.data[outlier_over_trace_idx_2d].x          = over_x
+            fig_2d.data[outlier_over_trace_idx_2d].y          = over_y
+            fig_2d.data[outlier_over_trace_idx_2d].customdata = over_cd
+            fig_2d.data[outlier_under_trace_idx_2d].x          = under_x
+            fig_2d.data[outlier_under_trace_idx_2d].y          = under_y
+            fig_2d.data[outlier_under_trace_idx_2d].customdata = under_cd
+
+        z0 = float(_z_from_time(float(times[t_idx]), ts or time_scale))
         pts_x = _to_list_none(data["xy"][t_idx, :, 0])
         pts_y = _to_list_none(data["xy"][t_idx, :, 1])
 
@@ -901,8 +1218,11 @@ def make_app(
         patched["data"][pts_trace_idx]["x"] = pts_x
         patched["data"][pts_trace_idx]["y"] = pts_y
         patched["data"][pts_trace_idx]["z"] = [z0] * len(pts_x)
+        patched["data"][pts_trace_idx]["customdata"] = [t_val] * len(pts_x)
         patched["data"][plane_trace_idx]["z"] = [z0, z0, z0, z0]
         patched["layout"]["title"]["text"] = f"3D Trajectories (t = {t_val:.2f})"
+        if camera:
+            patched["layout"]["scene"]["camera"] = camera
 
         return fig_2d, patched
 
@@ -948,21 +1268,15 @@ def make_app(
     @app.callback(
         Output("graph2d", "figure", allow_duplicate=True),
         Input("graph_rates", "hoverData"),
-        Input("graph_rates", "unhoverData"),
         State("t_idx", "value"),
         prevent_initial_call=True,
     )
-    def highlight_pair_on_rates_hover(hover_data, _unhover_data, t_idx_val):
+    def highlight_pair_on_rates_hover(hover_data, t_idx_val):
         patched = Patch()
-        clear = lambda: (
-            patched.__setitem__(("data", pair_edge_trace_idx_2d, "x"), []) or
-            patched.__setitem__(("data", pair_edge_trace_idx_2d, "y"), []) or
-            patched.__setitem__(("data", pair_edge_trace_idx_2d, "marker", "color"), [])
-        )
-
-        if ctx.triggered_id == "graph_rates" and ctx.triggered[0]["prop_id"] == "graph_rates.unhoverData":
-            clear()
-            return patched
+        def clear():
+            patched["data"][pair_edge_trace_idx_2d]["x"] = []
+            patched["data"][pair_edge_trace_idx_2d]["y"] = []
+            patched["data"][pair_edge_trace_idx_2d]["marker"]["color"] = []
 
         if not hover_data or not hover_data.get("points"):
             clear()
@@ -1005,13 +1319,59 @@ def make_app(
         return patched
 
     @app.callback(
+        Output("graph_rates", "figure", allow_duplicate=True),
+        Input("graph2d", "hoverData"),
+        State("t_idx", "value"),
+        prevent_initial_call=True,
+    )
+    def highlight_outlier_in_rates(hover_data, t_idx_val):
+        """When hovering over an outlier edge in the 2D view, highlight the pair in the rates scatter."""
+        patched = Patch()
+        def clear():
+            patched["data"][3]["x"] = []
+            patched["data"][3]["y"] = []
+            patched["data"][3]["marker"]["color"] = []
+
+        if rates_data is None or not hover_data or not hover_data.get("points"):
+            clear(); return patched
+
+        point = hover_data["points"][0]
+        curve_num = point.get("curveNumber", -1)
+        if curve_num not in (outlier_over_trace_idx_2d, outlier_under_trace_idx_2d):
+            clear(); return patched
+
+        cd = point.get("customdata")
+        if not cd or cd[0] is None:
+            clear(); return patched
+
+        pair_id = str(cd[0])
+        pair_idx_arr = np.where(rates_data["pair_ids"] == pair_id)[0]
+        if not len(pair_idx_arr):
+            clear(); return patched
+
+        t_val       = float(times[int(t_idx_val)])
+        in_col_idx  = int(np.argmin(np.abs(rates_data["input_times"]         - t_val)))
+        rec_col_idx = int(np.argmin(np.abs(rates_data["reconstructed_times"] - t_val)))
+        pi  = int(pair_idx_arr[0])
+        x_v = float(rates_data["input"].iloc[pi, in_col_idx])
+        y_v = float(rates_data["reconstructed"].iloc[pi, rec_col_idx])
+        if not np.isfinite(x_v) or not np.isfinite(y_v) or x_v <= 0 or y_v <= 0:
+            clear(); return patched
+
+        color = "#d62728" if curve_num == outlier_over_trace_idx_2d else "#1f77b4"
+        patched["data"][3]["x"] = [x_v]
+        patched["data"][3]["y"] = [y_v]
+        patched["data"][3]["marker"]["color"] = [color]
+        return patched
+
+    @app.callback(
         Output("rates_panel", "style"),
         Input("show_rates", "value"),
     )
     def toggle_rates_panel(show_rates_val):
         if "yes" in (show_rates_val or []):
-            return {"display": "block", "marginTop": "8px"}
-        return {"display": "none", "marginTop": "8px"}
+            return {"display": "block", "marginTop": "4px"}
+        return {"display": "none", "marginTop": "4px"}
 
     @app.callback(
         Output("graph_rates", "figure"),
@@ -1048,6 +1408,8 @@ def make_app(
         ]).tolist()
         patched["data"][2]["x"] = med_x
         patched["data"][2]["y"] = med_y
+        patched["data"][3]["x"] = []    # clear outlier highlight on time change
+        patched["data"][3]["y"] = []
         patched["layout"]["title"]["text"] = f"Rate comparison (t ≈ {t_actual:.2f})"
         return patched
 
