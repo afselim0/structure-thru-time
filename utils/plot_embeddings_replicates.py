@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import plotly.io as pio
 import matplotlib.patches as mpatches
 from PIL import Image
+from scipy.linalg import svd
 
 sys.path.append("../src")
 sys.path.append("../../src")
@@ -95,10 +96,35 @@ def main():
         dfs.append(df)
 
     # Subset labels/colors to samples present in the data
-    active_samples = set(dfs[0]["sample_id"].unique())
-    labels_df = labels_df[labels_df["sample_id"].isin(active_samples)]
+    id_label = "individual_id" if "individual_id" in dfs[0].columns else "sample_id"
+    if id_label == "individual_id" and "individual_id" not in labels_df.columns:
+        labels_df = labels_df.copy()
+        labels_df["individual_id"] = labels_df["sample_id"] // 2
+    active_samples = set(dfs[0][id_label].unique())
+    labels_df = labels_df[labels_df[id_label].isin(active_samples)]
     populations = labels_df["population"].unique()
     colors_df = colors_df[colors_df["population"].isin(populations)]
+
+    # Procrustes alignment: rotate+reflect each replicate's X1/X2 to match seed 0,
+    # using the most recent time slice as the reference, applied to all time points.
+    most_recent = min(df["time"].min() for df in dfs)
+    ref_slice = dfs[0][dfs[0]["time"] == most_recent].set_index(id_label)
+    common_ids = sorted(
+        set.intersection(*[set(df[df["time"] == most_recent][id_label].values) for df in dfs])
+    )
+    ref_xy = ref_slice.loc[common_ids, ["X1", "X2"]].values
+    for i in range(1, len(dfs)):
+        slice_i = dfs[i][dfs[i]["time"] == most_recent].set_index(id_label)
+        src_xy  = slice_i.loc[common_ids, ["X1", "X2"]].values
+        src_mean = src_xy.mean(axis=0)
+        ref_mean = ref_xy.mean(axis=0)
+        U, _, Vt = svd((src_xy - src_mean).T @ (ref_xy - ref_mean))
+        R = U @ Vt  # orthogonal Procrustes: allow rotation and reflection
+        all_xy  = dfs[i][["X1", "X2"]].values
+        rotated = (all_xy - src_mean) @ R + ref_mean
+        dfs[i] = dfs[i].copy()
+        dfs[i]["X1"] = rotated[:, 0]
+        dfs[i]["X2"] = rotated[:, 1]
 
     # Shared xy axis limits across all replicates
     if lims is None:
@@ -123,6 +149,7 @@ def main():
             embeddings_df=df,
             labels_df=labels_df,
             colors_df=colors_df,
+            sample_id_col=id_label,
         )
         plotter.init_plot(
             time_scale=args.time_scale,
@@ -136,7 +163,8 @@ def main():
         images.append(_autocrop(img))
 
     # Derive panel height from the median cropped aspect ratio so axes fit tightly
-    median_ratio = float(np.median([img.height / img.width for img in images]))
+    # Cap at 1.4 — uncropped 3D plots can have very tall aspect ratios that blow up figure height
+    median_ratio = min(float(np.median([img.height / img.width for img in images])), 1.4)
     panel_w = 3.5
     panel_h = panel_w * median_ratio
 
@@ -147,9 +175,11 @@ def main():
         for pop in populations if pop in color_map
     ]
 
-    # Reserve a fixed bottom strip: legend row + optional caption
-    caption_in = 0.32 if args.param_label else 0.0
-    legend_in  = 0.55
+    # Reserve a bottom strip sized to the actual legend: ~0.22" per row + padding
+    caption_in   = 0.32 if args.param_label else 0.0
+    legend_ncols = min(len(legend_handles), 8)
+    legend_nrows = int(np.ceil(len(legend_handles) / legend_ncols)) if legend_handles else 1
+    legend_in    = legend_nrows * 0.22 + 0.15
     fig_h = panel_h * nrows + legend_in + caption_in
 
     fig, axes = plt.subplots(nrows, ncols, figsize=(panel_w * ncols, fig_h))
@@ -177,7 +207,7 @@ def main():
                  fontsize=8, color="#555555")
 
     fig.legend(handles=legend_handles, loc="lower center",
-               ncol=min(len(legend_handles), 8),
+               ncol=legend_ncols,
                fontsize=9, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, caption_frac + 0.01))
 

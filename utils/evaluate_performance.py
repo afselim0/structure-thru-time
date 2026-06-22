@@ -355,6 +355,9 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
+    if not phased and "individual_id" not in pop_labels.columns:
+        pop_labels = pop_labels.copy()
+        pop_labels["individual_id"] = pop_labels["sample_id"] // 2
 
     if args.reconstructed_rates is not None:
         reconstructed_rates = pd.read_parquet(args.reconstructed_rates)
@@ -381,6 +384,11 @@ def main():
         print(f"  [warn] {len(reconstructed_rates) - len(common_pairs)} pairs in reconstructed_rates not in rates — dropping")
     rates = rates.loc[common_pairs]
     reconstructed_rates = reconstructed_rates.loc[common_pairs]
+
+    # Filter pop_labels to the individuals actually present in the data
+    active_ids = np.unique([s for pair in rates.index for s in pair])
+    pop_labels = pop_labels[pop_labels[id_label].isin(active_ids)].copy()
+    pop_colors = pop_colors[pop_colors["population"].isin(pop_labels["population"].unique())]
 
     print(f"Evaluating performance: {args.rates}")
 

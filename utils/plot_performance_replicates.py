@@ -39,7 +39,8 @@ def _perf_on_ax(ax, input_rates, rec_rates, pop_labels, pop_colors, N_max, seed)
 
     pairs   = inp.index
     n_times = len(common_times)
-    pop_map   = pop_labels.set_index("sample_id")["population"]
+    _id_col   = "individual_id" if "individual_id" in pop_labels.columns else "sample_id"
+    pop_map   = pop_labels.drop_duplicates(subset=_id_col).set_index(_id_col)["population"]
     color_map = pop_colors.set_index("population")["color"]
     pop1 = np.array([pop_map.get(p[0], "unknown") for p in pairs])
     pop2 = np.array([pop_map.get(p[1], "unknown") for p in pairs])
@@ -114,6 +115,10 @@ def main():
     parser.add_argument("--output_path", required=True)
     parser.add_argument("--output_name", required=True)
     parser.add_argument("--param_label", type=str, default=None)
+    parser.add_argument("--max_time_points", type=int, default=None,
+                        help="Subsample to at most this many evenly-spaced time points")
+    parser.add_argument("--max_pairs", type=int, default=None,
+                        help="Subsample to at most this many individual pairs")
     args = parser.parse_args()
 
     assert len(args.inputs) == len(args.seeds), \
@@ -124,13 +129,50 @@ def main():
     rates_df  = pd.read_parquet(args.rates)
     rates_df.columns = rates_df.columns.astype(float)
 
+    _first_emb = pd.read_parquet(args.inputs[0])
+    id_label   = "individual_id" if "individual_id" in _first_emb.columns else "sample_id"
+    if id_label == "individual_id" and "individual_id" not in labels_df.columns:
+        labels_df = labels_df.copy()
+        labels_df["individual_id"] = labels_df["sample_id"] // 2
+
+    # Restrict labels to samples present in the data (labels file may cover all populations)
+    active_samples = set(_first_emb[id_label].unique())
+    labels_df = labels_df[labels_df[id_label].isin(active_samples)]
+
+    # Optional subsetting of time points
+    if args.max_time_points is not None:
+        all_times = sorted(rates_df.columns.astype(float).tolist())
+        if len(all_times) > args.max_time_points:
+            idx_keep = np.round(np.linspace(0, len(all_times) - 1,
+                                            args.max_time_points)).astype(int)
+            keep_times = [all_times[i] for i in idx_keep]
+            rates_df = rates_df[[c for c in rates_df.columns
+                                  if float(c) in set(keep_times)]]
+            print(f"Subsampled to {len(keep_times)} time points")
+
+    # Optional subsetting of pairs
+    pair_subsample_idx = None
+    if args.max_pairs is not None:
+        all_pairs = rates_df.index.tolist()
+        if len(all_pairs) > args.max_pairs:
+            rng = np.random.default_rng(seed=42)
+            pair_subsample_idx = rng.choice(len(all_pairs), size=args.max_pairs,
+                                            replace=False)
+            print(f"Subsampled to {args.max_pairs} pairs (from {len(all_pairs)})")
+
     n     = len(args.seeds)
     ncols = min(n, 4)
     nrows = int(np.ceil(n / ncols))
 
-    # Reserve a fixed bottom strip: legend row + optional caption
-    caption_in = 0.32 if args.param_label else 0.0
-    legend_in  = 0.65
+    # Size legend strip — cap at MAX_LEGEND_ROWS to prevent blowup with many pops
+    MAX_LEGEND_ROWS = 4
+    caption_in   = 0.32 if args.param_label else 0.0
+    n_pops       = labels_df["population"].nunique()
+    n_pairs_est  = n_pops * (n_pops + 1) // 2
+    legend_ncols = max(5, int(np.ceil(n_pairs_est / MAX_LEGEND_ROWS)))
+    legend_nrows = min(MAX_LEGEND_ROWS,
+                       int(np.ceil(n_pairs_est / legend_ncols)) if n_pairs_est else 1)
+    legend_in    = legend_nrows * 0.22 + 0.20
     panel_w, panel_h = 3.8, 3.2
     fig_h = panel_h * nrows + legend_in + caption_in
 
@@ -145,10 +187,21 @@ def main():
         row, col = divmod(idx, ncols)
         ax = axes[row, col]
 
-        emb      = pd.read_parquet(path)
-        rec      = reconstruct_rates(compute_distance_df(emb),
-                                     args.N_min, args.link_function)
-        handles  = _perf_on_ax(ax, rates_df, rec, labels_df, colors_df, args.N_max, seed)
+        emb = pd.read_parquet(path)
+        rec = reconstruct_rates(compute_distance_df(emb, id_label=id_label),
+                                args.N_min, link=args.link_function)
+
+        # Apply pair subsample to both rates and reconstructed
+        inp_plot = rates_df
+        rec_plot = rec
+        if pair_subsample_idx is not None:
+            all_pairs = rates_df.index.tolist()
+            keep = [all_pairs[i] for i in pair_subsample_idx
+                    if all_pairs[i] in rec.index]
+            inp_plot = rates_df.loc[keep]
+            rec_plot = rec.loc[[p for p in keep if p in rec.index]]
+
+        handles = _perf_on_ax(ax, inp_plot, rec_plot, labels_df, colors_df, args.N_max, seed)
         if legend_handles is None:
             legend_handles = handles
 
@@ -167,19 +220,21 @@ def main():
 
     if args.param_label:
         fig.text(0.5, 0.005, args.param_label, ha="center", va="bottom",
-                 fontsize=8, color="#555555")
+                 fontsize=9, color="#555555")
 
     if legend_handles:
-        fig.legend(handles=legend_handles, loc="lower center",
-                   ncol=min(len(legend_handles), 5),
+        # Limit displayed legend entries to what fits in MAX_LEGEND_ROWS rows
+        display_handles = legend_handles[:legend_ncols * MAX_LEGEND_ROWS]
+        fig.legend(handles=display_handles, loc="lower center",
+                   ncol=legend_ncols,
                    fontsize=9, title="pop pair", title_fontsize=9,
                    frameon=True, framealpha=0.9,
                    bbox_to_anchor=(0.5, caption_frac + 0.01))
 
-    plt.tight_layout(rect=[0, legend_frac, 1, 1], pad=0.4)
+    fig.subplots_adjust(bottom=legend_frac, hspace=0.32, wspace=0.22)
     os.makedirs(args.output_path, exist_ok=True)
     out_path = os.path.join(args.output_path, args.output_name)
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    fig.savefig(out_path, dpi=200)
     print(f"Saved performance panel to {out_path}")
 
 

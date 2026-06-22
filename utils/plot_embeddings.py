@@ -43,6 +43,9 @@ def main():
         lims = float(args.lims)
     
     # subsetting labels_df and colors_df to active samples only
+    if not phased and "individual_id" not in labels_df.columns:
+        labels_df = labels_df.copy()
+        labels_df["individual_id"] = labels_df["sample_id"] // 2
     active_samples = embeddings_df[id_label].unique()
     labels_df = labels_df[labels_df[id_label].isin(active_samples)]
     # When unphased, each individual_id appears once per haplotype; collapse to one

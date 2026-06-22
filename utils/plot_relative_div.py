@@ -46,7 +46,7 @@ def get_pairs(samples1, samples2, within=False):
     return pairs
 
 
-def compute_relative_divergence(rates_df, pop_labels):
+def compute_relative_divergence(rates_df, pop_labels, id_col="sample_id"):
     """Compute rho_AB(t) for every off-diagonal population pair (A, B).
 
     Returns a dict keyed by (popA, popB) with values being a dict:
@@ -62,7 +62,7 @@ def compute_relative_divergence(rates_df, pop_labels):
     within_pairs = {}
     within_mean  = {}
     for pop in populations:
-        samples = pop_labels[pop_labels["population"] == pop]["sample_id"].values
+        samples = np.unique(pop_labels[pop_labels["population"] == pop][id_col].values)
         pairs = get_pairs(samples, samples, within=True)
         within_pairs[pop] = pairs
         if len(pairs) > 0:
@@ -72,8 +72,8 @@ def compute_relative_divergence(rates_df, pop_labels):
 
     results = {}
     for popA, popB in combinations(populations, 2):
-        samplesA = pop_labels[pop_labels["population"] == popA]["sample_id"].values
-        samplesB = pop_labels[pop_labels["population"] == popB]["sample_id"].values
+        samplesA = np.unique(pop_labels[pop_labels["population"] == popA][id_col].values)
+        samplesB = np.unique(pop_labels[pop_labels["population"] == popB][id_col].values)
 
         between_pairs = get_pairs(samplesA, samplesB, within=False)
         if len(between_pairs) == 0:
@@ -82,8 +82,9 @@ def compute_relative_divergence(rates_df, pop_labels):
         mean_between = rates_df.loc[between_pairs].values.mean(axis=0)
 
         if len(within_pairs[popA]) == 0 or len(within_pairs[popB]) == 0:
-            continue
-        mean_within = (within_mean[popA] + within_mean[popB]) / 2
+            mean_within = np.full(len(times), np.nan)
+        else:
+            mean_within = (within_mean[popA] + within_mean[popB]) / 2
 
         with np.errstate(divide="ignore", invalid="ignore"):
             rho = np.where(mean_within > 0, mean_between / mean_within, np.nan)
@@ -99,18 +100,23 @@ def compute_relative_divergence(rates_df, pop_labels):
 
 
 def plot_relative_divergence(rates_df, pop_colors, pop_labels,
-                              min_time=0, time_scale="linear"):
+                              min_time=0, time_scale="linear", id_col="sample_id"):
     setup_plotting_style()
 
     pop_colors_dict = dict(zip(pop_colors["population"], pop_colors["color"]))
     times = rates_df.columns.astype(float).values
     populations = pop_labels["population"].unique()
 
-    results = compute_relative_divergence(rates_df, pop_labels)
+    results = compute_relative_divergence(rates_df, pop_labels, id_col=id_col)
     pairs = list(results.keys())
     n_pairs = len(pairs)
     if n_pairs == 0:
-        raise ValueError("No population pairs found.")
+        print("Warning: No population pairs found. Skipping relative divergence plot.")
+        fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+        ax.text(0.5, 0.5, "No between-population pairs available\n(insufficient within-population samples)",
+                ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray")
+        ax.set_visible(True)
+        return fig, fig
 
     # One panel per pair + one summary panel at the end
     n_panels = n_pairs + 1
@@ -228,17 +234,28 @@ def main():
     parser.add_argument("--min_time",     type=float, default=0, help="Minimum time to plot")
     parser.add_argument("--time_scale",   type=str, default="linear",
                         help="Time scale: linear or log")
+    parser.add_argument("--phased",       type=str, default="True",
+                        help="Whether input data is phased (True/False)")
 
     args = parser.parse_args()
+    phased = args.phased == "True"
 
     rates_df = pd.read_parquet(args.input)
     rates_df.columns = rates_df.columns.astype(float)
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
 
+    if phased:
+        id_col = "sample_id"
+    else:
+        id_col = "individual_id"
+        if "individual_id" not in labels_df.columns:
+            labels_df = labels_df.copy()
+            labels_df["individual_id"] = labels_df["sample_id"] // 2
+
     active_pairs  = rates_df.index.values
     active_samples = np.unique([s for pair in active_pairs for s in pair])
-    pop_labels = labels_df[labels_df["sample_id"].isin(active_samples)]
+    pop_labels = labels_df[labels_df[id_col].isin(active_samples)]
     populations = pop_labels["population"].unique()
     pop_colors  = colors_df[colors_df["population"].isin(populations)]
 
@@ -250,6 +267,7 @@ def main():
         pop_labels=pop_labels,
         min_time=args.min_time,
         time_scale=args.time_scale,
+        id_col=id_col,
     )
     out = os.path.join(args.output_path, args.output_name)
     summary_out = os.path.join(args.output_path,

@@ -45,8 +45,8 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
                 color = "grey"
             else:
                 color = pop_colors_dict[pop2]
-            pop1_samples = pop_labels[pop_labels['population'] == pop1][id_label].values
-            pop2_samples = pop_labels[pop_labels['population'] == pop2][id_label].values
+            pop1_samples = np.unique(pop_labels[pop_labels['population'] == pop1][id_label].values)
+            pop2_samples = np.unique(pop_labels[pop_labels['population'] == pop2][id_label].values)
             sample_pairs = []
             for s1 in pop1_samples:
                 for s2 in pop2_samples:
@@ -120,6 +120,9 @@ def main():
         id_label = "sample_id"
     else:
         id_label = "individual_id"
+        if "individual_id" not in labels_df.columns:
+            labels_df = labels_df.copy()
+            labels_df["individual_id"] = labels_df["sample_id"] // 2
     active_pairs = rates_df.index.values
     active_samples = np.unique([item for sublist in active_pairs for item in sublist])
     pop_labels = labels_df[labels_df[id_label].isin(active_samples)]

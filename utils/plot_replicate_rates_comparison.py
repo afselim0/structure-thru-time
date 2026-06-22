@@ -35,7 +35,8 @@ def compare_replicate_rates(rates_a, rates_b, pop_labels, pop_colors, label_a, l
     pairs   = rates_a.index
     n_times = len(common_times)
 
-    pop_map   = pop_labels.set_index("sample_id")["population"]
+    _id_col   = "individual_id" if "individual_id" in pop_labels.columns else "sample_id"
+    pop_map   = pop_labels.drop_duplicates(subset=_id_col).set_index(_id_col)["population"]
     color_map = pop_colors.set_index("population")["color"]
 
     pop1 = np.array([pop_map.get(p[0], "unknown") for p in pairs])
@@ -130,7 +131,8 @@ def compare_replicate_rates_interactive(rates_a, rates_b, pop_labels, pop_colors
 
     pairs     = rates_a.index
     times     = np.array(common_times, dtype=float)
-    pop_map   = pop_labels.set_index("sample_id")["population"]
+    _id_col   = "individual_id" if "individual_id" in pop_labels.columns else "sample_id"
+    pop_map   = pop_labels.drop_duplicates(subset=_id_col).set_index(_id_col)["population"]
     color_map = pop_colors.set_index("population")["color"]
 
     pop1      = np.array([pop_map.get(p[0], "unknown") for p in pairs])
@@ -279,13 +281,18 @@ def main():
     print(f"Loading embeddings for {args.seed_b}...")
     emb_b = pd.read_parquet(args.input_b)
 
+    id_label = "individual_id" if "individual_id" in emb_a.columns else "sample_id"
+    if id_label == "individual_id" and "individual_id" not in pop_labels.columns:
+        pop_labels = pop_labels.copy()
+        pop_labels["individual_id"] = pop_labels["sample_id"] // 2
+
     print("Computing reconstructed rates...")
-    rates_a = reconstruct_rates(compute_distance_df(emb_a), args.N_min, args.link_function)
-    rates_b = reconstruct_rates(compute_distance_df(emb_b), args.N_min, args.link_function)
+    rates_a = reconstruct_rates(compute_distance_df(emb_a, id_label=id_label), args.N_min, link=args.link_function)
+    rates_b = reconstruct_rates(compute_distance_df(emb_b, id_label=id_label), args.N_min, link=args.link_function)
 
     # Subset labels to samples present in the embeddings
-    active_samples = set(emb_a["sample_id"].unique())
-    pop_labels = pop_labels[pop_labels["sample_id"].isin(active_samples)]
+    active_samples = set(emb_a[id_label].unique())
+    pop_labels = pop_labels[pop_labels[id_label].isin(active_samples)]
     populations = pop_labels["population"].unique()
     pop_colors = pop_colors[pop_colors["population"].isin(populations)]
 

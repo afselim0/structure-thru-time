@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from scipy.linalg import svd
 
 sys.path.append("../src")
 sys.path.append("../../src")
@@ -42,14 +43,6 @@ def main():
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
     color_map = colors_df.set_index("population")["color"].to_dict()
-    pop_map   = labels_df.set_index("sample_id")["population"]
-
-    # Build "POP-N" short labels: within-population rank sorted by sample_id,
-    # computed once so the same sample always gets the same label across seeds.
-    sample_labels: dict = {}
-    for pop, grp in labels_df.groupby("population"):
-        for rank, sid in enumerate(sorted(grp["sample_id"].unique()), start=1):
-            sample_labels[sid] = f"{pop}-{rank}"
 
     # Load and time-filter
     dfs = []
@@ -57,6 +50,12 @@ def main():
         df = pd.read_parquet(path)
         df = df[(df["time"] >= args.min_time) & (df["time"] <= args.max_time)]
         dfs.append(df)
+
+    id_col = "individual_id" if "individual_id" in dfs[0].columns else "sample_id"
+    if id_col == "individual_id" and "individual_id" not in labels_df.columns:
+        labels_df = labels_df.copy()
+        labels_df["individual_id"] = labels_df["sample_id"] // 2
+    pop_map = labels_df.drop_duplicates(subset=id_col).set_index(id_col)["population"]
 
     # Most recent = smallest time present across all replicates after filtering
     most_recent = min(df["time"].min() for df in dfs)
@@ -66,9 +65,32 @@ def main():
     slices = []
     for df in dfs:
         s = df[df["time"] == most_recent].copy()
-        s["population"] = s["sample_id"].map(pop_map).fillna("unknown")
+        s["population"] = s[id_col].map(pop_map).fillna("unknown")
         s["color"]      = s["population"].map(color_map).fillna("#808080")
         slices.append(s)
+
+    # Procrustes-rotate each replicate to best match seed 0 (rotation only, no scaling)
+    ref_slice = slices[0].set_index(id_col)
+    common_ids = sorted(
+        set.intersection(*[set(s[id_col].values) for s in slices])
+    )
+    ref_xy = ref_slice.loc[common_ids, ["X1", "X2"]].values
+    for i in range(1, len(slices)):
+        s_indexed = slices[i].set_index(id_col)
+        src_xy = s_indexed.loc[common_ids, ["X1", "X2"]].values
+        src_mean = src_xy.mean(axis=0)
+        ref_mean = ref_xy.mean(axis=0)
+        U, _, Vt = svd((src_xy - src_mean).T @ (ref_xy - ref_mean))
+        R = U @ Vt  # orthogonal Procrustes: allow rotation and reflection
+        all_xy = slices[i][["X1", "X2"]].values
+        rotated = (all_xy - src_mean) @ R + ref_mean
+        slices[i] = slices[i].copy()
+        slices[i]["X1"] = rotated[:, 0]
+        slices[i]["X2"] = rotated[:, 1]
+
+    print(f"\nSamples being plotted (seed 0, t={most_recent:.0f}):")
+    for _, row in slices[0].sort_values([id_col]).iterrows():
+        print(f"  {id_col}={row[id_col]}  population={row['population']}  label={row['population']}-{row[id_col]}")
 
     # Shared axis limits
     if lims is None:
@@ -79,8 +101,8 @@ def main():
         lims = max(abs(combined.min() - pad), abs(combined.max() + pad))
 
     # Populations present and their legend patches
-    active_samples = set(dfs[0]["sample_id"].unique())
-    active_labels  = labels_df[labels_df["sample_id"].isin(active_samples)]
+    active_samples = set(dfs[0][id_col].unique())
+    active_labels  = labels_df[labels_df[id_col].isin(active_samples)]
     active_pops    = [p for p in active_labels["population"].unique() if p in color_map]
     legend_handles = [
         mpatches.Patch(facecolor=color_map[pop], label=pop)
@@ -91,10 +113,12 @@ def main():
     ncols = min(n, 4)
     nrows = int(np.ceil(n / ncols))
 
-    panel_in = 4.0
-    # Bottom strip: legend (~0.5") + optional caption (~0.2")
-    bottom_strip = 0.55 + (0.22 if args.param_label else 0)
-    fig_h = panel_in * nrows + bottom_strip
+    panel_in     = 4.0
+    caption_in   = 0.22 if args.param_label else 0.0
+    legend_ncols = min(len(legend_handles), 8)
+    legend_nrows = int(np.ceil(len(legend_handles) / legend_ncols)) if legend_handles else 1
+    legend_in    = legend_nrows * 0.22 + 0.15
+    fig_h = panel_in * nrows + legend_in + caption_in
     fig, axes = plt.subplots(nrows, ncols, figsize=(panel_in * ncols, fig_h))
     axes = np.array(axes).reshape(nrows, ncols)
     fig.subplots_adjust(hspace=0.25, wspace=0.08)
@@ -103,10 +127,13 @@ def main():
         row, col = divmod(idx, ncols)
         ax = axes[row, col]
 
+        ax.scatter(s["X1"], s["X2"], c=s["color"], s=12,
+                   linewidths=0, zorder=5)
+        label_offset = 0.015 * 2 * lims
         for _, sample in s.iterrows():
-            ax.text(sample["X1"], sample["X2"],
-                    sample_labels.get(sample["sample_id"], str(sample["sample_id"])),
-                    fontsize=5, ha="center", va="center",
+            ax.text(sample["X1"], sample["X2"] - label_offset,
+                    f"{sample['population'][:2]}-{sample[id_col]}",
+                    fontsize=5, ha="center", va="top",
                     color=sample["color"], fontweight="bold")
 
         ax.set_xlim(-lims, lims)
@@ -123,21 +150,20 @@ def main():
         row, col = divmod(idx, ncols)
         axes[row, col].axis("off")
 
-    # Caption at the very bottom; legend sits above it with a clear gap
-    caption_y  = 0.01
-    legend_y   = (caption_y + 0.055) if args.param_label else 0.01
-    bottom_pad = legend_y + 0.10   # tight_layout leaves this fraction for the legend row
+    bottom_frac  = (legend_in + caption_in) / fig_h
+    legend_frac  = caption_in / fig_h
+
+    fig.subplots_adjust(bottom=bottom_frac, hspace=0.25, wspace=0.08,
+                        left=0.06, right=0.98, top=0.97)
 
     if args.param_label:
-        fig.text(0.5, caption_y, args.param_label, ha="center", va="bottom",
+        fig.text(0.5, 0.005, args.param_label, ha="center", va="bottom",
                  fontsize=7, color="#555555")
 
     fig.legend(handles=legend_handles, loc="lower center",
-               ncol=min(len(legend_handles), 8),
+               ncol=legend_ncols,
                fontsize=9, frameon=True, framealpha=0.9,
-               bbox_to_anchor=(0.5, legend_y))
-
-    plt.tight_layout(rect=[0, bottom_pad, 1, 1], pad=0.4)
+               bbox_to_anchor=(0.5, legend_frac + 0.01))
 
     os.makedirs(args.output_path, exist_ok=True)
     out_path = os.path.join(args.output_path, args.output_name)

@@ -43,7 +43,8 @@ embedding_seed                    = read_config("embedding_seed", default = 0)
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
 k                             = read_config("k", default = 1)
-link                             = read_config("link", default = "inverse_distance")
+link                          = read_config("link", read_config("link_function", "inverse_distance"))
+link_function                 = link  # alias for plot scripts that use --link_function
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
@@ -417,7 +418,6 @@ rule compute_embeddings_true:
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         phased = phased,
-        link_function = link_function
     shell:
         """
         mkdir -p {params.outdir}
@@ -431,8 +431,7 @@ rule compute_embeddings_true:
             --link {params.link} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
-            --phased {params.phased} \
-            --link_function {params.link_function}
+            --phased {params.phased}
         """
 
 rule plot_embeddings_true:
@@ -704,7 +703,8 @@ rule plot_relative_div:
         outdir = plot_output_path,
         output_name = relative_div_plot_file_name,
         min_time = min_time,
-        time_scale = time_scale
+        time_scale = time_scale,
+        phased = phased
     shell:
         """
         mkdir -p {params.outdir}
@@ -715,7 +715,8 @@ rule plot_relative_div:
             --min_time {params.min_time} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --time_scale {params.time_scale}
+            --time_scale {params.time_scale} \
+            --phased {params.phased}
         """
 # ______________________STT Rules_________________________
 rule compute_embeddings:
@@ -987,7 +988,8 @@ rule compute_embeddings_replicate:
     params:
         N_min = N_min,
         N_max = N_max,
-        link_function = link_function,
+        k = k,
+        link = link,
         l1_penalties = l1_penalties,
         l2_penalties = l2_penalties,
         outdir = data_output_path,
@@ -1003,7 +1005,8 @@ rule compute_embeddings_replicate:
             --output_name embeddings_seed{wildcards.seed}{STT_TAG}.parquet \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --link_function {params.link_function} \
+            --k {params.k} \
+            --link {params.link} \
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \

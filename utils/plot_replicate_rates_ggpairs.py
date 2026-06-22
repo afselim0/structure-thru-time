@@ -21,13 +21,13 @@ from evaluate_performance import compute_distance_df, reconstruct_rates
 MAX_PTS = 2000
 
 
-def _compute_all_rates(inputs, seeds, N_min, link_function):
+def _compute_all_rates(inputs, seeds, N_min, link_function, id_label="sample_id"):
     """Load embeddings and compute reconstructed rates for every seed."""
     rates = {}
     for path, seed in zip(inputs, seeds):
         print(f"Computing reconstructed rates for seed {seed}...")
         emb = pd.read_parquet(path)
-        r   = reconstruct_rates(compute_distance_df(emb), N_min, link_function)
+        r   = reconstruct_rates(compute_distance_df(emb, id_label=id_label), N_min, link=link_function)
         rates[seed] = r
     return rates
 
@@ -47,7 +47,8 @@ def _align_rates(rates_dict):
 
 def _precompute_colors(pairs, pop_labels, pop_colors):
     """Return facecolors, edgecolors, linewidths, and legend handles for every pair."""
-    pop_map   = pop_labels.set_index("sample_id")["population"]
+    _id_col   = "individual_id" if "individual_id" in pop_labels.columns else "sample_id"
+    pop_map   = pop_labels.drop_duplicates(subset=_id_col).set_index(_id_col)["population"]
     color_map = pop_colors.set_index("population")["color"]
 
     pop1 = np.array([pop_map.get(p[0], "unknown") for p in pairs])
@@ -98,8 +99,14 @@ def main():
     pop_colors_df = pd.read_csv(args.colors)
     pop_labels_df = pd.read_csv(args.labels)
 
+    _first_emb = pd.read_parquet(args.inputs[0])
+    id_label   = "individual_id" if "individual_id" in _first_emb.columns else "sample_id"
+    if id_label == "individual_id" and "individual_id" not in pop_labels_df.columns:
+        pop_labels_df = pop_labels_df.copy()
+        pop_labels_df["individual_id"] = pop_labels_df["sample_id"] // 2
+
     # Compute and align rates
-    rates_dict = _compute_all_rates(args.inputs, args.seeds, args.N_min, args.link_function)
+    rates_dict = _compute_all_rates(args.inputs, args.seeds, args.N_min, args.link_function, id_label=id_label)
     rates_dict = _align_rates(rates_dict)
 
     # Reference seed for pair/time structure
@@ -111,7 +118,7 @@ def main():
 
     # Subset labels/colors to active samples
     active = set(pairs.get_level_values(0)) | set(pairs.get_level_values(1))
-    pop_labels_df = pop_labels_df[pop_labels_df["sample_id"].isin(active)]
+    pop_labels_df = pop_labels_df[pop_labels_df[id_label].isin(active)]
     pops          = pop_labels_df["population"].unique()
     pop_colors_df = pop_colors_df[pop_colors_df["population"].isin(pops)]
 
@@ -139,13 +146,20 @@ def main():
     sub_idx      = rng.choice(n_pts, size=min(MAX_PTS, n_pts), replace=False)
 
     # Figure: n×n grid + room for legend on right
+    # Hard-cap displayed legend entries so the side panel never blows up.
+    MAX_LEGEND_ENTRIES = 30
+    MAX_LEGEND_ROWS    = 5
+    display_handles    = legend_handles[:MAX_LEGEND_ENTRIES]
+    n_display          = len(display_handles)
+    legend_ncols_right = max(1, int(np.ceil(n_display / MAX_LEGEND_ROWS)))
+    legend_w_in        = legend_ncols_right * 1.4 + 0.3   # ~1.4" per column
     panel_size = 1.4
-    fig_w = n * panel_size + 1.8   # extra for legend
-    fig_h = n * panel_size + (0.35 if args.param_label else 0)
+    fig_w = n * panel_size + legend_w_in + 0.2
+    fig_h = n * panel_size + (0.45 if args.param_label else 0)
     fig, axes = plt.subplots(n, n, figsize=(fig_w, fig_h),
                              sharex=False, sharey=False)
-    fig.subplots_adjust(hspace=0.05, wspace=0.05,
-                        right=(n * panel_size) / fig_w)
+    grid_right = (n * panel_size) / fig_w
+    fig.subplots_adjust(hspace=0.05, wspace=0.05, right=grid_right)
 
     for row in range(n):
         for col in range(n):
@@ -158,7 +172,7 @@ def main():
                 ax.set_xlim(log_lims); ax.set_ylim(log_lims)
                 ax.set_facecolor("#f0f0f0")
                 ax.text(0.5, 0.5, f"seed {si}", ha="center", va="center",
-                        transform=ax.transAxes, fontsize=8, fontweight="bold", color="#333333")
+                        transform=ax.transAxes, fontsize=10, fontweight="bold", color="#333333")
                 ax.set_xticks([]); ax.set_yticks([])
 
             elif row < col:
@@ -189,12 +203,12 @@ def main():
                 log_r2 = np.corrcoef(np.log10(xi_all[vv]), np.log10(yi_all[vv]))[0, 1] ** 2
                 ax.set_facecolor("#fafafa")
                 ax.text(0.5, 0.5, f"{log_r2:.3f}", ha="center", va="center",
-                        transform=ax.transAxes, fontsize=9, color="#222222")
+                        transform=ax.transAxes, fontsize=22, fontweight="bold",
+                        color="#222222")
                 ax.set_xticks([]); ax.set_yticks([])
                 ax.set_xlim(log_lims); ax.set_ylim(log_lims)
 
             # Tick/spine cleanup: only show ticks on outer edges
-            show_bottom = (row == n - 1) and (col != col)   # never — handled below
             ax.tick_params(axis="both", which="both",
                            bottom=(row == n - 1) and (row != col),
                            left=(col == 0) and (row != col),
@@ -210,21 +224,22 @@ def main():
             if col == 0 and row != col:
                 ax.set_ylabel(f"seed {si}", fontsize=6, labelpad=2)
 
-    # Shared legend to the right
-    legend_ax = fig.add_axes([(n * panel_size + 0.1) / fig_w, 0.1, 1.5 / fig_w, 0.8])
+    # Shared legend to the right — truncate to MAX_LEGEND_ROWS rows to keep size sane
+    legend_ax = fig.add_axes([(n * panel_size + 0.1) / fig_w, 0.05, legend_w_in / fig_w, 0.9])
     legend_ax.axis("off")
-    legend_ax.legend(handles=legend_handles, loc="center left", fontsize=7,
-                     title="pop pair", title_fontsize=7,
+    legend_ax.legend(handles=display_handles, loc="center left", fontsize=9,
+                     title="pop pair", title_fontsize=9,
+                     ncol=legend_ncols_right,
                      frameon=True, markerscale=1.2, handlelength=1.0, borderpad=0.6)
 
     # Subtitle
     if args.param_label:
-        fig.text(0.5 * (n * panel_size) / fig_w, 0.01, args.param_label,
-                 ha="center", va="bottom", fontsize=7, color="#555555")
+        fig.text(0.5 * (n * panel_size) / fig_w, 0.005, args.param_label,
+                 ha="center", va="bottom", fontsize=9, color="#555555")
 
     os.makedirs(args.output_path, exist_ok=True)
     out_path = os.path.join(args.output_path, args.output_name)
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    fig.savefig(out_path, dpi=200)
     print(f"Saved ggpairs plot to {out_path}")
 
 
