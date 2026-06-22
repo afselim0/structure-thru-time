@@ -168,25 +168,31 @@ class CountCoalEvents:
             contig_ids = np.unique([
                 re.sub(r"_[0-9]+\.trees$", "", f) for f in self.ts_files
             ])
-            contigs_with_complete_replicates = []
+            contigs_with_enough_replicates = []
+            trimmed_ts_files = []
             for cid in contig_ids:
-                cid_tree_files = [f for f in self.ts_files if f.startswith(cid + "_")]
+                cid_tree_files = sorted(f for f in self.ts_files if f.startswith(cid + "_"))
                 num_posterior_samples_found = len(cid_tree_files)
-                if num_posterior_samples_found == num_posterior_samples:
-                    contigs_with_complete_replicates.append(cid)
+                if num_posterior_samples_found >= num_posterior_samples:
+                    contigs_with_enough_replicates.append(cid)
+                    # Use only the first num_posterior_samples files
+                    trimmed_ts_files.extend(cid_tree_files[:num_posterior_samples])
+                    if num_posterior_samples_found > num_posterior_samples:
+                        print(
+                            f"Info: Contig '{cid}' has {num_posterior_samples_found} "
+                            f"posterior samples; using first {num_posterior_samples}."
+                        )
                 else:
                     print(
-                        f"Warning: Contig '{cid}' has {num_posterior_samples_found} "
+                        f"Warning: Contig '{cid}' has only {num_posterior_samples_found} "
                         f"posterior samples (expected {num_posterior_samples}). "
                         "Skipping this contig."
                     )
 
-            # Use only contigs with the expected number of posterior samples
-            self.contig_ids = np.array(contigs_with_complete_replicates)
+            # Use only contigs with at least num_posterior_samples files
+            self.contig_ids = np.array(contigs_with_enough_replicates)
             self.num_contigs = len(self.contig_ids)
-            self.ts_files = [
-                f for f in self.ts_files if any(f.startswith(cid + "_") for cid in self.contig_ids)
-            ]
+            self.ts_files = trimmed_ts_files
 
             print(f"using {len(self.ts_files)} tree-sequence files across {self.num_contigs} contigs with {self.num_posterior_samples} posterior samples each.")
             # Use the first posterior sample (_0) to read sequence lengths
