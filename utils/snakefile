@@ -35,7 +35,8 @@ min_window_size                   = read_config("min_window_size", default = 50)
 max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
-phased                            = read_config("phased", default = "False") # If "False", coalescent rates (and embeddings, plots) are per-individual rather than per-haplotype
+per_haplotype                     = str(read_config("per_haplotype", default = "False")).lower() == "true" # If True, coalescent rates (and embeddings, plots) are per-haplotype rather than per-individual
+compute_se                        = str(read_config("compute_se", default = "False")).lower() == "true" # If True, pass --compute_se to compute_coal_rates to estimate standard errors of rates
 
 # STT Parameters 
 N_min                             = read_config("N_min", default = 1)
@@ -48,6 +49,7 @@ if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_pe
 if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
 n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
 n_timepoints_emb                  = read_config("n_timepoints_emb", default = 400)
+rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -93,6 +95,8 @@ plot_embeddings_wrapper_script         = "plot_embeddings.py"
 plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
 evaluate_performance_script       = "evaluate_performance.py"
 run_population_combs_script       = "run_pop_combs.py"
+bundle_dash_script                = "bundle_dash.py"
+dash_app_script                   = "plot_embeddings_dash.py"
 
 # =====================================================
 # File Names
@@ -137,6 +141,7 @@ performance_interactive_file_name      = f"performance{STT_TAG}.html"
 embeddings_pyvista_plot_file_name      = f"embeddings_pyvista{PLOT_TAG}.html"
 dash_launch_file_name                  = f"launch_dash{STT_TAG}.sh"
 dash_launch_true_file_name             = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
+dash_bundle_file_name                  = f"dash_bundle{STT_TAG}.zip"
 
 # Target file paths
 pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
@@ -163,6 +168,7 @@ performance_interactive           = os.path.join(plot_output_path, performance_i
 embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
+dash_bundle                       = os.path.join(plot_output_path, dash_bundle_file_name)
 
 combs_data_dir                    = os.path.join(output_path, "combs/data")
 combs_plot_dir                    = os.path.join(output_path, "combs/plots")
@@ -276,7 +282,7 @@ rule run_pca:
     params:
         outdir = plot_output_path,
         n_per_pop = n_sim_per_pop,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         python {input.script} \
@@ -285,7 +291,7 @@ rule run_pca:
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
             --n {params.n_per_pop} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 
 rule compute_rates_true:
@@ -298,7 +304,7 @@ rule compute_rates_true:
     params:
         outdir = data_output_path,
         max_time = max_time,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -307,7 +313,7 @@ rule compute_rates_true:
             --output_path {params.outdir} \
             --max_time {params.max_time} \
             --labels {input.pop_labels} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 rule plot_rates_true:
     input:
@@ -323,7 +329,7 @@ rule plot_rates_true:
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -336,7 +342,7 @@ rule plot_rates_true:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 rule compute_embeddings_true:
     input:
@@ -354,7 +360,7 @@ rule compute_embeddings_true:
         link = link,
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -368,7 +374,7 @@ rule compute_embeddings_true:
             --link {params.link} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 
 rule plot_embeddings_true:
@@ -391,7 +397,7 @@ rule plot_embeddings_true:
         N_max = N_max,
         rates_path = rates_true,
         reconstructed_rates_path = performance_true_data,
-        phased = phased,
+        per_haplotype = "--per-haplotype" if per_haplotype else "",
     shell:
         """
         mkdir -p {params.outdir}
@@ -405,7 +411,7 @@ rule plot_embeddings_true:
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
 # Run from the utils/ directory
@@ -446,7 +452,7 @@ rule evaluate_performance_true:
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         python {input.script} \
@@ -465,7 +471,7 @@ rule evaluate_performance_true:
             --min_time {params.min_time} \
             --max_rate_plot {params.max_rate_plot} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 
 rule simulate_trees:
@@ -584,7 +590,8 @@ rule compute_rates:
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
         max_window_size = max_window_size,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else "",
+        compute_se = "--compute_se" if compute_se else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -595,7 +602,8 @@ rule compute_rates:
             --minimum_window_size {params.min_window_size} \
             --maximum_window_size {params.max_window_size} \
             --pop_labels {input.pop_labels} \
-            --phased {params.phased}
+            {params.per_haplotype} \
+            {params.compute_se}
         """
 
 rule plot_rates:
@@ -612,7 +620,7 @@ rule plot_rates:
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -625,7 +633,7 @@ rule plot_rates:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 # ______________________STT Rules_________________________
 rule compute_embeddings:
@@ -648,7 +656,7 @@ rule compute_embeddings:
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -665,7 +673,7 @@ rule compute_embeddings:
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 rule plot_embeddings:
     input:
@@ -687,7 +695,7 @@ rule plot_embeddings:
         N_max = N_max,
         rates_path = rates_data,
         reconstructed_rates_path = performance_data,
-        phased = phased,
+        per_haplotype = "--per-haplotype" if per_haplotype else "",
     shell:
         """
         mkdir -p {params.outdir}
@@ -701,7 +709,7 @@ rule plot_embeddings:
             --min_time {params.min_time} \
             --max_time {params.embeddings_max_time} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
 # Run from the utils/ directory
@@ -749,6 +757,40 @@ rule plot_embeddings_pyvista:
             --max_time {params.embeddings_max_time} \
             --time_scale {params.time_scale}
         """
+# Not in STT_targets — run explicitly to package a self-contained, shareable
+# interactive dash bundle (.zip with the app, data, pinned env, and run.sh):
+#   snakemake bundle_dash --configfile <config> --cores 1
+rule bundle_dash:
+    input:
+        embeddings = embeddings_data,
+        rates = rates_data,
+        reconstructed_rates = performance_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = bundle_dash_script,
+        dash_app = dash_app_script
+    output:
+        dash_bundle
+    params:
+        N_max = N_max,
+        time_scale = time_scale,
+        min_time = min_time,
+        embeddings_max_time = embeddings_max_time,
+        rates_time_stride = rates_time_stride
+    shell:
+        """
+        python {input.script} {input.embeddings} \
+            --labels {input.pop_labels} \
+            --colors {input.pop_colors} \
+            --rates {input.rates} \
+            --reconstructed_rates {input.reconstructed_rates} \
+            --N_max {params.N_max} \
+            --time_scale {params.time_scale} \
+            --min_time {params.min_time} \
+            --max_time {params.embeddings_max_time} \
+            --rates-time-stride {params.rates_time_stride} \
+            -o {output}
+        """
 rule evaluate_performance:
     input:
         embeddings = embeddings_data,
@@ -772,7 +814,7 @@ rule evaluate_performance:
         min_time = min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         python {input.script} \
@@ -791,7 +833,7 @@ rule evaluate_performance:
             --min_time {params.min_time} \
             --max_rate_plot {params.max_rate_plot} \
             --time_scale {params.time_scale} \
-            --phased {params.phased}
+            {params.per_haplotype}
         """
 
 rule STT_pop_combs:

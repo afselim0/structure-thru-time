@@ -18,10 +18,13 @@ def setup_plotting_style():
     rcParams['ytick.major.size'] = 5
     # -- Fonts --
     rcParams['font.size'] = 12
-    rcParams['font.family'] = 'sans-serif'
-    rcParams['font.sans-serif'] = ['DejaVu Sans']
-    rcParams['mathtext.fontset'] = 'dejavusans'
+    # rcParams['font.family'] = 'sans-serif'
+    # rcParams['font.sans-serif'] = ['DejaVu Sans']
+    # rcParams['mathtext.fontset'] = 'dejavusans'
     # plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'sans-serif']
+
+    rcParams['font.family'] = 'STIXGeneral'
+    rcParams['mathtext.fontset'] = 'stix'
     rcParams['text.color'] = 'black'
     rcParams['axes.labelcolor'] = 'black'
     # -- Figure size --
@@ -30,3 +33,4 @@ def setup_plotting_style():
     rcParams['savefig.bbox'] = 'tight'
     rcParams['savefig.dpi'] = 500
 setup_plotting_style()
+# %%

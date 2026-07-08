@@ -47,7 +47,13 @@ def reconstruct_rates(D_df, N_min, k=1, link="inverse_distance"):
     reconstructed_rates,_ = compute_f(D_df, N_min, k=k, link=link)
     return reconstructed_rates
 
-def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id"):
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):
+    # When an ax is supplied, draw onto it (for embedding in a grid); otherwise make a standalone figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
     input_rates = input_rates.copy()
     input_rates += 1/N_max
     input_rates.columns = input_rates.columns.astype(float)
@@ -89,7 +95,6 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
     rng   = np.random.default_rng(seed=0)
     order = rng.permutation(len(x_v))
 
-    fig, ax = plt.subplots(figsize=(6, 4))
     lims = [min(x_v.min(), y_v.min()), max(x_v.max(), y_v.max())]
     ax.plot(lims, lims, 'k--', lw=1.5, zorder=0)
     ax.scatter(x_v[order], y_v[order], facecolors=fc_v[order], edgecolors=ec_v[order],
@@ -327,7 +332,7 @@ def main():
     argparser.add_argument("--labels", type=str, required=True, help="Path to population labels csv file")
     argparser.add_argument("--N_min", type=float, default=None, help="N_min used to compute embeddings")
     argparser.add_argument("--N_max", type=float, default=None, help="N_max used to compute embeddings")
-    argparser.add_argument("--k", type=int, default=1, help="Link function exponent used to compute embeddings")
+    argparser.add_argument("--k", type=float, default=1, help="Link function exponent used to compute embeddings")
     argparser.add_argument("--link", type=str, default="inverse_distance", help="Link function used to compute embeddings")
     argparser.add_argument("--data_output_path", type=str, required=True, help="Path to output directory")
     argparser.add_argument("--plot_output_path", type=str, required=True, help="Path to output directory")
@@ -336,12 +341,12 @@ def main():
     argparser.add_argument("--min_time", type=float, default=0, help="Minimum time for plotting")
     argparser.add_argument("--max_rate_plot", type=float, default=None, help="Maximum rate for plotting")
     argparser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
-    argparser.add_argument("--phased", type=str, default="False", help="Indicates whether the data is phased. If False, rates/embeddings are per-individual (individual_id) rather than per-haplotype (sample_id)")
+    argparser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, rates/embeddings are per-haplotype (sample_id). Otherwise they are per-individual (individual_id).")
     args = argparser.parse_args()
 
     # Loading data
-    phased = args.phased == "True"
-    id_label = "sample_id" if phased else "individual_id"
+    per_haplotype = args.per_haplotype
+    id_label = "sample_id" if per_haplotype else "individual_id"
     N_min = args.N_min
     N_max = args.N_max
     k = args.k
@@ -384,7 +389,7 @@ def main():
 
     # Plotting reconstructed rates over time
     if len(pop_labels["population"].unique()) < 10: # only plot if there are less than 10 populations for better visualization
-        rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate", phased=phased)
+        rates_fig = plot_rates_multi_figs(reconstructed_rates, pop_colors, pop_labels, min_time=args.min_time, max_rate_plot=args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate", per_haplotype=per_haplotype)
         rates_fig_single = plot_rates_single_fig(reconstructed_rates, min_time = args.min_time, max_rate_plot = args.max_rate_plot, time_scale=args.time_scale, ylabel="Coalescence Rate")
 
         rates_fig.savefig(os.path.join(args.plot_output_path, args.plot_output_name.replace("performance", "reconstructed_rates")), dpi=500, bbox_inches="tight")

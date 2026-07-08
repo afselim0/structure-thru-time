@@ -15,10 +15,6 @@ job_logs/
 *.mp4
 results/empirical
 results/simulations
-utils/singer_mac/*
-utils/singer_linux/*
-utils/relate_mac/*
-utils/relate_linux/*
 
 pop_colors.csv
 pop_labels.csv
