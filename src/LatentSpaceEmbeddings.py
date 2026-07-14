@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import pandas as pd
-from optimization_functions import *
+from OptimzationFunctions import *
 
 class LatentSpaceEmbeddings:
     def __init__(self,
@@ -159,11 +159,6 @@ class LatentSpaceEmbeddings:
                                         link = "inverse_distance",
                                         compute_uncertainty = False,
                                         exact_hessian = True):
-                                        target_precision = 1e-8,
-                                        k = 1,
-                                        link = "inverse_distance",
-                                        compute_uncertainty = False,
-                                        exact_hessian = True):
         """Compute embeddings by coordinate descent over time points
 
         Args:
@@ -190,7 +185,6 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
         print(self.smoothing_params)
-        return X, loss_df
         return X, loss_df
 
     def compute_embeddings_sample_coordinate_descent(self, X_init = None, p = 1, link = "inverse_distance", n_epochs = 1):
