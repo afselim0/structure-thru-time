@@ -44,15 +44,15 @@ def _compute_exact_hessian(X_t, R_t, W_t, N_min, p=1, link="inverse_distance"):
     The result is symmetric with exactly d zero eigenvalues (translation invariance).
     link must match the link function used in compute_loss_gradient_timepoint.
 
-    The second-derivative (f'') formulas below are derived only for p=1.  A general-k
-    derivation has not been worked out, so k != 1 is rejected to avoid silently
+    The second-derivative (f'') formulas below are derived only for p=1.  A general-p
+    derivation has not been worked out, so p != 1 is rejected to avoid silently
     returning incorrect covariances.
     """
-    if k != 1:
+    if p != 1:
         raise NotImplementedError(
             "_compute_exact_hessian only supports p=1; the f'' formulas have not "
-            "been derived for general k. Use exact_hessian=False (L-BFGS approximation) "
-            "or extend the f'' formulas for your k before requesting exact covariances."
+            "been derived for general p. Use exact_hessian=False (L-BFGS approximation) "
+            "or extend the f'' formulas for your p before requesting exact covariances."
         )
     n, d = X_t.shape
     D = squareform(pdist(X_t, 'euclidean'))
@@ -101,7 +101,7 @@ def extract_sample_covariances(X_t, R_t, W_t, N_min, p=1, link="inverse_distance
         R_t (np.ndarray): (n, n) rate matrix used in optimization.
         W_t (np.ndarray): (n, n) weight matrix.
         N_min (float): link function parameter.
-        k (int): link function exponent. Must match the value used in optimization.
+        p (int): link function exponent. Must match the value used in optimization.
         link (str): link function type. Must match the value used in optimization.
         hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct). Only used when exact=False.
         exact (bool): If True (default), compute the exact Hessian analytically and
@@ -161,7 +161,6 @@ def compute_f(x,
     else:
         return f,f_prime
 
-import numpy as np
 
 def compute_f_inverse(f, N_min, p=1, link="inverse_distance", eps=1e-10):
     """Compute the inverse link function, mapping rates back to distances.
@@ -196,26 +195,187 @@ def compute_f_inverse(f, N_min, p=1, link="inverse_distance", eps=1e-10):
 
     return x
 
-def procrustes_single_time(X_reference, Y):
+import numpy as np
+
+def procrustes_single_time(X_reference, Y, allow_reflection=True):
+    """
+    Align Y to X_reference via optimal rotation (Procrustes).
+
+    Parameters
+    ----------
+    X_reference : (n, d) array
+    Y : (n, d) array
+    allow_reflection : bool
+        If False, forces a proper rotation (det = +1), disallowing reflections.
+        If True (default), uses the unconstrained best-fit orthogonal matrix
+        (may include reflection).
+
+    Returns
+    -------
+    Y_rotated : (n, d) array
+    rotation_matrix : (d, d) array
+    """
     X_reference_centered = X_reference - np.mean(X_reference, axis=0)
     Y_centered = Y - np.mean(Y, axis=0)
+
     cov_matrix = np.dot(Y_centered.T, X_reference_centered)
-    U, _, Vt = np.linalg.svd(cov_matrix)
-    rotation_matrix = np.dot(U, Vt)
+    U, S, Vt = np.linalg.svd(cov_matrix)
+
+    if not allow_reflection:
+        d = np.sign(np.linalg.det(np.dot(U, Vt)))
+        D = np.diag([1] * (U.shape[1] - 1) + [d])
+        rotation_matrix = np.dot(U, np.dot(D, Vt))
+    else:
+        rotation_matrix = np.dot(U, Vt)
+
     Y_rotated = np.dot(Y_centered, rotation_matrix)
     return Y_rotated, rotation_matrix
 
-def procrustes_alignment(X):
-    X_aligned = np.zeros_like(X)
+
+def procrustes_align_trajectories(X_reference, X, allow_reflections=True):
+    """
+    Align a trajectory X (n, d, T) to a reference X_reference (n, d, T'),
+    using the following chain:
+      1. Align X[:, :, 0] onto X_reference[:, :, 0] -> X0_aligned.
+      2. Align every other frame X[:, :, t] onto X0_aligned (not onto
+         X_reference directly).
+
+    Parameters
+    ----------
+    X_reference : (n, d, T_ref) array
+        Only the first timepoint (index 0) is used.
+    X : (n, d, T) array
+    allow_reflections : bool
+        Passed to procrustes_single_time.
+
+    Returns
+    -------
+    X_aligned : (n, d, T) array
+    """
     n_timepoints = X.shape[2]
-    X_reference = X[:,:,0]
-    X_reference = X_reference - np.mean(X_reference, axis=0)
-    X_aligned[:,:,0] = X_reference
-    for t in range(1,n_timepoints):
-        Y = X[:,:,t]
-        Y_aligned, _ = procrustes_single_time(X_reference,Y)
-        X_aligned[:,:,t] = Y_aligned
+    X_aligned = np.zeros_like(X)
+
+    # Step 1: align frame 0 of X onto frame 0 of X_reference
+    X0_aligned, _ = procrustes_single_time(
+        X_reference[:, :, 0], X[:, :, 0], allow_reflection=allow_reflections
+    )
+    X_aligned[:, :, 0] = X0_aligned
+
+    # Step 2: align all remaining frames onto the now-aligned frame 0
+    for t in range(1, n_timepoints):
+        Y = X[:, :, t]
+        Y_aligned, _ = procrustes_single_time(
+            X0_aligned, Y, allow_reflection=allow_reflections
+        )
+        X_aligned[:, :, t] = Y_aligned
+
     return X_aligned
+
+
+def procrustes_align_trajectories_df(df_reference, df_X, allow_reflections=True):
+    """
+    Dataframe wrapper around procrustes_align_trajectories.
+
+    df_reference is treated as time-varying, but only its first timepoint
+    (the row with the minimum "time" value) is used as the reference frame.
+    Matching between df_reference and df_X (at the first timepoint), and
+    across all timepoints of df_X, is done by "sample_id".
+
+    Parameters
+    ----------
+    df_reference : pd.DataFrame
+        Columns: ["sample_id", "time", "X_1", ..., "X_d"].
+    df_X : pd.DataFrame
+        Columns: ["sample_id", "time", "X_1", ..., "X_d"].
+    allow_reflections : bool
+        Passed to procrustes_align_trajectories.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same schema as df_X, with coordinate columns replaced by aligned values.
+    """
+    coord_cols = [c for c in df_X.columns if c not in ("sample_id", "time")]
+
+    times = sorted(df_X["time"].unique())
+    n_timepoints = len(times)
+
+    # sample_id order is fixed by the first timepoint of df_X
+    first_frame = df_X[df_X["time"] == times[0]]
+    sample_ids = first_frame["sample_id"].to_numpy()
+    n = len(sample_ids)
+    d = len(coord_cols)
+
+    # Build (n, d, T) array for df_X, enforcing consistent sample_id order per frame
+    X = np.zeros((n, d, n_timepoints))
+    for i, t in enumerate(times):
+        frame = df_X[df_X["time"] == t].set_index("sample_id")
+        try:
+            X[:, :, i] = frame.loc[sample_ids, coord_cols].to_numpy()
+        except KeyError as e:
+            raise ValueError(
+                f"df_X at time={t} is missing sample_id(s) present at time={times[0]}: {e}"
+            )
+
+    # Build (n, d, 1) array for the reference's first timepoint, same sample_id order
+    ref_first_time = df_reference["time"].min()
+    ref_frame = df_reference[df_reference["time"] == ref_first_time].set_index("sample_id")
+    try:
+        X_ref0 = ref_frame.loc[sample_ids, coord_cols].to_numpy()
+    except KeyError as e:
+        raise ValueError(
+            f"df_reference at time={ref_first_time} is missing sample_id(s) "
+            f"present in df_X: {e}"
+        )
+    X_reference = X_ref0[:, :, np.newaxis]  # (n, d, 1)
+
+    # Run the array-level alignment
+    X_aligned = procrustes_align_trajectories(
+        X_reference, X, allow_reflections=allow_reflections
+    )
+
+    # Reassemble into a dataframe with the same schema as df_X
+    aligned_frames = []
+    for i, t in enumerate(times):
+        frame = df_X[df_X["time"] == t].set_index("sample_id").loc[sample_ids].reset_index()
+        frame[coord_cols] = X_aligned[:, :, i]
+        aligned_frames.append(frame)
+
+    result = pd.concat(aligned_frames, axis=0, ignore_index=True)
+    return result[df_X.columns.tolist()]
+
+# def procrustes_alignment(X, allow_reflections=True):
+#     X_aligned = np.zeros_like(X)
+#     n_timepoints = X.shape[2]
+#     X_reference = X[:,:,0]
+#     X_reference = X_reference - np.mean(X_reference, axis=0)
+#     X_aligned[:,:,0] = X_reference
+#     for t in range(1,n_timepoints):
+#         Y = X[:,:,t]
+#         Y_aligned, _ = procrustes_single_time(X_reference,Y, allow_reflection=allow_reflections)
+#         X_aligned[:,:,t] = Y_aligned
+#     return X_aligned
+
+# def procrustes_align_trajectories(X_reference, X, allow_reflections=True):
+#     n_timepoints = X.shape[2]
+#     X_aligned = np.zeros_like(X)
+
+#     # Step 1: align frame 0 of X onto frame 0 of X_reference
+#     X0_aligned, _ = procrustes_single_time(
+#         X_reference[:, :, 0], X[:, :, 0], allow_reflection=allow_reflections
+#     )
+#     X_aligned[:, :, 0] = X0_aligned
+
+#     # Step 2: align all remaining frames onto the now-aligned frame 0
+#     for t in range(1, n_timepoints):
+#         Y = X[:, :, t]
+#         Y_aligned, _ = procrustes_single_time(
+#             X0_aligned, Y, allow_reflection=allow_reflections
+#         )
+#         X_aligned[:, :, t] = Y_aligned
+
+#     return X_aligned
+
 
 def compute_difference_operators(num_timepoints, max_order, delta_t):
     D1 = np.zeros((num_timepoints-1,num_timepoints))
@@ -376,7 +536,7 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, p=1, link
         R_t (np.ndarray): Rate matrix. (n, n)
         W_t (np.ndarray): Weight matrix. (n, n)
         N_min, N_max (float): Link function parameters.
-        k (int): Link function parameter.
+        p (int): Link function parameter.
         link (str): Link function type.
         max_iter (int): Maximum L-BFGS-B iterations.
         gtol, ftol (float): Convergence tolerances.
@@ -429,7 +589,7 @@ def coordinate_descent_over_time(
         R (np.ndarray): Rate tensor. (n, n, T)
         W (np.ndarray): Weight tensor. (n, n, T)
         N_min, N_max (float): Link function parameters.
-        k (int): Link function exponent.
+        p (int): Link function exponent.
         link (str): Link function type.
         n_components (int): Latent space dimensionality.
         max_iter (int): Maximum L-BFGS-B iterations per timepoint.
@@ -450,10 +610,10 @@ def coordinate_descent_over_time(
     # Exact covariances rely on _compute_exact_hessian, whose f'' formulas are only
     # derived for p=1. Fail loudly up front rather than letting the per-timepoint
     # try/except silently return all-NaN covariances.
-    if return_covariances and exact_hessian and k != 1:
+    if return_covariances and exact_hessian and p != 1:
         raise NotImplementedError(
             "exact_hessian=True covariances are only supported for p=1; "
-            "use exact_hessian=False (L-BFGS approximation) for k != 1."
+            "use exact_hessian=False (L-BFGS approximation) for p != 1."
         )
 
     n_samples, _, n_timepoints = R.shape
@@ -815,7 +975,7 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, p=1, link="invers
         R (np.ndarray): Rate tensor. (n, n, T)
         W (np.ndarray, optional): Weight tensor. (n, n, T) Defaults to all ones.
         N_min, N_max (float): Link function parameters.
-        k (float): Link function parameter.
+        p (float): Link function parameter.
         link (str): Link function name.
         smoothing_params (dict, optional): Smoothing configuration.
         sampled_by_time (np.ndarray, optional): Presence mask. (n, T)

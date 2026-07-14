@@ -19,7 +19,7 @@ def find_active_pops(rates_df, pop_labels, pop_colors):
     pop_colors = pop_colors[pop_colors['population'].isin(populations)]
     return populations, pop_labels, pop_colors
 
-def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_min, N_max, k=1, link="inverse_distance", min_time=1, lims=None, generation_time=None):
+def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_min, N_max, p=1, link="inverse_distance", min_time=1, lims=None, generation_time=None):
     populations, pop_labels, pop_colors = find_active_pops(rates, pop_labels, pop_colors)
     population_combinations = []
     for r in range(1, len(populations) + 1):
@@ -33,8 +33,8 @@ def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_m
         colors_subset = pop_colors[pop_colors['population'].isin(population_combination)]
         sample_ids = label_subset['sample_id'].values
         rates_subset = rates.loc[rates.index.get_level_values(0).isin(sample_ids) & rates.index.get_level_values(1).isin(sample_ids)]
-        LSE = LatentSpaceEmbeddings(rates_subset, N_min = N_min, N_max = N_max, k = k, link = link)
-        _ = LSE.compute_embeddings_through_time()
+        LSE = LatentSpaceEmbeddings(rates_subset, N_min = N_min, N_max = N_max)
+        _ = LSE.compute_embeddings_through_time(p = p, link = link)
         embeddings_df = LSE.get_embeddings_df()
         embeddings_df.to_parquet(f"{data_dir}/{filename}.parquet")
 

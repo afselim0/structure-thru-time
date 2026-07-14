@@ -15,6 +15,7 @@ job_logs/
 *.mp4
 results/empirical
 results/simulations
+results/figures/misc_figs
 
 pop_colors.csv
 pop_labels.csv

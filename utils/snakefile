@@ -36,12 +36,12 @@ max_window_size                   = read_config("max_window_size", default = 500
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 per_haplotype                     = str(read_config("per_haplotype", default = "False")).lower() == "true" # If True, coalescent rates (and embeddings, plots) are per-haplotype rather than per-individual
-compute_se                        = str(read_config("compute_se", default = "False")).lower() == "true" # If True, pass --compute_se to compute_coal_rates to estimate standard errors of rates
+compute_variance                        = str(read_config("compute_variance", default = "False")).lower() == "true" # If True, pass --compute_variance to compute_coal_rates to estimate standard errors of rates
 
 # STT Parameters 
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
-k                             = read_config("k", default = 1)
+p                             = read_config("p", default = 1)
 link                             = read_config("link", default = "inverse_distance")
 l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
 l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
@@ -68,7 +68,7 @@ pop_labels                        = read_config("pop_labels", os.path.join(outpu
 SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
-STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.k{k}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
 
@@ -356,7 +356,7 @@ rule compute_embeddings_true:
         output_name = embeddings_true_file_name,
         N_min = N_min,
         N_max = N_max,
-        k = k,
+        p = p,
         link = link,
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
@@ -370,7 +370,7 @@ rule compute_embeddings_true:
             --output_name {params.output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --k {params.k} \
+            --p {params.p} \
             --link {params.link} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
@@ -443,7 +443,7 @@ rule evaluate_performance_true:
     params:
         N_min = N_min,
         N_max = N_max,
-        k = k,
+        p = p,
         link = link,
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
@@ -460,7 +460,7 @@ rule evaluate_performance_true:
             --rates {input.rates} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --k {params.k} \
+            --p {params.p} \
             --link {params.link} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
@@ -591,7 +591,7 @@ rule compute_rates:
         min_window_size = min_window_size,
         max_window_size = max_window_size,
         per_haplotype = "--per-haplotype" if per_haplotype else "",
-        compute_se = "--compute_se" if compute_se else ""
+        compute_variance = "--compute_variance" if compute_variance else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -603,7 +603,7 @@ rule compute_rates:
             --maximum_window_size {params.max_window_size} \
             --pop_labels {input.pop_labels} \
             {params.per_haplotype} \
-            {params.compute_se}
+            {params.compute_variance}
         """
 
 rule plot_rates:
@@ -647,7 +647,7 @@ rule compute_embeddings:
     params:
         N_min = N_min,
         N_max = N_max,
-        k = k,
+        p = p,
         link = link,
         l1_penalties = l1_penalties,
         l2_penalties = l2_penalties,
@@ -666,7 +666,7 @@ rule compute_embeddings:
             --output_name {params.output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --k {params.k} \
+            --p {params.p} \
             --link {params.link} \
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
@@ -805,7 +805,7 @@ rule evaluate_performance:
     params:
         N_min = N_min,
         N_max = N_max,
-        k = k,
+        p = p,
         link = link,
         data_output_path = data_output_path,
         plot_output_path = plot_output_path,
@@ -822,7 +822,7 @@ rule evaluate_performance:
             --rates {input.rates} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --k {params.k} \
+            --p {params.p} \
             --link {params.link} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \

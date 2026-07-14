@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
-    parser.add_argument("--k", type=int, default=1, help="Exponent of the distance in the link function")
+    parser.add_argument("--p", type=int, default=1, help="Exponent of the distance in the link function")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential)")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
     parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
@@ -98,11 +98,11 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, k=args.k, link=args.link, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     X_init = None
 
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
-    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init)
+    X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init, p=args.p, link=args.link)
     unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
@@ -110,7 +110,7 @@ def main():
     if LSE.smoothing_params is not None:
         print("Computing smoothed embeddings...")
         # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
-        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8)
+        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8, p=args.p, link=args.link)
         smoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
         smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
         # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")

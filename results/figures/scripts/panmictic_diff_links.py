@@ -35,8 +35,8 @@ for i, link_dict in enumerate(link_functions):
     ax = axs[i//4, i%4]
     ax.scatter(X[:,0], X[:,1], s=10)
     ax.set_title(f"p={p}", fontsize=10)
-fig.text(-0.01, 0.78, r"$f(x) = (N_{\mathrm{min}} + x^p)^{-1}$", ha='center', va='center', fontsize=12, rotation=90)
-fig.text(-0.01, 0.28, r"$f(x) = \frac{1}{N_{\mathrm{min}}} e^{-x^p}$", ha='center', va='center', fontsize=12, rotation=90)
+fig.text(-0.01, 0.78, r"$f(x) = (1 + x^p)^{-1}$", ha='center', va='center', fontsize=12, rotation=90)
+fig.text(-0.01, 0.28, r"$f(x) = e^{-x^p}$", ha='center', va='center', fontsize=12, rotation=90)
 
 file_name = os.path.splitext(os.path.basename(__file__))[0]
 fig.savefig(f"../outputs/{file_name}.pdf", dpi=500)

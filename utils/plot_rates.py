@@ -3,7 +3,7 @@
 import pandas as pd
 import argparse
 import os
-from plotting_style import setup_plotting_style
+from plotting_style import *
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -15,12 +15,39 @@ INDIVIDUAL_LINE_ALPHA = 0.2
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
+def compute_mean_rates(rates_df, pop_labels, phased=False):
+    if phased:
+        id_label = "sample_id"
+    else:
+        id_label = "individual_id"
+    populations = pop_labels['population'].unique()
+    K = len(populations)
+    T = len(rates_df.columns)
+    mean_rates = np.zeros((K,K,T))
+    for i in range(K):
+        for j in range(i, K):
+            pop1 = populations[i]
+            pop2 = populations[j]
+            pop1_samples = pop_labels[pop_labels['population'] == pop1][id_label].values
+            pop2_samples = pop_labels[pop_labels['population'] == pop2][id_label].values
+            sample_pairs = []
+            for s1 in pop1_samples:
+                for s2 in pop2_samples:
+                    if s1 < s2:
+                        if (s1,s2) not in sample_pairs:
+                            sample_pairs.append((s1,s2))
+                    elif s1 > s2:
+                        if (s2,s1) not in sample_pairs:
+                            sample_pairs.append((s2,s1))
+            mean_rates[i,j,:] = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
+            mean_rates[j,i,:] = mean_rates[i,j,:]
+    return mean_rates, populations
+    
 def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear", phased=False):
     if phased:
         id_label = "sample_id"
     else:
         id_label = "individual_id"
-    setup_plotting_style()
     populations = pop_labels['population'].unique()
 
     n_populations = len(populations)
@@ -137,3 +164,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%

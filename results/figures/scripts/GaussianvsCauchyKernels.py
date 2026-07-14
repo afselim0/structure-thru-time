@@ -1,3 +1,4 @@
+#%%
 """
 Compare Gaussian and Cauchy kernels, highlighting how a fixed band of
 "moderate similarity" on the y-axis corresponds to very different distance
@@ -5,31 +6,23 @@ ranges on the x-axis -- the mechanism behind the t-SNE crowding problem.
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
-# Both kernels normalized to peak at 1, for direct illustrative comparison.
-# Gaussian: exp(-x^2 / (2*sigma^2)), sigma=1 -> exp(-x^2/2)
-# Cauchy:   1 / (1 + x^2)
-x = np.linspace(0, 6, 2000)
-gaussian = np.exp(-x**2 / 2)
-cauchy = 1.0 / (1.0 + x**2)
-
-# Define the "moderate similarity" band on the y-axis.
-y_low, y_high = 0.05, 0.25
-
-# For each kernel, find the x-range where the curve falls within the band.
-# Since both kernels are monotonically decreasing, invert analytically:
-#   Gaussian: y = exp(-x^2/2)      -> x = sqrt(-2 ln y)
-#   Cauchy:   y = 1/(1+x^2)        -> x = sqrt(1/y - 1)
 def gaussian_inv(y):
     return np.sqrt(-2 * np.log(y))
 
 def cauchy_inv(y):
     return np.sqrt(1 / y - 1)
-
+x = np.linspace(0, 12, 2000)
+gaussian = np.exp(-x**2 / 2)
+cauchy = 1.0 / (1.0 + x**2)
+#%%
+# Define the "moderate similarity" band on the y-axis.
+y_low, y_high = 0.05, 0.1
 x_gauss_low, x_gauss_high = gaussian_inv(y_high), gaussian_inv(y_low)
 x_cauchy_low, x_cauchy_high = cauchy_inv(y_high), cauchy_inv(y_low)
 
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, ax = plt.subplots(figsize=(6, 4), dpi=500)
 
 # Plot the two kernels.
 ax.plot(x, gaussian, color="#1f77b4", linewidth=2.5, label="Gaussian: $\\exp(-x^2/2)$")
@@ -66,18 +59,13 @@ for x_val, y_val, color in [
     ax.plot([x_val, x_val], [0, y_val], color=color, linestyle=":", linewidth=1, alpha=0.6)
 
 ax.set_xlim(0, 6)
-ax.set_ylim(0, 1.05)
+ax.set_ylim(0, 1)
 ax.set_xlabel("distance $x$", fontsize=11)
 ax.set_ylabel("similarity $f(x)$", fontsize=11)
-ax.set_title(
-    "Same similarity band, very different distance ranges:\n"
-    "the Cauchy tail spreads 'moderate similarity' over a much wider distance range",
-    fontsize=11,
-)
-ax.legend(loc="upper right", fontsize=10, framealpha=0.9)
+ax.legend()
 ax.grid(alpha=0.25)
 
 fig.tight_layout()
-fig.savefig("/mnt/user-data/outputs/gaussian_vs_cauchy_kernel.png", dpi=200)
-print("Gaussian range width:", x_gauss_high - x_gauss_low)
-print("Cauchy range width:", x_cauchy_high - x_cauchy_low)
+filename = os.path.basename(__file__).split(".")[0]
+fig.savefig(f"../outputs/{filename}.pdf")
+# %%

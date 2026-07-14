@@ -73,7 +73,7 @@ for link_dict in link_functions:
     average_pairwise_distances[f"{link}_{p}"] = link_average_pairwise_distances
     f_inverse[f"{link}_{p}"] = link_f_inverse
 # %%
-fig, axs = plt.subplots(1, 2, figsize=(9, 4), sharex=True, sharey=False)
+fig, axs = plt.subplots(1, 2, figsize=(6, 3.5), sharex=True, sharey=False)
 # panel layout: cols = link family, showing average pairwise distance only
 panels = {
     "inverse_distance": axs[0],
@@ -92,16 +92,16 @@ for link in link_functions:
 
 for link_name, ax in panels.items():
     # twin_ax = twin_axs[link_name]
-    ax.spines['right'].set_visible(True)
+    # ax.spines['right'].set_visible(True)
     ax.set_xlabel("Effective population size (Ne)")
     ax.set_ylabel("Average pairwise distance")
     # twin_ax.set_ylabel("f_inverse(1/Ne)")
     ax.set_xscale('log')
     ax.set_yscale('log')
     # twin_ax.set_yscale('log')
-
-axs[0].set_title(r"$f(x) = (N_{\mathrm{min}} + x^p)^{-1}$")
-axs[1].set_title(r"$f(x) = \frac{1}{N_{\mathrm{min}}} e^{-x^p}$")
+axs[0].plot([1e2,1e4],[1e2,1e4], 'k--', label="y=x")
+axs[0].set_title(r"$f(x) = (1 + x^p)^{-1}$")
+axs[1].set_title(r"$f(x) = e^{-x^p}$")
 axs[0].legend()
 axs[1].legend()
 fig.tight_layout()

@@ -6,9 +6,7 @@ from scipy import sparse
 from tqdm import tqdm
 import os
 
-
-MIN_RATE = 1e-20
-
+MIN_RATE = 1e-16
 
 def adaptive_local_linear_filter(
     minimum_window_size: float,
@@ -55,8 +53,8 @@ def adaptive_local_linear_filter(
     minimum_num_idxs = int(minimum_window_size // time_step)
     if minimum_num_idxs % 2 == 0:
         minimum_num_idxs += 1
-    if minimum_num_idxs < 7:
-        minimum_num_idxs = 7
+    if minimum_num_idxs < 3:
+        minimum_num_idxs = 3
     maximum_num_idxs = int(maximum_window_size // time_step)
     if maximum_num_idxs % 2 == 0:
         maximum_num_idxs += 1
@@ -105,15 +103,14 @@ def adaptive_local_linear_filter(
         n  = maximum_num_idxs
         S[t, start:] = (n * xloc - S1) / (n * S2 - S1 ** 2)
 
-    # S is banded; return CSR so that H @ S.T exploits the sparsity.
-    return sparse.csr_matrix(S)
+    return S
 
 
 def compute_coal_rates(
     pdf_df: pd.DataFrame,
     minimum_window_size: float,
     maximum_window_size: float,
-    phased: bool = False,
+    per_haplotype: bool = False,
     sample_individal_ids: pd.DataFrame | None = None,
     filter_matrix: sparse.spmatrix | None = None,
 ) -> pd.DataFrame:
@@ -134,11 +131,11 @@ def compute_coal_rates(
         Minimum local-linear bandwidth (same units as column time points).
     maximum_window_size : float
         Maximum local-linear bandwidth (same units as column time points).
-    phased : bool
+    per_haplotype : bool
         If True, return per-sample-pair rates.  If False, average rates over
         all cross-individual sample pairs to return per-individual-pair rates.
     sample_individal_ids : pd.DataFrame or None
-        Required when ``phased=False``.  Must have two columns, ``sample_id``
+        Required when ``per_haplotype=False``.  Must have two columns, ``sample_id``
         and ``individual_id``.  If None, consecutive sample IDs are assumed to
         belong to the same diploid individual (IDs 0–1 → individual 0, IDs 2–3 →
         individual 1, etc.) — this assumption is only valid for zero-indexed,
@@ -153,7 +150,7 @@ def compute_coal_rates(
     -------
     rates_df : pd.DataFrame
         Estimated coalescent rates.  Index is a MultiIndex of pair IDs (sample
-        or individual depending on ``phased``); columns are the same time points
+        or individual depending on ``per_haplotype``); columns are the same time points
         as ``pdf_df``.  Values are clipped to MIN_RATE to suppress numerical
         artefacts from non-monotone empirical survival estimates.
     """
@@ -164,7 +161,7 @@ def compute_coal_rates(
     # S(t) = 1 - CDF(t) is the probability of not having coalesced by the right
     # edge of bin t.  H(t) = -log S(t) is the cumulative hazard at that edge.
     survival_df = 1 - pdf_df.cumsum(axis=1)
-    H = -np.log(survival_df.values.clip(1e-10))   # (n_pairs, n_T); clip avoids -inf at S=0
+    H = -np.log(survival_df.values.clip(1e-16))   # (n_pairs, n_T); clip avoids -inf at S=0
 
     S = filter_matrix
     if S is None:
@@ -173,23 +170,15 @@ def compute_coal_rates(
     # rates = H @ S.T.  Compute as (S @ H.T).T so the sparse operand is on the
     # left of the product (the efficient form for CSR) and the result is a dense
     # ndarray of shape (n_pairs, n_T).
-    rates = np.asarray((S @ H.T).T)
+    rates = H @ S.T
 
     rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
 
     # Clip negative rates caused by numerical noise in non-monotone empirical H(t)
     rates_df = rates_df.clip(lower=MIN_RATE)
 
-    if not phased:
+    if not per_haplotype:
         if sample_individal_ids is None or "individual_id" not in sample_individal_ids.columns:
-            # ASSUMPTION: sample IDs are zero-indexed consecutive integers; IDs
-            # 2k and 2k+1 belong to individual k.  Will silently mis-assign
-            # individuals if IDs are non-contiguous or non-zero-indexed.
-            # print(
-            #     "Mapping from sample IDs to individual IDs not provided. "
-            #     "Assuming consecutive sample IDs (0,1), (2,3), ... belong to "
-            #     "the same diploid individual."
-            # )
             sample_ids = rates_df.index.values
             sample_ids = np.unique([item for sample_id in sample_ids for item in sample_id])
             individual_ids = sample_ids // 2
@@ -200,6 +189,73 @@ def compute_coal_rates(
         rates_df = compute_between_individual_rates(rates_df, sample_individal_ids)
     return rates_df
 
+def compute_coal_rates_variance(
+    pdf_df: pd.DataFrame,
+    coal_counts_dir: str,
+    minimum_window_size: float,
+    maximum_window_size: float,
+    per_haplotype: bool = False,
+    sample_individal_ids: pd.DataFrame | None = None,   
+) -> pd.DataFrame:
+    """Estimate the variance of the coalescent rate estimates over time using a block-jackknife approach.
+    The genome-wide counts of coalescent events are loaded into memory once. 
+    Iterating over the count files (each for a specified contig), the counts are loaded and removed from the total counts
+    A pdf is computed by normalizing the remaining counts, and the coalescent rates are computed using the compute_coal_rates function.
+    Matrices of sums and sums of squares are accumulated over all contigs, and the variance is computed at the end.
+
+    Args:
+        pdf_df (pd.DataFrame): The probability density function computed from the genome-wide coalescent event counts.
+        coal_counts_dir (str): Directory containing the parquet files with the counts of coalescent events for each contig, and a coverage.parquet file with the total coverage for each pair and contig.
+    Returns:
+        pd.DataFrame: Dataframe with the variance of the coalescent rate estimates over time, with the same index and columns as the output of compute_coal_rates.
+    """
+
+    coverage_df = pd.read_parquet(os.path.join(coal_counts_dir, "coverage.parquet"))
+    total_segments_per_pair = coverage_df.sum(axis=1).values  # Total segments for each pair across all contigs
+    full_counts_df = pdf_df*coverage_df.sum(axis=1).values[:, np.newaxis]  # Total counts across all contigs for each pair (undo the normalization to get the total counts)
+    full_counts_df.columns = full_counts_df.columns.astype(float)  # Ensure columns are float
+    full_counts_df = full_counts_df.round().astype(int)  # Ensure counts are integers
+    pair_index = full_counts_df.index
+    times      = full_counts_df.columns.astype(float)
+    n_T        = len(times)
+    n_sample_pairs = len(pair_index)
+    time_step = times[1] - times[0]
+    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+
+    sums = np.zeros((n_sample_pairs, n_T))
+    sums_of_squares = np.zeros((n_sample_pairs, n_T))
+    count_files = sorted(f for f in os.listdir(coal_counts_dir) if f.endswith(".parquet") and f != "coverage.parquet")
+    n_contigs = len(count_files)
+    if n_contigs<20:
+        print(f"Warning: Only {n_contigs} contig count files found in {coal_counts_dir}.  Block-jackknife variance estimates may be unstable.")
+
+    for count_file in tqdm(count_files, desc="Block-jackknife over contigs"):
+        contig_counts_df = pd.read_parquet(os.path.join(coal_counts_dir, count_file))
+        contig_counts_df.columns = contig_counts_df.columns.astype(float)  # Ensure columns are float
+        contig_name = count_file.removesuffix(".parquet")
+        new_total_segments_per_pair = total_segments_per_pair - coverage_df[contig_name].values  # Total segments for each pair after dropping the current contig
+        new_counts_df = full_counts_df - contig_counts_df # Subtract the current contig counts from the total counts
+        pdf_without_contig = new_counts_df / new_total_segments_per_pair[:, np.newaxis]
+        rates_without_contig = compute_coal_rates(pdf_without_contig, minimum_window_size, maximum_window_size, per_haplotype, sample_individal_ids, filter_matrix=S)
+        sums += rates_without_contig.values
+        sums_of_squares += rates_without_contig.values ** 2
+
+    # Delete-1-block jackknife variance:
+    # Var = (n-1)/n * sum_i (theta_(i) - mean(theta))^2
+    #     = (n-1)/n * [ sum_i theta_(i)^2 - n * mean(theta)^2 ]
+    # expressed here via the running sums/sums-of-squares accumulators
+    mean_rates = sums / n_contigs
+    variance_values = (n_contigs - 1) / n_contigs * (
+        sums_of_squares - n_contigs * mean_rates ** 2
+    )
+
+    variance_df = pd.DataFrame(
+        variance_values,
+        index=full_counts_df.index,
+        columns=full_counts_df.columns,
+    )
+
+    return variance_df
 
 def compute_between_individual_rates(
     rates_df: pd.DataFrame,
@@ -254,151 +310,13 @@ def compute_between_individual_rates(
         between_individual_rates.loc[(ind1, ind2)] = rates_df.loc[pairs].mean()
     return between_individual_rates
 
-def compute_coal_rates_bootstrap_se(
-    bootstrap_dir: str,
-    minimum_window_size: float,
-    maximum_window_size: float,
-    n_replicates: int = 100,
-    subsample_size: int = None,
-    phased: bool = False,
-    sample_individal_ids: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """Estimate the SE of full-data coalescent rate estimates by delete-d jackknife.
+# %%
+pdf_df = pd.read_parquet("../results/empirical/Wohns/all.npp.2_0609/data/coal_pdf.V1.FS1.0.maxT4000.nT4000.parquet")
+coal_counts_dir = "../results/empirical/Wohns/all.npp.2_0609/data/bootstrap_pdf_samples"
+minimum_window_size = 100
+maximum_window_size = 1000
+per_haplotype = True
+sample_individal_ids = None
 
-    The data are split across ``N`` count files (one per contig/tree file) in
-    ``bootstrap_dir``.  For each of ``n_replicates`` replicates, ``subsample_size``
-    (= ``m``) files are drawn **without replacement**; their counts and coverage
-    are pooled into a bootstrap PDF, from which rates are computed via
-    ``compute_coal_rates``.
-
-    The raw across-replicate variance estimates the variance of an ``m``-contig
-    rate estimate, not of the full ``N``-contig estimate that the caller actually
-    reports.  The delete-d jackknife (Shao & Wu 1989, ``d = N - m`` deleted per
-    replicate) rescales it to the full-data variance:
-
-        Var[r_N] = (m / (N - m)) * Var_replicates[r_m]
-
-    The ``m / (N - m)`` factor simultaneously rescales for the data budget and
-    cancels the finite-population correction of without-replacement sampling, so
-    the returned SE is the SE of the estimate computed on **all** ``N`` contigs.
-
-    Validity requires both ``m`` and ``d = N - m`` to be reasonably large (the
-    1/n variance scaling must hold); ``m`` near ``N/2`` is the robust default.
-    The scaling treats each contig as an exchangeable unit of information; if
-    contig coverages are highly heterogeneous the contig-count scaling is only
-    approximate.
-
-    Parameters
-    ----------
-    bootstrap_dir : str
-        Directory containing per-file ``.parquet`` count files and a
-        ``coverage.parquet`` file, as written by
-        ``CountCoalEvents.compute_coal_time_pdf``.  The pair index and time grid
-        are taken from these files.
-    minimum_window_size : float
-        Passed to ``compute_coal_rates``.
-    maximum_window_size : float
-        Passed to ``compute_coal_rates``.
-    n_replicates : int
-        Number of jackknife replicates (Monte Carlo subsamples).
-    subsample_size : int
-        Number of count files (``m``) drawn without replacement per replicate.
-        Must satisfy ``0 < m < N``; ``m ~ N/2`` recommended.
-    phased : bool
-        Passed to ``compute_coal_rates``.  If False, the returned SE DataFrame
-        has an individual-pair index.
-    sample_individal_ids : pd.DataFrame or None
-        Passed to ``compute_coal_rates``.  Required when ``phased=False`` and
-        the sample-to-individual mapping is non-trivial.
-
-    Returns
-    -------
-    pd.DataFrame
-        SE of the full-data rate estimates, with the same (pair) index and
-        (time) columns as the output of ``compute_coal_rates``.
-    """
-    coverage_df = pd.read_parquet(os.path.join(bootstrap_dir, "coverage.parquet"))
-
-    # Discover available count files (exclude coverage.parquet)
-    available_files = sorted(
-        f for f in os.listdir(bootstrap_dir)
-        if f.endswith(".parquet") and f != "coverage.parquet"
-    )
-    file_basenames = [f.removesuffix(".parquet") for f in available_files]
-    n_files = len(available_files)
-
-    if n_files == 0:
-        raise ValueError(f"No count parquet files found in {bootstrap_dir}.")
-
-    missing = set(file_basenames) - set(coverage_df.columns)
-    if missing:
-        raise ValueError(f"coverage_df is missing columns for files: {missing}")
-
-    if subsample_size is None:
-        subsample_size = n_files // 2
-    # Delete-d jackknife needs 0 < m < N so that d = N - m > 0.
-    if not (0 < subsample_size < n_files):
-        raise ValueError(
-            f"subsample_size must satisfy 0 < subsample_size < n_files; got "
-            f"subsample_size={subsample_size}, n_files={n_files}. (m ~ n_files/2 recommended.)"
-        )
-
-    # Take the pair index and time grid from the first count file; all files and
-    # coverage_df are then aligned to this index so row order is consistent.
-    template = pd.read_parquet(os.path.join(bootstrap_dir, available_files[0]))
-    pair_index = template.index
-    times      = template.columns.astype(float)
-    n_T        = len(times)
-    n_sample_pairs = len(pair_index)
-
-    coverage_df = coverage_df.loc[pair_index, file_basenames]
-    coverage_vals = coverage_df.values  # (n_sample_pairs, n_files)
-
-    # The derivative-filter matrix depends only on the time grid, so build it once
-    # and reuse it across all replicates rather than rebuilding it each call.
-    time_step = times[1] - times[0]
-    filter_matrix = adaptive_local_linear_filter(
-        minimum_window_size, maximum_window_size, n_T, time_step
-    )
-
-    # Load all count files into (n_files, n_sample_pairs, n_T), reindexing each
-    # file to the template pair index so row order is guaranteed consistent.
-    print("Loading all bootstrap count files into memory …")
-    all_counts = np.empty((n_files, n_sample_pairs, n_T))
-    for i, fname in enumerate(tqdm(available_files, desc="Loading count files")):
-        file_df = pd.read_parquet(os.path.join(bootstrap_dir, fname))
-        all_counts[i] = file_df.loc[pair_index].values
-
-    replicate_rates_list: list[np.ndarray] = []
-
-    for _ in tqdm(range(n_replicates), desc="Bootstrap replicates"):
-        sampled_idxs = np.random.choice(n_files, size=subsample_size, replace=False)
-
-        # Sum counts and coverage over sampled files
-        counts_sum = all_counts[sampled_idxs].sum(axis=0)       # (n_sample_pairs, n_T)
-        total_len  = coverage_vals[:, sampled_idxs].sum(axis=1)  # (n_sample_pairs,)
-
-        with np.errstate(invalid="ignore"):
-            pdf_rep = pd.DataFrame(
-                counts_sum / total_len[:, np.newaxis],
-                index=pair_index,
-                columns=times,
-            )
-
-        rates_rep = compute_coal_rates(
-            pdf_rep, minimum_window_size, maximum_window_size, phased,
-            sample_individal_ids, filter_matrix=filter_matrix,
-        )
-        replicate_rates_list.append(rates_rep.values)
-
-    # Stack replicates; index comes from the last replicate (consistent across all)
-    replicate_rates = np.stack(replicate_rates_list, axis=0).astype(float)  # (n_replicates, n_pairs, n_T)
-
-    # Delete-d jackknife: rescale the m-contig replicate variance to the full-N
-    # variance by the factor m / (N - m), then take the square root for the SE.
-    m = subsample_size
-    N = n_files
-    subsample_var = replicate_rates.var(axis=0, ddof=1)   # Var[r_m] across replicates
-    se = np.sqrt((m / (N - m)) * subsample_var)            # SE of the full-N estimate
-
-    return pd.DataFrame(se, columns=times, index=rates_rep.index)
+variance_df = compute_coal_rates_variance(pdf_df,coal_counts_dir,minimum_window_size,maximum_window_size,per_haplotype)
+# %%
