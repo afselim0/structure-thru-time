@@ -234,18 +234,18 @@ def main():
     parser.add_argument("--min_time",     type=float, default=0, help="Minimum time to plot")
     parser.add_argument("--time_scale",   type=str, default="linear",
                         help="Time scale: linear or log")
-    parser.add_argument("--phased",       type=str, default="True",
-                        help="Whether input data is phased (True/False)")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true",
+                        help="If set, input data is treated as per-haplotype (sample_id). Otherwise per-individual (individual_id)")
 
     args = parser.parse_args()
-    phased = args.phased == "True"
+    per_haplotype = args.per_haplotype
 
     rates_df = pd.read_parquet(args.input)
     rates_df.columns = rates_df.columns.astype(float)
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
 
-    if phased:
+    if per_haplotype:
         id_col = "sample_id"
     else:
         id_col = "individual_id"

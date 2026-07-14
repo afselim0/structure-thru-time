@@ -6,7 +6,7 @@ import sys
 
 sys.path.append("../src")
 sys.path.append("../../src")
-from compute_coal_rates import compute_coal_rates, compute_coal_rates_variance
+from ComputeCoalescentRates import compute_coal_rates, compute_coal_rates_variance
 import pandas as pd
 
 def main():
@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--output_name", required=True, help="Output filename for pdf parquet file")
     parser.add_argument("--minimum_window_size", type=float, required=True, help="minimum window size for rate calculation")
     parser.add_argument("--maximum_window_size", type=float, required=True, help="maximum window size for rate calculation")
-    parser.add_argument("--per-haplotype", type=str, default="False", help="Indicates whether the input data is phased.  If False, rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.  If True, per-sample-pair rates are returned.")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, per-sample-pair (haplotype) rates are returned. Otherwise rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv (with sample_id and individual_id columns). Used to map haploid samples to diploid individuals when phased=False. If omitted, consecutive sample IDs (2k, 2k+1) are assumed to belong to individual k.")
     parser.add_argument("--compute_variance", action="store_true", help="Compute standard errors using bootstrap replicates")
     args = parser.parse_args()
@@ -27,7 +27,7 @@ def main():
     minimum_window_size = args.minimum_window_size
     maximum_window_size = args.maximum_window_size
     compute_variance = args.compute_variance
-    per_haplotype = args["per-haplotype"] == "True"
+    per_haplotype = args.per_haplotype
     print(f"computing rates from estimates of the pdfs of pairwise coalescent times: {args.pdf_path}")
     pdf_df = pd.read_parquet(pdf_path)
     pdf_df.columns = pdf_df.columns.astype(float)

@@ -13,7 +13,7 @@ from plot_rates import plot_rates_multi_figs, plot_rates_single_fig
 
 sys.path.append("../../src")
 sys.path.append("../src")
-from optimization_functions import compute_f
+from OptimzationFunctions import compute_f
 from plotting_style import *
 import argparse
 import matplotlib.pyplot as plt
@@ -362,7 +362,7 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
-    if not phased and "individual_id" not in pop_labels.columns:
+    if not per_haplotype and "individual_id" not in pop_labels.columns:
         pop_labels = pop_labels.copy()
         pop_labels["individual_id"] = pop_labels["sample_id"] // 2
 

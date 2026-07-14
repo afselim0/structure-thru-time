@@ -23,12 +23,12 @@ def main():
     parser.add_argument("--lims", type=str, help="Minimum time for plotting")
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
     parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
-    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, trajectories are per-individual (individual_id) rather than per-haplotype (sample_id)")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, trajectories are per-haplotype (sample_id). Otherwise per-individual (individual_id)")
     parser.add_argument("--param_label", default=None, type=str, help="Optional parameter string rendered as plot subtitle")
 
     args = parser.parse_args()
-    phased = args.phased == "True"
-    id_label = "sample_id" if phased else "individual_id"
+    per_haplotype = args.per_haplotype
+    id_label = "sample_id" if per_haplotype else "individual_id"
     embeddings_df = pd.read_parquet(args.input)
     colors_df = pd.read_csv(args.colors)
     labels_df = pd.read_csv(args.labels)
@@ -43,7 +43,7 @@ def main():
         lims = float(args.lims)
     
     # subsetting labels_df and colors_df to active samples only
-    if not phased and "individual_id" not in labels_df.columns:
+    if not per_haplotype and "individual_id" not in labels_df.columns:
         labels_df = labels_df.copy()
         labels_df["individual_id"] = labels_df["sample_id"] // 2
     active_samples = embeddings_df[id_label].unique()

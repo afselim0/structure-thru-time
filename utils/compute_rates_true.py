@@ -62,7 +62,7 @@ def main():
     parser.add_argument("--max_time", type=int, required=True, help="Maximum time for rate calculation")
     parser.add_argument("--labels", type=str, required=True, help="Path to the population labels file")
     parser.add_argument("--delta_t", type=int, default=10, help="Time step for rate calculation")
-    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the output rates should be per-sample-pair (phased=True) or per-individual-pair (phased=False).  If phased=False, rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, output rates are per-sample-pair (haplotype). Otherwise rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
     
     args = parser.parse_args()
     
@@ -71,7 +71,7 @@ def main():
     max_time = args.max_time
     labels_path = args.labels
     delta_t = args.delta_t
-    phased = args.phased == "True"
+    per_haplotype = args.per_haplotype
 
     print(f"Computing true rates for the demes file: {demes_file_path}")
     # if delta_t is None:
@@ -83,7 +83,7 @@ def main():
         rates_df.to_parquet(f"{output_path}/rates_true.parquet")
     pop_rates_df = compute_true_rates(demes_file_path, max_time, delta_t=delta_t)
     pop_labels = pd.read_csv(labels_path)
-    expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels, phased = phased)
+    expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels, phased = per_haplotype)
     expanded_rates_df.columns = expanded_rates_df.columns.astype(str)
     expanded_rates_df.to_parquet(f"{output_path}/rates_true.parquet")
 

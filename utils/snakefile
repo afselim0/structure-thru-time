@@ -10,15 +10,15 @@ def read_config(parameter, default, params = config):
 
 # General Parameters
 output_path                       = read_config("output_path", default = "../results")
-tree_output_path                  = os.path.join(output_path,"trees") # This directory is used when trees are simulated or inferred
-trees_dir                         = read_config("trees_dir", default = tree_output_path) # Default is the output path of simulated/inferred trees
+tree_output_path                  = os.path.join(output_path,"trees") # This directory is used when trees are simulated or inferred from simulated trees
+trees_dir                         = read_config("trees_dir", default = tree_output_path) # Default is the output path of simulated/inferred trees, unless trees are already inferred
 num_threads                       = read_config("num_threads", default = 1) # Parallelization used in simulation, inference and computation of coalescent pdf
 version                           = read_config("version", default = 1)
 
 # Simulation Parameters
-demes_file_path                   = read_config("demes_file_path", default = "../data/demes/main/split.yaml")
+demes_file_path                   = read_config("demes_file_path", default = "")
 num_contigs                       = int(read_config("num_contigs", default = 500))
-contig_length                     = int(read_config("contig_length", default = 1e6))
+contig_length                     = int(read_config("contig_length", default = 5e6))
 n_sim_per_pop                     = read_config("n_sim_per_pop", default = 20)
 mutation_rate                     = read_config("mutation_rate", default = 1.2e-8)
 recombination_rate                = read_config("recombination_rate", default = 1.2e-8)
@@ -37,24 +37,23 @@ max_window_size                   = read_config("max_window_size", default = 500
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 per_haplotype                     = str(read_config("per_haplotype", default = "False")).lower() == "true" # If True, coalescent rates (and embeddings, plots) are per-haplotype rather than per-individual
-compute_variance                        = str(read_config("compute_variance", default = "False")).lower() == "true" # If True, pass --compute_variance to compute_coal_rates to estimate standard errors of rates
+compute_variance                  = str(read_config("compute_variance", default = "True")).lower() == "true" # If True, pass --compute_variance to compute_coal_rates to estimate standard errors of rates
 
 # STT Parameters
 N_min                             = read_config("N_min", default = 1)
 N_max                             = read_config("N_max", default = N_min + 100000)
-p                             = read_config("p", default = 1)
-link                             = read_config("link", default = "inverse_distance")
-l1_penalties                      = read_config("l1", default = "None") # For plotting purposes only
-l2_penalties                      = read_config("l2", default = "None")# # For plotting purposes only
+p                                 = read_config("p", default = 1)
+link                              = read_config("link", default = "inverse_distance")
+l1_penalties                      = read_config("l1", default = "None")
+l2_penalties                      = read_config("l2", default = "None")
+n_components                      = read_config("n_components", default = 2) 
+rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
 if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
-n_components                      = read_config("n_components", default = 2)# # For plotting purposes only
-n_timepoints_emb                  = read_config("n_timepoints_emb", default = 400)
-rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
-rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
+n_timepoints_emb                  = read_config("n_timepoints_emb", default = n_timepoints) # For plotting purposes only
 embeddings_plot_lims              = read_config("embeddings_plot_lims", default="None") 
 max_rate_plot                     = read_config("max_rate_plot", default = 1/10000)
 embeddings_max_time               = read_config("embeddings_max_time", default = max_time)
@@ -75,7 +74,7 @@ _l2_str = f" | l2={l2_penalties}" if l2_penalties != "None" else ""
 param_label = (
     f"n={n_samples_per_pop}/pop | "
     f"N=[{N_min}, {N_max}] | "
-    f"link={link_function} | "
+    f"link={link} | "
     f"window size=[{min_window_size}, {max_window_size}]"
     f"{_l1_str}{_l2_str}"
 )
@@ -90,53 +89,50 @@ TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" 
 
 # Main scripts
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
-COMPUTE_RATES_SCRIPT              = "../src/compute_coal_rates.py"
+COMPUTE_RATES_SCRIPT              = "../src/ComputeCoalescentRates.py"
 COMPUTE_EMBEDDINGS_SCRIPT         = "../src/LatentSpaceEmbeddings.py"
-OPTIMIZATION_FUNCTIONS_SCRIPT         = "../src/optimization_functions.py"
+OPTIMIZATION_FUNCTIONS_SCRIPT     = "../src/OptimzationFunctions.py"
 PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
 PLOT_EMBEDDINGS_PYVISTA_SCRIPT    = "../src/PlotEmbeddingsPyVista.py"
 
 # Util Scripts
-preprocess_demography_script      = "preprocess_demography.py"
-plot_demography_script            = "plot_demography.py"
-pca_script                        = "run_pca.py"
-compute_rates_true_script         = "compute_rates_true.py"
-simulate_trees_script             = "simulate_trees.py"
-infer_trees_script                = "infer_trees.py"
-compute_pdf_wrapper_script        = "compute_pdf.py"
-compute_rates_wrapper_script      = "compute_rates.py"
-plot_rates_script                 = "plot_rates.py"
-plot_relative_div_script          = "plot_relative_div.py"
+preprocess_demography_script           = "preprocess_demography.py"
+plot_demography_script                 = "plot_demography.py"
+pca_script                             = "run_pca.py"
+compute_rates_true_script              = "compute_rates_true.py"
+simulate_trees_script                  = "simulate_trees.py"
+infer_trees_script                     = "infer_trees.py"
+compute_pdf_wrapper_script             = "compute_pdf.py"
+compute_rates_wrapper_script           = "compute_rates.py"
+plot_rates_script                      = "plot_rates.py"
+plot_relative_div_script               = "plot_relative_div.py"
 compute_embeddings_wrapper_script      = "compute_embeddings.py"
 plot_embeddings_wrapper_script         = "plot_embeddings.py"
 plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
-evaluate_performance_script       = "evaluate_performance.py"
-run_population_combs_script       = "run_pop_combs.py"
-bundle_dash_script                = "bundle_dash.py"
-dash_app_script                   = "plot_embeddings_dash.py"
-bundle_dash_script                = "bundle_dash.py"
-dash_app_script                   = "plot_embeddings_dash.py"
+evaluate_performance_script            = "evaluate_performance.py"
+run_population_combs_script            = "run_pop_combs.py"
+bundle_dash_script                     = "bundle_dash.py"
+dash_app_script                        = "plot_embeddings_dash.py"
 
 # =====================================================
 # File Names
 # =====================================================
-
 # Base Output directories
-data_output_path                  = os.path.join(output_path, "data")
-plot_output_path                  = os.path.join(output_path, "plots")
+data_output_path                       = os.path.join(output_path, "data")
+plot_output_path                       = os.path.join(output_path, "plots")
 
 # Target file names
-pca_plot_file_name                = "pca.png"
-demography_plot_file_name         = "demography.png"
-rates_true_file_name              = "rates_true.parquet"
-rates_true_plot_file_name         = "rates_true.png"
+pca_plot_file_name                     = "pca.png"
+demography_plot_file_name              = "demography.png"
+rates_true_file_name                   = "rates_true.parquet"
+rates_true_plot_file_name              = "rates_true.png"
 embeddings_true_file_name              = f"embeddings_true{TRUE_TAG}.parquet"
 embeddings_true_plot_file_name         = f"embeddings_true{TRUE_TAG}.html"
 performance_true_file_name             = f"reconstructed_rates_true{TRUE_TAG}.parquet"
 performance_true_plot_file_name        = f"performance_true{TRUE_TAG}.png"
 performance_true_interactive_file_name = f"performance_true{TRUE_TAG}.html"
-sim_finished_file_name            = f"sim_trees_ready{SIM_TAG}.txt"
-infer_finished_file_name          = f"infer_trees_ready{SIM_TAG}.txt"
+sim_finished_file_name                 = f"sim_trees_ready{SIM_TAG}.txt"
+infer_finished_file_name               = f"infer_trees_ready{SIM_TAG}.txt"
 
 if trees_dir == tree_output_path: # The case of simulation or inference
     if infer_method == "None": # Simulation
@@ -146,23 +142,22 @@ if trees_dir == tree_output_path: # The case of simulation or inference
 else: # The case of using empirical trees
     trees_ready = "trees_ready.txt"
 
-trees_ready                       = os.path.join(trees_dir, trees_ready)
+trees_ready                            = os.path.join(trees_dir, trees_ready)
 
-pdf_data_file_name                = f"coal_pdf{PDF_TAG}.parquet"
-rates_data_file_name              = f"rates{RATES_TAG}.parquet"
-rates_plot_file_name              = f"rates{RATES_TAG}.png"
-relative_div_plot_file_name       = f"relative_div{RATES_TAG}.png"
-relative_div_plot_summary_file_name = f"relative_div{RATES_TAG}_summary.png"
+pdf_data_file_name                     = f"coal_pdf{PDF_TAG}.parquet"
+rates_data_file_name                   = f"rates{RATES_TAG}.parquet"
+rates_plot_file_name                   = f"rates{RATES_TAG}.png"
+relative_div_plot_file_name            = f"relative_div{RATES_TAG}.png"
+relative_div_plot_summary_file_name    = f"relative_div{RATES_TAG}_summary.png"
 
-embeddings_data_file_name         = f"embeddings{STT_TAG}.parquet"
-embeddings_plot_file_name         = f"embeddings{PLOT_TAG}.html"
+embeddings_data_file_name              = f"embeddings{STT_TAG}.parquet"
+embeddings_plot_file_name              = f"embeddings{PLOT_TAG}.html"
 performance_data_file_name             = f"reconstructed_rates{STT_TAG}.parquet"
 performance_plot_file_name             = f"performance{STT_TAG}.png"
 performance_interactive_file_name      = f"performance{STT_TAG}.html"
 embeddings_pyvista_plot_file_name      = f"embeddings_pyvista{PLOT_TAG}.html"
 dash_launch_file_name                  = f"launch_dash{STT_TAG}.sh"
 dash_launch_true_file_name             = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
-dash_bundle_file_name                  = f"dash_bundle{STT_TAG}.zip"
 dash_bundle_file_name                  = f"dash_bundle{STT_TAG}.zip"
 
 # Target file paths
@@ -195,13 +190,9 @@ embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_py
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
 dash_bundle                       = os.path.join(plot_output_path, dash_bundle_file_name)
-dash_bundle                       = os.path.join(plot_output_path, dash_bundle_file_name)
-
-combs_data_dir                    = os.path.join(output_path, "combs/data")
-combs_plot_dir                    = os.path.join(output_path, "combs/plots")
 
 # Replicate embeddings file names (one per seed)
-embeddings_replicate_data         = [os.path.join(data_output_path, f"embeddings_seed{s}{STT_TAG}.parquet") for s in seeds]
+embeddings_replicate_data              = [os.path.join(data_output_path, f"embeddings_seed{s}{STT_TAG}.parquet") for s in seeds]
 replicates_panel_file_name             = f"replicates_panel{PLOT_TAG}.png"
 replicates_panel                       = os.path.join(plot_output_path, replicates_panel_file_name)
 replicates_2d_slice_file_name          = f"replicates_2d_slice{PLOT_TAG}.png"
@@ -227,13 +218,14 @@ if trees_dir != tree_output_path and not os.path.exists(trees_ready): # In the c
 # =====================================================
 # Target Groups
 # =====================================================
-sim_targets = [
-    pop_labels,pop_colors,pca_plot,demography_plot,
-    rates_true,rates_true_plot,
-    embeddings_true,embeddings_true_plot,
-    performance_true_data,performance_true_plot,performance_true_interactive,
-    sim_finished
-    ]
+true_targets = [
+    pop_labels, pop_colors,
+    rates_true, rates_true_plot,
+    embeddings_true, embeddings_true_plot,
+    performance_true_data, performance_true_plot, performance_true_interactive,
+    dash_launch_true]
+
+sim_targets = true_targets + [sim_finished]
 
 STT_targets = [
     pdf_data,
@@ -243,14 +235,6 @@ STT_targets = [
     slice_2d,
     performance_plot, performance_data, performance_interactive,
     dash_launch,
-    ]
-
-true_targets = [
-    pop_labels, pop_colors,
-    rates_true, rates_true_plot,
-    # embeddings_true, embeddings_true_plot,
-    # performance_true_data, performance_true_plot, performance_true_interactive,
-    # dash_launch_true,
     ]
 
 replicates_targets = ([rates_data]
@@ -263,8 +247,12 @@ replicates_targets = ([rates_data]
 # =====================================================
 # General Rules
 # =====================================================
-rule sim: # Only simulate the trees
+rule STT_true:# Compute true rates, embeddings, and performance without simulating trees
+    input: true_targets
+
+rule sim: # Compute true targets and simulate the trees
     input: sim_targets
+
 rule sim_STT: # Simulate and run STT on simulated trees
     input: sim_targets, STT_targets
 
@@ -276,12 +264,7 @@ rule infer_STT: # Infer and run STT on inferred trees
 rule STT: # Run STT
     input: STT_targets
 
-# Compute true rates, embeddings, and performance without simulating trees
-rule STT_true:
-    input: true_targets
-
-# Run multiple replicate optimizations with different seeds (rates computed once)
-rule STT_replicates:
+rule STT_replicates: # Run multiple replicate optimizations with different seeds (rates computed once)
     input: replicates_targets
 
 # =====================================================
@@ -710,7 +693,7 @@ rule plot_relative_div:
         output_name = relative_div_plot_file_name,
         min_time = min_time,
         time_scale = time_scale,
-        phased = phased
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -908,40 +891,6 @@ rule bundle_dash:
             --rates-time-stride {params.rates_time_stride} \
             -o {output}
         """
-# Not in STT_targets — run explicitly to package a self-contained, shareable
-# interactive dash bundle (.zip with the app, data, pinned env, and run.sh):
-#   snakemake bundle_dash --configfile <config> --cores 1
-rule bundle_dash:
-    input:
-        embeddings = embeddings_data,
-        rates = rates_data,
-        reconstructed_rates = performance_data,
-        pop_colors = pop_colors,
-        pop_labels = pop_labels,
-        script = bundle_dash_script,
-        dash_app = dash_app_script
-    output:
-        dash_bundle
-    params:
-        N_max = N_max,
-        time_scale = time_scale,
-        min_time = min_time,
-        embeddings_max_time = embeddings_max_time,
-        rates_time_stride = rates_time_stride
-    shell:
-        """
-        python {input.script} {input.embeddings} \
-            --labels {input.pop_labels} \
-            --colors {input.pop_colors} \
-            --rates {input.rates} \
-            --reconstructed_rates {input.reconstructed_rates} \
-            --N_max {params.N_max} \
-            --time_scale {params.time_scale} \
-            --min_time {params.min_time} \
-            --max_time {params.embeddings_max_time} \
-            --rates-time-stride {params.rates_time_stride} \
-            -o {output}
-        """
 rule evaluate_performance:
     input:
         embeddings = embeddings_data,
@@ -987,31 +936,6 @@ rule evaluate_performance:
             {params.per_haplotype}
         """
 
-rule STT_pop_combs:
-    input:
-        pop_labels = pop_labels,
-        pop_colors = pop_colors,
-        rates = rates_data,
-        script = run_population_combs_script
-    params:
-        data_dir = combs_data_dir,
-        plot_dir = combs_plot_dir,
-        N_min = N_min,
-        N_max = N_max
-    output:
-        directory(combs_data_dir),
-        directory(combs_plot_dir)
-    shell:
-        """
-        python {input.script} \
-            --data_dir {params.data_dir} \
-            --plotrees_dir {params.plotrees_dir} \
-            --pop_labels {input.pop_labels} \
-            --pop_colors {input.pop_colors} \
-            --rates_file {input.rates} \
-            --N0 {params.N0}
-        """
-
 # ______________________replicate Rules______________________
 rule compute_embeddings_replicate:
     input:
@@ -1024,7 +948,7 @@ rule compute_embeddings_replicate:
     params:
         N_min = N_min,
         N_max = N_max,
-        k = k,
+        p = p,
         link = link,
         l1_penalties = l1_penalties,
         l2_penalties = l2_penalties,
@@ -1032,6 +956,7 @@ rule compute_embeddings_replicate:
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -1041,13 +966,14 @@ rule compute_embeddings_replicate:
             --output_name embeddings_seed{wildcards.seed}{STT_TAG}.parquet \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
-            --k {params.k} \
+            --p {params.p} \
             --link {params.link} \
             --l1_penalties {params.l1_penalties} \
             --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
+            {params.per_haplotype} \
             --seed {wildcards.seed}
         """
 
@@ -1101,7 +1027,7 @@ rule plot_replicate_rates_comparison:
         output_name_html = "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".html",
         N_min            = N_min,
         N_max            = N_max,
-        link_function    = link_function,
+        link_function    = link,
         param_label      = param_label,
     shell:
         """
@@ -1136,7 +1062,7 @@ rule plot_replicate_rates_ggpairs:
         output_name = replicates_ggpairs_file_name,
         N_min       = N_min,
         N_max       = N_max,
-        link_function = link_function,
+        link_function = link,
         param_label = param_label,
     shell:
         """
@@ -1201,7 +1127,7 @@ rule plot_performance_replicates:
         output_name   = replicates_performance_panel_file_name,
         N_min         = N_min,
         N_max         = N_max,
-        link_function = link_function,
+        link_function = link,
         param_label   = param_label,
     shell:
         """

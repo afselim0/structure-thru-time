@@ -128,7 +128,7 @@ def main():
     parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
     parser.add_argument("--output_path", required=True, help="Output directory for plots")
     parser.add_argument("--output_name", required=True, help="Output filename for plot")
-    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If false, colors are based on individual_id rather than sample_id")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, colors are based on sample_id (haplotype). Otherwise colors are based on individual_id")
     
     args = parser.parse_args()
     rates_df = pd.read_parquet(args.input)
@@ -138,12 +138,12 @@ def main():
     output_name = args.output_name
     min_time = args.min_time
     max_rate_plot = args.max_rate_plot
-    phased = args.phased == "True"
+    per_haplotype = args.per_haplotype
 
     print(f"Plotting coalescence rates from file: {args.input}")
 
     # Subsetting labels_df and colors_df to active samples only
-    if phased:
+    if per_haplotype:
         id_label = "sample_id"
     else:
         id_label = "individual_id"
@@ -157,7 +157,7 @@ def main():
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
     if len(populations) <= 6 and len(populations) > 1:
-        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale, phased=phased)
+        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale, phased=per_haplotype)
         rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
         rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:

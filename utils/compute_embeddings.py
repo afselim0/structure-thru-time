@@ -25,21 +25,21 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
-    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, embeddings are per-individual (indexed by individual_id) rather than per-haplotype (sample_id)")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, embeddings are per-haplotype (indexed by sample_id). Otherwise per-individual (individual_id)")
     parser.add_argument("--compute_uncertainty", action="store_true", help="Compute per-sample Laplace covariance ellipses")
     parser.add_argument("--no_exact_hessian", action="store_true", help="Use L-BFGS inverse Hessian approximation instead of the exact analytical Hessian (not recommended)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
 
     args = parser.parse_args()
-    phased = args.phased == "True"
-    id_label = "sample_id" if phased else "individual_id"
+    per_haplotype = args.per_haplotype
+    id_label = "sample_id" if per_haplotype else "individual_id"
     input = args.input
     output_path = args.output_path
     print(f"computing embeddings for {input}")
     l1_penalties = args.l1_penalties
     l2_penalties = args.l2_penalties
     pop_labels_df = pd.read_csv(args.pop_labels) if args.pop_labels is not None else pd.DataFrame()
-    if not phased and "individual_id" not in pop_labels_df.columns and "sample_id" in pop_labels_df.columns:
+    if not per_haplotype and "individual_id" not in pop_labels_df.columns and "sample_id" in pop_labels_df.columns:
         pop_labels_df = pop_labels_df.copy()
         pop_labels_df["individual_id"] = pop_labels_df["sample_id"] // 2
 

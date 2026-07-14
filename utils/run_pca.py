@@ -64,7 +64,7 @@ def main():
     parser.add_argument("--colors", required=True, help="path to colors file", type=str)
     parser.add_argument("--labels", required=True, help="path to labels file", type=str)
     parser.add_argument("--n", required=True, help="Number of samples per population", type=int)
-    parser.add_argument("--phased", type=str, default="False", help="Indicates whether the data is phased. If False, PCA coordinates are averaged per diploid individual (individual_id) rather than plotted per haplotype (sample_id)")
+    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, PCA coordinates are plotted per haplotype (sample_id). Otherwise they are averaged per diploid individual (individual_id)")
 
     args = parser.parse_args()
     demes_file_path = args.demes_file_path
@@ -74,8 +74,8 @@ def main():
     labels_path = args.labels
     colors = pd.read_csv(colors_path)
     labels = pd.read_csv(labels_path)
-    phased = args.phased == "True"
-    id_label = "sample_id" if phased else "individual_id"
+    per_haplotype = args.per_haplotype
+    id_label = "sample_id" if per_haplotype else "individual_id"
 
     sequence_length = 1e7
     recombination_rate = 1e-8
