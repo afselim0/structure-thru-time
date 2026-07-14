@@ -26,6 +26,9 @@ def main():
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
     parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, embeddings are per-individual (indexed by individual_id) rather than per-haplotype (sample_id)")
+    parser.add_argument("--compute_uncertainty", action="store_true", help="Compute per-sample Laplace covariance ellipses")
+    parser.add_argument("--no_exact_hessian", action="store_true", help="Use L-BFGS inverse Hessian approximation instead of the exact analytical Hessian (not recommended)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
 
     args = parser.parse_args()
     phased = args.phased == "True"
@@ -36,6 +39,9 @@ def main():
     l1_penalties = args.l1_penalties
     l2_penalties = args.l2_penalties
     pop_labels_df = pd.read_csv(args.pop_labels) if args.pop_labels is not None else pd.DataFrame()
+    if not phased and "individual_id" not in pop_labels_df.columns and "sample_id" in pop_labels_df.columns:
+        pop_labels_df = pop_labels_df.copy()
+        pop_labels_df["individual_id"] = pop_labels_df["sample_id"] // 2
 
     # Parsing l1 and l2 penalties
     if l1_penalties == "None":
@@ -101,11 +107,21 @@ def main():
     LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     X_init = None
 
+    if args.seed is not None:
+        np.random.seed(args.seed)
+        print(f"Random seed set to {args.seed}")
+
     print("Computing unsmoothed embeddings by optimizing timepoints sequentially...")
     X, loss_df = LSE.compute_embeddings_through_time(X_init=X_init, p=args.p, link=args.link)
     unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
+
+    if args.compute_uncertainty:
+        covariances_df = LSE.get_covariances_df()
+        cov_name = args.output_name.replace("embeddings.", "covariances.")
+        covariances_df.to_parquet(f"{args.output_path}/{cov_name}")
+        print(f"Covariances saved to {args.output_path}/{cov_name}")
 
     if LSE.smoothing_params is not None:
         print("Computing smoothed embeddings...")

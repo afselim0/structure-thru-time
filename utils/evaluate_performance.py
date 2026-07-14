@@ -20,32 +20,39 @@ import matplotlib.pyplot as plt
 import os
 
 def compute_distance_df(embeddings, id_label="sample_id"):
-    x_cols = [col for col in embeddings.columns if col.startswith("X")]
+    x_cols = sorted(c for c in embeddings.columns if c.startswith("X"))
 
-    embeddings_pairs = embeddings.merge(
-        embeddings, on="time", suffixes=("_1", "_2")
-    )
-
-    embeddings_pairs = embeddings_pairs[
-        embeddings_pairs[f"{id_label}_1"] < embeddings_pairs[f"{id_label}_2"]
+    # Pivot each dimension to (n_individuals, n_times), then stack to
+    # (n_individuals, n_times, n_dims). Avoids the O(n²·T) cross-join.
+    pivots = [
+        embeddings.pivot_table(index=id_label, columns="time", values=c, aggfunc="first")
+        for c in x_cols
     ]
+    individuals = pivots[0].index.values
+    times       = pivots[0].columns.values
+    X = np.stack([p.values for p in pivots], axis=-1)  # (n, n_times, n_dims)
 
-    X1 = embeddings_pairs[[f"{c}_1" for c in x_cols]].values
-    X2 = embeddings_pairs[[f"{c}_2" for c in x_cols]].values
+    ii, jj   = np.triu_indices(len(individuals), k=1)
+    distances = np.linalg.norm(X[ii] - X[jj], axis=-1)  # (n_pairs, n_times)
 
-    embeddings_pairs["distance"] = np.linalg.norm(X1 - X2, axis=1)
-
-    D_df = (
-        embeddings_pairs
-        .set_index([f"{id_label}_1", f"{id_label}_2", "time"])["distance"]
-        .unstack("time")
+    pair_index = pd.MultiIndex.from_arrays(
+        [individuals[ii], individuals[jj]],
+        names=[f"{id_label}_1", f"{id_label}_2"],
     )
+    return pd.DataFrame(distances, index=pair_index, columns=times)
 
     return D_df
 
 def reconstruct_rates(D_df, N_min, p=1, link="inverse_distance"):
     reconstructed_rates,_ = compute_f(D_df, N_min, p=p, link=link)
     return reconstructed_rates
+
+def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):
+    # When an ax is supplied, draw onto it (for embedding in a grid); otherwise make a standalone figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):
     # When an ax is supplied, draw onto it (for embedding in a grid); otherwise make a standalone figure
@@ -355,6 +362,9 @@ def main():
     rates.columns = rates.columns.astype(float)
     pop_colors = pd.read_csv(args.colors)
     pop_labels = pd.read_csv(args.labels)
+    if not phased and "individual_id" not in pop_labels.columns:
+        pop_labels = pop_labels.copy()
+        pop_labels["individual_id"] = pop_labels["sample_id"] // 2
 
     if args.reconstructed_rates is not None:
         reconstructed_rates = pd.read_parquet(args.reconstructed_rates)
@@ -372,6 +382,20 @@ def main():
     common_times = sorted(set(rates.columns) & set(reconstructed_rates.columns))
     rates = rates[common_times]
     reconstructed_rates = reconstructed_rates[common_times]
+
+    # Align to common pairs (individual-level rates and reconstructed may differ)
+    common_pairs = rates.index.intersection(reconstructed_rates.index)
+    if len(common_pairs) < len(rates):
+        print(f"  [warn] {len(rates) - len(common_pairs)} pairs in rates not in reconstructed_rates — dropping")
+    if len(common_pairs) < len(reconstructed_rates):
+        print(f"  [warn] {len(reconstructed_rates) - len(common_pairs)} pairs in reconstructed_rates not in rates — dropping")
+    rates = rates.loc[common_pairs]
+    reconstructed_rates = reconstructed_rates.loc[common_pairs]
+
+    # Filter pop_labels to the individuals actually present in the data
+    active_ids = np.unique([s for pair in rates.index for s in pair])
+    pop_labels = pop_labels[pop_labels[id_label].isin(active_ids)].copy()
+    pop_colors = pop_colors[pop_colors["population"].isin(pop_labels["population"].unique())]
 
     print(f"Evaluating performance: {args.rates}")
 

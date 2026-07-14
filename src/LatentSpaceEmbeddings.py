@@ -15,7 +15,8 @@ class LatentSpaceEmbeddings:
                  l1_strengths:         dict         = None,
                  l2_strengths:         dict         = None,
                  weight_cap_percentile: float        = 95,
-                 default_weights:       int        = 1e6):
+                 default_weights:       int          = 1_000_000,
+                 link_function:         str          = "inverse_distance"):
 
         rates_df.columns = rates_df.columns.astype(float)
 
@@ -30,6 +31,8 @@ class LatentSpaceEmbeddings:
         self.delta_t         = self.time_points[1] - self.time_points[0]
         self.N_min           = N_min
         self.N_max           = N_max
+        self.link_function   = link_function
+
         
         # --- Sample times ---
         if sample_times is None:
@@ -97,6 +100,7 @@ class LatentSpaceEmbeddings:
         self.l1_strengths = l1_strengths
         self.l2_strengths = l2_strengths
         self.covariances  = None
+        self.covariances  = None
 
     def _parse_smoothing_params(self, l1_strengths, l2_strengths):
         """Compute smoothing weights from transferable strengths and the current embeddings.
@@ -155,11 +159,19 @@ class LatentSpaceEmbeddings:
                                         link = "inverse_distance",
                                         compute_uncertainty = False,
                                         exact_hessian = True):
+                                        target_precision = 1e-8,
+                                        k = 1,
+                                        link = "inverse_distance",
+                                        compute_uncertainty = False,
+                                        exact_hessian = True):
         """Compute embeddings by coordinate descent over time points
 
         Args:
             X_init (_type_, optional): initial solution over all time points. Defaults to None.
             target_precision (float, optional): target precision for the optimization.
+            compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
+            exact_hessian (bool): if True (default), use exact analytical Hessian for
+                covariance estimation; if False, use L-BFGS approximation.
             compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
             exact_hessian (bool): if True (default), use exact analytical Hessian for
                 covariance estimation; if False, use L-BFGS approximation.
@@ -178,6 +190,7 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
         print(self.smoothing_params)
+        return X, loss_df
         return X, loss_df
 
     def compute_embeddings_sample_coordinate_descent(self, X_init = None, p = 1, link = "inverse_distance", n_epochs = 1):

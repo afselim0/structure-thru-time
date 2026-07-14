@@ -1,0 +1,29 @@
+version: 1
+num_threads: 4
+
+# file paths
+output_path: ../results/empirical/Wohns/archaic
+trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/wohns_chopped/
+pop_colors: ../data/metadata/archaic_pop_colors.csv
+pop_labels: ../data/metadata/Wohns_ancients_pop_labels.csv
+num_posterior_samples: 1
+
+# coal time pdf estimation
+n_samples_per_pop: 20
+max_time: 30000
+n_timepoints: 1000
+
+# rate estimation parameters
+min_window_size: 300
+max_window_size: 6000
+
+# Embeddings estimation parameters
+N_min: 200
+N_max: 10000000
+
+# Plotting parameters
+min_time: 100
+time_scale: log
+
+pops: YRI,CEU,CHB,Afanasievo,Vindija,Denisovan,Chagyrskaya,Altai
+link_function: inverse_distance

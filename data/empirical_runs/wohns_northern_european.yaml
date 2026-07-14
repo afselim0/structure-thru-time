@@ -1,0 +1,36 @@
+version: 1
+num_threads: 2
+
+# file paths
+output_path: ../results/empirical/Wohns/northern_european_v2
+trees_dir: /project/jnovembre/afselim/structure-thru-time/data/trees/wohns_chopped/
+pop_colors: ../data/metadata/northern_european_colors.csv
+pop_labels: ../data/metadata/wohns_pop_labels.csv
+num_posterior_samples: 1
+
+# coal time pdf estimation
+n_samples_per_pop: 20
+max_time: 500
+n_timepoints: 500
+# fraction_samples - run if using more than 500 samps
+
+# rate estimation parameters
+min_window_size: 50
+max_window_size: 200
+poly: 1
+
+# Embeddings estimation parameters
+N_min: 200
+N_max: 10000000
+l1: [0,0] 
+l2: [0,0.1]
+
+# Plotting parameters
+min_time: 50
+max_rate_plot: 0.0002
+#embeddings_plot_lims: 10000
+embeddings_max_time: 500
+time_scale: log
+
+pops: FIN,Finnish,Orcadian,Icelandic,Saami,Norwegian,Estonian
+link_function: inverse_distance

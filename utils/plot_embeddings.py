@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--generation_time", default=None, type=float,help="Generation time in years")
     parser.add_argument("--time_scale", default="linear", help="Time scale for demography plot, linear or log", type=str)
     parser.add_argument("--phased", type=str, default="False", help="Indicates whether the input data is phased. If False, trajectories are per-individual (individual_id) rather than per-haplotype (sample_id)")
+    parser.add_argument("--param_label", default=None, type=str, help="Optional parameter string rendered as plot subtitle")
 
     args = parser.parse_args()
     phased = args.phased == "True"
@@ -42,6 +43,9 @@ def main():
         lims = float(args.lims)
     
     # subsetting labels_df and colors_df to active samples only
+    if not phased and "individual_id" not in labels_df.columns:
+        labels_df = labels_df.copy()
+        labels_df["individual_id"] = labels_df["sample_id"] // 2
     active_samples = embeddings_df[id_label].unique()
     labels_df = labels_df[labels_df[id_label].isin(active_samples)]
     # When unphased, each individual_id appears once per haplotype; collapse to one
@@ -67,8 +71,9 @@ def main():
     plotter.add_sample_trajectories()
     # plotter.add_population_medians()
     plotter.add_legend()
-    plotter.fig.show()
-    plotter.fig.update_layout(title_text=output_basename)
+    title_text = (f"{output_basename}<br><sup>{args.param_label}</sup>"
+                  if args.param_label else output_basename)
+    plotter.fig.update_layout(title_text=title_text)
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
     plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
     plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
@@ -81,8 +86,9 @@ def main():
         plotter_smooth.add_sample_trajectories()
         # plotter_smooth.add_population_medians()
         plotter_smooth.add_legend()
-        plotter_smooth.fig.show()
-        plotter_smooth.fig.update_layout(title_text=output_basename + " (smoothed)")
+        smooth_title = (f"{output_basename} (smoothed)<br><sup>{args.param_label}</sup>"
+                        if args.param_label else output_basename + " (smoothed)")
+        plotter_smooth.fig.update_layout(title_text=smooth_title)
         plotter_smooth.fig.write_html(f"{output_path}/smooth_{output_basename}.html")
     except FileNotFoundError:
         print("Smooth embeddings file not found.")

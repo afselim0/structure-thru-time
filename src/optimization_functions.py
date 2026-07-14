@@ -11,6 +11,8 @@ The module also contains functions for performing optimization using L-BFGS-B fo
 
 GTOL_TIMEPOINT     = 1e-32
 FTOL_TIMEPOINT     = 1e-32
+GTOL_TIMEPOINT     = 1e-32
+FTOL_TIMEPOINT     = 1e-32
 MAX_ITER_TIMEPOINT = 12000
 
 GTOL_SAMPLE        = 1e-16
@@ -23,8 +25,6 @@ MAX_ITER_JOINT     = 6000
 
 DEFAULT_WEIGHTS = 1e6
 DEFAULT_W_PERCENTILE_CAP = 95
-
-from os import link
 
 import numpy as np
 import pandas as pd
@@ -448,6 +448,7 @@ def compute_total_unpenalized_loss(X,R,W=None,N_min=1,N_max=np.inf, p=1, link="i
         N_min (float): Minimum value for the function computation.
         N_max (float): Maximum value for the function computation.
         W (np.ndarray, optional): Weight tensor. (nxnxT) Defaults to all ones.
+        link (str): Link function type.
 
     Returns:
         float: Total unpenalized loss value.
@@ -506,6 +507,7 @@ def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.i
         W_t (np.ndarray): Weight matrix. (n, n)
         N_min (float): Link function parameter.
         N_max (float): Link function parameter.
+        link (str): Link function type.
 
     Returns:
         tuple: (loss, gradient)
@@ -541,8 +543,11 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, p=1, link
         max_iter (int): Maximum L-BFGS-B iterations.
         gtol, ftol (float): Convergence tolerances.
         return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
+        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
 
     Returns:
+        tuple: (X_opt, loss, n_iterations, message) or
+               (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
         tuple: (X_opt, loss, n_iterations, message) or
                (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
     """
@@ -559,6 +564,10 @@ def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, p=1, link
         jac=True,
         options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
     )
+    X_opt = result.x.reshape(X_t_init.shape)
+    if return_hess_inv:
+        return X_opt, result.fun, result.nit, result.message, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
     X_opt = result.x.reshape(X_t_init.shape)
     if return_hess_inv:
         return X_opt, result.fun, result.nit, result.message, result.hess_inv
@@ -604,6 +613,11 @@ def coordinate_descent_over_time(
         exact_hessian (bool): If True (default), compute the exact analytical Hessian for
                covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
                (faster but significantly less accurate — see extract_sample_covariances).
+        tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
+               covariances has shape (n, d, d, T).
+        exact_hessian (bool): If True (default), compute the exact analytical Hessian for
+               covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
+               (faster but significantly less accurate — see extract_sample_covariances).
     """
     print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
 
@@ -628,6 +642,8 @@ def coordinate_descent_over_time(
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
     loss_before, loss_after, n_iters, messages = [], [], [], []
+    if return_covariances:
+        covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
     if return_covariances:
         covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
 
@@ -694,7 +710,12 @@ def coordinate_descent_over_time(
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
         X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
+        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
         X[extant_idx, :, t_idx] = X_t
+
+        if return_covariances and covs is not None:
+            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
+            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
 
         if return_covariances and covs is not None:
             # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
@@ -714,6 +735,8 @@ def coordinate_descent_over_time(
         "n_iterations": n_iters,
         "message":      messages,
     })
+    if return_covariances:
+        return X, loss_df, covariances
     if return_covariances:
         return X, loss_df, covariances
     return X, loss_df
@@ -797,6 +820,7 @@ def compute_loss_gradient_sample(X_i_flat, X, R_i, W_i=None, N_min=1, N_max=np.i
         W_i (np.ndarray): Weights for sample i's pairs. (n, T)
         N_min, N_max (float): Link function parameters.
         smoothing_params (dict, optional): Smoothing configuration.
+        link (str): Link function type.
 
     Returns:
         tuple: (loss, gradient)
@@ -836,6 +860,7 @@ def optimize_sample(X_i_init, X, R_i, W_i=None, N_min=1, N_max=np.inf, p=1, link
         smoothing_params (dict): Smoothing configuration.
         gtol, ftol (float): Convergence tolerances.
         max_iter (int): Maximum iterations.
+        link (str): Link function type.
 
     Returns:
         tuple: (X_opt, loss, n_iterations, message)
@@ -937,6 +962,7 @@ def compute_loss_gradient_all(X_flat, R, W=None, N_min=1, N_max=np.inf, p=1, lin
         N_min, N_max (float): Link function parameters.
         sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
         smoothing_params (dict, optional): Smoothing configuration.
+        link (str): Link function type.
 
     Returns:
         tuple: (total_loss, gradient)
