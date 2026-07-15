@@ -4,18 +4,16 @@
 This module provides the `CountCoalEvents` class, which:
   1. Discovers and loads tree-sequence files (*.trees) from a directory.
   2. Counts the total genomic span that coalesces in discrete time bins
-     for every pair of samples.
+     for every pair of samples for each tree sequence file, and saves the counts to disk.
   3. Normalises the counts into an empirical PDF of pairwise coalescence
      times.
-
-Supports multiple posterior ARG samples per contig (e.g. from SINGER) and
-optional sub-sampling of sample pairs per contig for memory / speed trade-offs.
+count files are saved in .npy format, and the final PDF is saved in .parquet format.
+The parquet has multi-index rows for sample IDs and columns for time-bin left edges.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -40,10 +38,6 @@ class CountCoalEvents:
     sample_ids : list, optional
         Subset of sample node IDs to analyse. If *None*, every sample in the
         first tree sequence is used.
-    num_posterior_samples : int, optional
-        Number of posterior ARG replicates per contig (for Bayesian ARG
-        inference methods such as SINGER). Files must follow the naming
-        convention ``{ContigID}_{PosteriorSampleID}.trees``. Defaults to 1.
     max_time : float, optional
         Upper bound of the time grid (in generations). If *None*, defaults to
         the 95th percentile of node times in the first tree sequence.
@@ -77,7 +71,6 @@ class CountCoalEvents:
         self,
         ts_dir: str,
         sample_ids: Optional[List[int]] = None,
-        num_posterior_samples: int = 1,
         max_time: Optional[float] = None,
         num_timepoints: int = 100,
         fraction_samples: float = 1.0,
@@ -97,17 +90,23 @@ class CountCoalEvents:
         if not self.ts_files:
             raise ValueError(f"No .trees files found in directory: {ts_dir}")
 
-        # --- Resolve contigs & posterior samples ------------------------
-        # Counts number of contigs and contig lengths, and extracts contig IDs from filenames.
-        self._init_contigs(num_posterior_samples)
+        # --- Resolve contigs ----------------------------------------------
+        # Each .trees file is treated as a single contig; read contig lengths
+        # and extract contig IDs from filenames.
+        self.num_contigs = len(self.ts_files)
+        self.contig_ids = [f.removesuffix(".trees") for f in self.ts_files]
+        self.contig_lengths = np.array([
+            tskit.load(os.path.join(self.ts_dir, cid + ".trees")).sequence_length
+            for cid in tqdm(self.contig_ids, total=self.num_contigs,
+                            desc="Reading contig lengths")
+        ], dtype=np.uint64)
 
         # --- Choose compact dtype based on total genome length ----------
         total_bp = int(np.sum(self.contig_lengths))
-        self.datatype = np.uint32 if total_bp*num_posterior_samples < 2**32 else np.uint64
+        self.datatype = np.uint32 if total_bp < 2**32 else np.uint64
 
         # --- Sample metadata -------------------------------------------
         ts_first = tskit.load(os.path.join(ts_dir, self.ts_files[0]))
-        self.sample_sets = [[int(sid)] for sid in ts_first.samples()]
 
         if sample_ids is None:
             self.sample_ids = ts_first.samples()
@@ -138,200 +137,115 @@ class CountCoalEvents:
         self.samples_selected = pd.DataFrame(
             np.random.rand(self.num_samples, self.num_contigs) < self.fraction_samples,
             index=self.sample_ids,
-            columns=self.contig_ids,
+            columns=self.contig_ids
         )
+        self.coverage_df = self._build_coverage_df()
+        self.total_segments_per_pair = self.coverage_df.values.sum(axis=1).astype(self.datatype)
 
     # ------------------------------------------------------------------ #
-    #  Private helpers
+    #  Counting coalescent spans
     # ------------------------------------------------------------------ #
 
-    def _init_contigs(self, num_posterior_samples: int) -> None:
-        """Populate contig/posterior-sample metadata from discovered files.
-
-        Sets ``self.num_posterior_samples``, ``self.num_contigs``,
-        ``self.contig_ids``, and ``self.contig_lengths``.
-        """
-        if num_posterior_samples == 1:
-            # Each file is a single contig (no posterior replicates)
-            self.num_posterior_samples = 1
-            self.num_contigs = len(self.ts_files)
-            self.contig_ids = [f.removesuffix(".trees") for f in self.ts_files]
-            self.contig_lengths = np.array([
-                tskit.load(os.path.join(self.ts_dir, cid + ".trees")).sequence_length
-                for cid in tqdm(self.contig_ids, total=self.num_contigs,
-                                desc="Reading contig lengths")
-            ], dtype=np.uint64)
-        else:
-            # Multiple posterior samples per contig
-            # File naming convention: {ContigID}_{PosteriorSampleID}.trees
-            self.num_posterior_samples = num_posterior_samples
-            contig_ids = np.unique([
-                re.sub(r"_[0-9]+\.trees$", "", f) for f in self.ts_files
-            ])
-            contigs_with_enough_replicates = []
-            trimmed_ts_files = []
-            for cid in contig_ids:
-                cid_tree_files = sorted(f for f in self.ts_files if f.startswith(cid + "_"))
-                num_posterior_samples_found = len(cid_tree_files)
-                if num_posterior_samples_found >= num_posterior_samples:
-                    contigs_with_enough_replicates.append(cid)
-                    # Use only the first num_posterior_samples files
-                    trimmed_ts_files.extend(cid_tree_files[:num_posterior_samples])
-                    if num_posterior_samples_found > num_posterior_samples:
-                        print(
-                            f"Info: Contig '{cid}' has {num_posterior_samples_found} "
-                            f"posterior samples; using first {num_posterior_samples}."
-                        )
-                else:
-                    print(
-                        f"Warning: Contig '{cid}' has only {num_posterior_samples_found} "
-                        f"posterior samples (expected {num_posterior_samples}). "
-                        "Skipping this contig."
-                    )
-
-            # Use only contigs with at least num_posterior_samples files
-            self.contig_ids = np.array(contigs_with_enough_replicates)
-            self.num_contigs = len(self.contig_ids)
-            self.ts_files = trimmed_ts_files
-
-            print(f"using {len(self.ts_files)} tree-sequence files across {self.num_contigs} contigs with {self.num_posterior_samples} posterior samples each.")
-            # Use the first posterior sample (_0) to read sequence lengths
-            self.contig_lengths = np.array([
-                tskit.load(os.path.join(self.ts_dir, cid + "_0.trees")).sequence_length
-                for cid in tqdm(self.contig_ids, total=self.num_contigs,
-                                desc="Reading contig lengths")
-            ], dtype=np.uint64)
-
-            print(f"Total used genome length across contigs: {np.sum(self.contig_lengths)} bp")
-            for cid, length in zip(self.contig_ids, self.contig_lengths):
-                print(f"  Contig '{cid}': {length} bp")
-
-    def _resolve_contig_id(self, ts_file: str) -> str:
-        """Extract the contig ID from a tree-sequence filename."""
-        if self.num_posterior_samples == 1:
-            return ts_file.removesuffix(".trees")
-        return re.sub(r"_[0-9]+\.trees$", "", ts_file)
-
-    # ------------------------------------------------------------------ #
-    #  Counting coalescent segments
-    # ------------------------------------------------------------------ #
-
-    def count_coal_segments_chunk(
+    def count_coal_spans_single_ts(
         self,
         ts_file: str,
-        bootstrap_dir: Optional[str] = None,
-    ) -> np.ndarray:
-        """Count coalescent segment spans in time bins for one tree sequence.
+        coal_counts_dir: str,
+    ) -> None:
+        """Count total genomic spans where a coalescent event occurs between each pair of samples in time bins for one tree sequence.
 
         For every selected sample pair, the function records how many base-pairs
         coalesce within each time bin (defined by a regular grid from 0 to
-        ``self.max_time``).
+        ``self.max_time``), and saves the result to disk. Nothing is returned;
+        results are saved as a .npy file at ``{coal_counts_dir}/{basename}.npy``
+        (array of shape ``(num_pairs, num_timepoints)``, dtype ``self.datatype``,
+        rows in the same order as ``self.sample_pairs``), where ``basename`` is
+        *ts_file* with the ``.trees`` suffix removed.
 
         Parameters
         ----------
         ts_file : str
             Filename (not full path) of the ``.trees`` file inside
             ``self.ts_dir``.
-        bootstrap_dir : str, optional
-            If provided, the unnormalised counts for this file are saved as a
-            parquet at ``{bootstrap_dir}/{basename}.parquet``, where
-            ``basename`` is *ts_file* with the ``.trees`` suffix removed.
-
-        Returns
-        -------
-        np.ndarray
-            Array of shape ``(num_pairs, num_timepoints)`` with dtype
-            ``self.datatype``.  Rows correspond to sample pairs (same order
-            as ``self.sample_pairs``), columns to time bins.
+        coal_counts_dir : str
+            The directory where the unnormalised counts for this file will be
+            saved as a .npy file.
         """
         ts = tskit.load(os.path.join(self.ts_dir, ts_file))
-        contig_id = self._resolve_contig_id(ts_file)
+        contig_id = ts_file.removesuffix(".trees")
 
         # --- Determine which samples are active on this contig ----------
         active_mask = self.samples_selected[contig_id]
         active_samples = active_mask[active_mask].index.values
 
-        if len(active_samples) == 0:
-            return np.zeros((self.num_pairs, self.num_timepoints), dtype=self.datatype)
-
-        # Simplify the tree sequence down to the active sample set
-        if len(active_samples) < ts.num_samples:
-            ts = ts.simplify(samples=active_samples)
-
-        # --- Build local pair indices that map back to the global index --
-        local_pairs: list[tuple[int, int]] = []
-        global_pair_idxs: list[int] = []
-        for i, s1 in enumerate(active_samples):
-            for j in range(i + 1, len(active_samples)):
-                s2 = active_samples[j]
-                local_pairs.append((i, j))
-                global_pair_idxs.append(self.pair_to_idx[(s1, s2)])
-        global_pair_idx = np.array(global_pair_idxs)
-
-        # --- Count pair-coalescence events in each time bin -------------
-        time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
-
-        # print(active_samples)
-        # print(local_pairs)
-        coal_segments = ts.pair_coalescence_counts(
-            sample_sets=[[i] for i in range(len(active_samples))],
-            indexes=local_pairs,
-            span_normalise=False,
-            time_windows=time_windows,
-        ).astype(self.datatype)
-
-
         # Place results into the full (all-pairs) output array
         coal_segments_total = np.zeros(
             (self.num_pairs, self.num_timepoints), dtype=self.datatype
         )
-        coal_segments_total[global_pair_idx, :] = coal_segments
 
-        # --- Optionally persist for block bootstrap ----------------------
-        if bootstrap_dir is not None:
-            os.makedirs(bootstrap_dir, exist_ok=True)
-            basename = ts_file.removesuffix(".trees")
-            counts_df = pd.DataFrame(
-                coal_segments_total,
-                index=self.pairs_MultiIndex,
-                columns=time_windows[:-1],
-            )
-            counts_df.to_parquet(
-                os.path.join(bootstrap_dir, f"{basename}.parquet")
-            )
+        if len(active_samples) > 0:
+            # Simplify the tree sequence down to the active sample set
+            if len(active_samples) < ts.num_samples:
+                ts = ts.simplify(samples=active_samples)
 
-        return coal_segments_total
+            # --- Build local pair indices that map back to the global index --
+            local_pairs: list[tuple[int, int]] = []
+            global_pair_idxs: list[int] = []
+            for i, s1 in enumerate(active_samples):
+                for j in range(i + 1, len(active_samples)):
+                    s2 = active_samples[j]
+                    local_pairs.append((i, j))
+                    global_pair_idxs.append(self.pair_to_idx[(s1, s2)])
+            global_pair_idx = np.array(global_pair_idxs)
 
-    def count_coal_segments_contigs_all_chunks(
+            # --- Count pair-coalescence events in each time bin -------------
+            time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
+            coal_segments = ts.pair_coalescence_counts(
+                sample_sets=[[i] for i in range(len(active_samples))],
+                indexes=local_pairs,
+                span_normalise=False,
+                time_windows=time_windows,
+            ).astype(self.datatype)
+
+            coal_segments_total[global_pair_idx, :] = coal_segments
+
+        coal_segments_total.dump(os.path.join(coal_counts_dir, f"{ts_file.removesuffix('.trees')}.npy"))
+
+    def count_coal_spans_contigs_all_ts(
         self,
         ts_files: List[str],
-        bootstrap_dir: Optional[str] = None,
-    ) -> np.ndarray:
-        """Accumulate coalescent-segment counts across multiple tree sequences.
+        coal_counts_dir: str,
+        num_threads: int = 1,
+    ) -> None:
+        """Count total genomic spans where a coalescent event occurs between each pair of samples in time bins for all tree sequences in a directory.
+
+        Each tree sequence's counts are saved to disk by
+        ``count_coal_spans_single_ts`` as a ``.npy`` file; results are not
+        returned or accumulated in memory.
 
         Parameters
         ----------
         ts_files : list[str]
             Filenames of the tree sequences to process.
-        bootstrap_dir : str, optional
-            Forwarded to ``count_coal_segments_chunk``; saves per-file parquets
-            when set.
-
-        Returns
-        -------
-        np.ndarray
-            Summed array of shape ``(num_pairs, num_timepoints)``.
+        coal_counts_dir : str
+            Forwarded to ``count_coal_spans_single_ts``; directory where
+            per-file numpy arrays are saved.
+        num_threads : int, optional
+            Number of parallel workers. Defaults to 1 (serial execution).
         """
-        total_coal_segments: Optional[np.ndarray] = None
+        os.makedirs(coal_counts_dir, exist_ok=True)
+        num_threads = min(num_threads, len(ts_files))
 
-        for ts_file in tqdm(ts_files, desc="Counting coalescent segments"):
-            coal_segments = self.count_coal_segments_chunk(ts_file, bootstrap_dir=bootstrap_dir)
-            if total_coal_segments is None:
-                total_coal_segments = coal_segments
-            else:
-                total_coal_segments += coal_segments
-
-        return total_coal_segments  # type: ignore[return-value]
+        if num_threads == 1:
+            # --- Serial execution -----------------------------------------
+            for ts_file in tqdm(ts_files, desc="Counting coalescent segments"):
+                self.count_coal_spans_single_ts(ts_file, coal_counts_dir=coal_counts_dir)
+        else:
+            # --- Parallel execution via pathos -----------------------------
+            pool = Pool(nodes=num_threads)
+            pool.map(
+                lambda ts_file: self.count_coal_spans_single_ts(ts_file, coal_counts_dir=coal_counts_dir),
+                ts_files,
+            )
 
     # ------------------------------------------------------------------ #
     #  PDF estimation
@@ -339,31 +253,20 @@ class CountCoalEvents:
 
     def compute_coal_time_pdf(
         self,
-        num_threads: int = 1,
-        data_output: Optional[str] = None,
-        bootstrap_dir: Optional[str] = None,
+        coal_counts_dir: str
     ) -> pd.DataFrame:
-        """Estimate the PDF of pairwise coalescence times.
+        """Estimate the PDF of pairwise coalescence times given the unnormalised counts.
 
-        Counts coalescent segments across all tree-sequence files, then
-        normalises by the total genomic span observed for each pair (accounting
-        for sub-sampling and posterior replicates).
+        Loads the per-file coalescent-span counts previously saved to
+        *coal_counts_dir* by ``count_coal_spans_contigs_all_ts``, sums them
+        across tree sequences, and normalises by the total observed genomic
+        span for each pair.
 
         Parameters
         ----------
-        num_threads : int, optional
-            Number of parallel workers.  When > 1, intermediate results are
-            saved to disk in *data_output* and aggregated afterwards.
-            Defaults to 1 (serial).
-        data_output : str, optional
-            Directory for temporary chunk files during parallel execution.
-            **Required** when ``num_threads > 1``.
-        bootstrap_dir : str, optional
-            If provided, per-file unnormalised count parquets are saved under
-            this directory (one per ``.trees`` file), and a coverage dataframe
-            ``coverage.parquet`` is written there as well.  These files are
-            the inputs for block-bootstrap uncertainty estimation of rate
-            estimates.
+        coal_counts_dir : str
+            Directory containing the unnormalised ``.npy`` counts for each
+            tree sequence, as saved by ``count_coal_spans_single_ts``.
 
         Returns
         -------
@@ -371,21 +274,24 @@ class CountCoalEvents:
             DataFrame indexed by ``(sample_1, sample_2)`` with one column per
             time-bin left-edge.  Values approximate the coalescence-time PDF.
         """
-        # Cap thread count at the number of available files
-        num_threads = min(num_threads, len(self.ts_files))
-
-        if num_threads == 1:
-            coal_segments_total = self.count_coal_segments_contigs_all_chunks(
-                self.ts_files, bootstrap_dir=bootstrap_dir
+        # --- Verify counts exist for every tree-sequence file ------------
+        expected_basenames = {ts_file.removesuffix(".trees") for ts_file in self.ts_files}
+        count_files = {
+            f.name.removesuffix(".npy") for f in Path(coal_counts_dir).glob("*.npy")
+        }
+        missing = expected_basenames - count_files
+        if missing:
+            raise FileNotFoundError(
+                f"coal_counts_dir '{coal_counts_dir}' is missing coalescent-count "
+                f"files for {len(missing)} tree sequence(s): {sorted(missing)}"
             )
-        else:
-            coal_segments_total = self._count_parallel(num_threads, data_output, bootstrap_dir=bootstrap_dir)
 
-        # --- Coverage dataframe (always computed, optionally saved) -----
-        coverage_df = self._build_coverage_df()
-        if bootstrap_dir is not None:
-            os.makedirs(bootstrap_dir, exist_ok=True)
-            coverage_df.to_parquet(os.path.join(bootstrap_dir, "coverage.parquet"))
+        # --- Load and sum counts across all tree sequences ----------------
+        coal_segments_total = np.zeros((self.num_pairs, self.num_timepoints), dtype=self.datatype)
+        for basename in tqdm(expected_basenames, desc="Loading coalescent counts"):
+            coal_segments_total += np.load(
+                os.path.join(coal_counts_dir, f"{basename}.npy"), allow_pickle=True
+            )
 
         # --- Normalise counts into a PDF --------------------------------
         time_bin_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
@@ -396,103 +302,22 @@ class CountCoalEvents:
             index=self.pairs_MultiIndex,
         )
 
-        # Total observed genome length for each pair, respecting the
-        # stochastic sub-sampling mask:  a pair is active on a contig only
-        # if *both* samples were selected on that contig.
-        total_segments_per_pair = coverage_df.values.sum(axis=1).astype(self.datatype)
-
-        # print(pdf_df.sum(axis=1))
-        # print(f"dividing by {total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples}")
-        pdf_df = pdf_df / (
-            total_segments_per_pair.reshape(-1, 1) * self.num_posterior_samples
-        )
-        # print(pdf_df.sum(axis=1))
+        # Normalise by the total observed genome length for each pair,
+        # respecting the stochastic sub-sampling mask computed in __init__.
+        pdf_df = pdf_df / self.total_segments_per_pair.reshape(-1, 1)
         return pdf_df
 
     # ------------------------------------------------------------------ #
-    #  Parallel helpers
+    #  Private helpers
     # ------------------------------------------------------------------ #
 
-    def _count_parallel(
-        self,
-        num_threads: int,
-        data_output: Optional[str],
-        bootstrap_dir: Optional[str] = None,
-    ) -> np.ndarray:
-        """Run ``count_coal_segments_contigs`` in parallel across chunks.
-
-        Each worker writes its result to a temporary ``.npy`` file; results are
-        aggregated and cleaned up after all workers finish.
-
-        Parameters
-        ----------
-        num_threads : int
-            Number of parallel workers.
-        data_output : str
-            Directory for temporary chunk files.
-        bootstrap_dir : str, optional
-            Forwarded to each chunk worker for per-file parquet saving.
-
-        Returns
-        -------
-        np.ndarray
-            Summed coalescent-segment counts across all chunks.
-        """
-        if data_output is None:
-            raise ValueError(
-                "data_output directory must be specified when using multiple threads."
-            )
-        os.makedirs(data_output, exist_ok=True)
-
-        chunks = np.array_split(self.ts_files, num_threads)
-
-        def _process_chunk(ts_files_chunk: list, chunk_id: int) -> None:
-            """Count segments for a chunk and persist to disk."""
-            result = self.count_coal_segments_contigs_all_chunks(
-                ts_files_chunk, bootstrap_dir=bootstrap_dir
-            )
-            np.save(
-                os.path.join(data_output, f"coal_segments_chunk_{chunk_id}.npy"),
-                result,
-            )
-
-        # Dispatch via pathos
-        pool = Pool(nodes=num_threads)
-        pool.map(
-            lambda args: _process_chunk(*args),
-            [(chunk, cid) for cid, chunk in enumerate(chunks)],
-        )
-
-        # Aggregate chunk files
-        print("Aggregating results from parallel workers …")
-        coal_segments_total: Optional[np.ndarray] = None
-        for chunk_id in tqdm(range(len(chunks))):
-            chunk_path = os.path.join(
-                data_output, f"coal_segments_chunk_{chunk_id}.npy"
-            )
-            chunk_data = np.load(chunk_path)
-            if coal_segments_total is None:
-                coal_segments_total = chunk_data
-            else:
-                coal_segments_total += chunk_data
-            os.remove(chunk_path)
-
-        # Clean up temp directory (will only succeed if empty)
-        os.rmdir(data_output)
-
-        return coal_segments_total  # type: ignore[return-value]
-
     def _build_coverage_df(self) -> pd.DataFrame:
-        """Build the per-file sequence-length coverage dataframe for bootstrap.
+        """Build the per-file sequence-length coverage dataframe.
 
         Rows are ``(sample_1, sample_2)`` pairs; columns are the basenames of
         the ``.trees`` files (without the ``.trees`` suffix).  Each entry is
         ``ts.sequence_length`` for the contig the file belongs to when *both*
         samples of that pair were selected on that contig, and zero otherwise.
-
-        For posterior-replicate files (``num_posterior_samples > 1``) the
-        column name is the contig ID (without the replicate suffix), so
-        multiple replicate columns share the same contig-level sequence length.
 
         Returns
         -------
@@ -518,7 +343,7 @@ class CountCoalEvents:
         col_names: list[str] = []
         data = np.zeros((self.num_pairs, len(self.ts_files)), dtype=np.float64)
         for col_idx, ts_file in enumerate(self.ts_files):
-            contig_id = self._resolve_contig_id(ts_file)
+            contig_id = ts_file.removesuffix(".trees")
             contig_idx = contig_id_list.index(contig_id)
             seq_len = float(self.contig_lengths[contig_idx])
             data[:, col_idx] = pair_contig_active[:, contig_idx] * seq_len
