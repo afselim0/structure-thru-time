@@ -202,6 +202,31 @@ def Stepping_Stones_2d(N,K,m):
                 M[i,j] = m/4
     return demography
 
+def two_admix(Ne, deep_split_time, recent_split_time, admix_time_1, admix_time_2,admix_prop_1=0.5, admix_prop_2=0.5):
+    
+    demography = msprime.Demography()
+    demography.add_population(name="Ancestral", initial_size= Ne)
+    demography.add_population(name="AB_ancestor", initial_size= Ne)
+    demography.add_population(name="CD_ancestor", initial_size= Ne)
+
+    demography.add_population(name="A", initial_size= Ne, default_sampling_time = 0)
+    demography.add_population(name="B", initial_size= Ne, default_sampling_time = 0)
+    demography.add_population(name="C", initial_size= Ne, default_sampling_time = 0)
+    demography.add_population(name="D", initial_size= Ne, default_sampling_time = 0)
+
+    demography.add_population(name="Admix_1", initial_size= Ne, default_sampling_time = 0)
+    demography.add_population(name="Admix_2", initial_size= Ne, default_sampling_time = 0)
+
+    demography.add_population_split(time=deep_split_time, derived=["AB_ancestor", "CD_ancestor"], ancestral="Ancestral")
+    demography.add_population_split(time=recent_split_time, derived=["A", "B"], ancestral="AB_ancestor")
+    demography.add_population_split(time=recent_split_time, derived=["C", "D"], ancestral="CD_ancestor")
+
+    demography.add_admixture(time=admix_time_1,derived="Admix_1",ancestral=["A","B"],proportions=[admix_prop_1,1-admix_prop_1])
+    demography.add_admixture(time=admix_time_2,derived="Admix_2",ancestral=["C","D"],proportions=[admix_prop_2,1-admix_prop_2])
+
+    demography.sort_events()
+    
+    return demography
 
 #%%
 Ne=1e4
@@ -277,3 +302,13 @@ demography = Stepping_Stones_2d(N,K,m)
 graph = demography.to_demes()
 demes.dump(graph, main_demes_dir_1 + "stepping_stones_2d.yaml")
 # %%
+# 8- Two Admix
+Ne = 1e4
+deep_split_time = 4000
+recent_split_time = 2000
+admix_time_1 = 500
+admix_time_2 = 100
+
+demography = two_admix(Ne, deep_split_time, recent_split_time, admix_time_1, admix_time_2,admix_prop_1=0.5, admix_prop_2=0.5)
+graph = demography.to_demes()
+demes.dump(graph, main_demes_dir_1 + "two_admix.yaml")

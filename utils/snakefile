@@ -225,7 +225,7 @@ true_targets = [
     performance_true_data, performance_true_plot, performance_true_interactive,
     dash_launch_true]
 
-sim_targets = true_targets + [sim_finished]
+sim_targets = sim_finished
 
 STT_targets = [
     pdf_data,
@@ -252,13 +252,12 @@ rule STT_true:# Compute true rates, embeddings, and performance without simulati
 
 rule sim: # Compute true targets and simulate the trees
     input: sim_targets
-
-rule sim_STT: # Simulate and run STT on simulated trees
+rule STT_sim: # Simulate and run STT on simulated trees
     input: sim_targets, STT_targets
 
 rule infer: # Only infer the trees 
     input: infer_finished
-rule infer_STT: # Infer and run STT on inferred trees
+rule STT_infer: # Infer and run STT on inferred trees
     input: infer_finished, STT_targets
 
 rule STT: # Run STT

@@ -1,0 +1,34 @@
+demography: two_admix
+demes_file_path: ../data/demes/main_1/two_admix.yaml
+output_path: ../results/simulations/outputs/two_admix
+version: 1
+num_threads: 12
+
+# Simulation Parameters
+num_contigs: 500
+contig_length: 5000000
+n_sim_per_pop: 5
+mutation_rate: 1.2e-8
+recombination_rate: 1.2e-8
+
+# coal time pdf estimation
+max_time: 5000
+n_timepoints: 2500
+# fraction_samples: 1.0
+
+# rate estimation parameters
+min_window_size: 100
+max_window_size: 200
+
+# Embeddings estimation parameters
+N_min: 100
+N_max: 1000000
+p: 2
+# l1: [0,0.05]
+# l2: [0,0.005]
+
+# Plotting parameters
+min_time: 50
+max_rate_plot: 0.0002
+embeddings_plot_lims: 4000
+time_scale: linear

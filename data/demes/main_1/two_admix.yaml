@@ -1,0 +1,42 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: Ancestral
+  epochs:
+  - {end_time: 4000, start_size: 10000.0}
+- name: AB_ancestor
+  ancestors: [Ancestral]
+  epochs:
+  - {end_time: 2000, start_size: 10000.0}
+- name: CD_ancestor
+  ancestors: [Ancestral]
+  epochs:
+  - {end_time: 2000, start_size: 10000.0}
+- name: A
+  ancestors: [AB_ancestor]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: B
+  ancestors: [AB_ancestor]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: C
+  ancestors: [CD_ancestor]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: D
+  ancestors: [CD_ancestor]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: Admix_1
+  start_time: 500
+  ancestors: [A, B]
+  proportions: [0.5, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}
+- name: Admix_2
+  start_time: 100
+  ancestors: [C, D]
+  proportions: [0.5, 0.5]
+  epochs:
+  - {end_time: 0, start_size: 10000.0}

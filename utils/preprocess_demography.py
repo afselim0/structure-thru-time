@@ -11,6 +11,14 @@ import matplotlib.colors as mcolors
 def preprocess_demography(demes_file_path,n_samples_per_pop):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
+    admix_times = {}
+    admix = False
+    for event in demography.events:
+        if event._type_str == "Admixture":
+            admix = True
+            print(f"Admixture event at time {event.time} generations between {event.ancestral[0]} and {event.ancestral[1]} with proportions {event.proportions}")
+            admix_times[event.derived] = event.time
+
     pops = [pop.name for pop in demography.populations if pop.default_sampling_time == 0]
     if len(pops) <= 9:
         cmap = plt.get_cmap("Set1")
@@ -29,6 +37,10 @@ def preprocess_demography(demes_file_path,n_samples_per_pop):
         "individual_id": np.arange(len(pop_labels)) // 2, # each individual has 2 samples for diploidy
         "population": pop_labels
     })
+
+    if admix: 
+        pop_labels["admix_time"] = pop_labels["population"].map(admix_times).fillna(0).astype(int)
+
     return pop_labels, pop_colors
 
 def main():

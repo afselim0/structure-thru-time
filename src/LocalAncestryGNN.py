@@ -9,8 +9,8 @@ contig to a user-specified output directory (named ``<contig_id>.parquet``):
   * ``LocalAncestryInference`` — infers local ancestry per local tree using
     ``TreeSequence.genealogical_nearest_neighbours`` against reference
     sample panels, then merges consecutive same-label trees into segments.
-    Optionally collapses segments below ``min_segment_size`` into a
-    neighbouring segment.
+    Optionally relabels segments below ``min_segment_size`` to match a
+    neighbouring segment (probabilities and boundaries are left untouched).
   * ``TrueLocalAncestry`` — recovers ground-truth local ancestry from census
     nodes baked into the simulation by
     ``msprime.Demography.add_census(time=admix_time + 1)``.
@@ -110,17 +110,21 @@ class LocalAncestryInference:
         share the same winning label they are merged into one segment; the
         reported probabilities are the span-weighted averages of the
         per-tree GNN values across all merged trees.  If ``min_segment_size``
-        is given, segments shorter than that span are then collapsed into a
-        neighbour and re-merged.
+        is given, segments shorter than that span then have their
+        ``ancestry_label`` overwritten to match a neighbouring segment —
+        probability columns and segment boundaries are left untouched, so
+        short segments are NOT re-merged into their neighbour; see
+        ``_collapse_short_segments``.
 
         Parameters
         ----------
         ts_path : str | Path
             Path to a ``.trees`` file.
         min_segment_size : float, optional
-            If given, segments shorter than this span (in base pairs) are
-            relabeled to a neighbouring segment's label and re-merged; see
-            ``_collapse_short_segments_with_probs``. Default: no collapsing.
+            If given, segments shorter than this span (in base pairs) have
+            their label relabeled to a neighbouring segment's label, without
+            altering probability columns or segment boundaries; see
+            ``_collapse_short_segments``. Default: no collapsing.
 
         Returns
         -------
@@ -179,7 +183,7 @@ class LocalAncestryInference:
         merged = _merge_segments_with_probs(df, self.admixed_sample_ids, prob_cols)
 
         if min_segment_size is not None:
-            merged = _collapse_short_segments_with_probs(
+            merged = _collapse_short_segments(
                 merged, self.admixed_sample_ids, prob_cols, min_segment_size
             )
         return merged
@@ -347,7 +351,7 @@ class TrueLocalAncestry:
         if not self.ts_files:
             raise FileNotFoundError(f"No .trees files found in: {self.ts_dir}")
 
-    def _find_census_nodes(self, ts: tskit.TreeSequence) -> list[int]:
+    def _find_census_nodes(self, ts: tskit.TreeSequence) -> np.ndarray:
         """
         Return all node IDs whose time equals ``admix_time + 1``.
 
@@ -355,11 +359,16 @@ class TrueLocalAncestry:
         loop over individual node objects.
         """
         census_time = self.admix_time + 1
-        return list(np.where(ts.nodes_time == census_time)[0])
+        return np.where(ts.nodes_time == census_time)[0]
 
     def infer_single(self, ts_path: str | Path) -> pd.DataFrame:
         """
         Recover ground-truth ancestry for a single tree sequence.
+
+        Uses ``tskit.TableCollection.link_ancestors`` to map each admixed
+        sample's genome directly onto its census-node ancestors — a
+        vectorised C-level operation, avoiding a per-tree Python loop over
+        ``tree.samples(cp_node)``.
 
         Parameters
         ----------
@@ -375,130 +384,64 @@ class TrueLocalAncestry:
         """
         ts = tskit.load(str(ts_path))
         census_nodes = self._find_census_nodes(ts)
-        if not census_nodes:
+        if len(census_nodes) == 0:
             raise ValueError(
                 f"No census nodes found at time {self.admix_time + 1} in {ts_path}. "
                 "Ensure the demography was built with "
                 f"demography.add_census(time={self.admix_time + 1}) before simulation."
             )
 
-        admixed_set = set(self.admixed_sample_ids)
+        tables = ts.dump_tables()
+        ancestry = tables.link_ancestors(
+            samples=self.admixed_sample_ids, ancestors=census_nodes
+        )
 
-        # Pre-fetch population for every census node using the vectorised
+        # Map each census node -> population ID using the vectorised
         # nodes_population array — avoids repeated ts.node(u) Python calls.
-        census_populations: dict[int, int] = {
-            u: int(ts.nodes_population[u])
-            for u in census_nodes
+        census_node_population = {
+            int(u): int(ts.nodes_population[u]) for u in census_nodes
         }
 
-        rows: list[dict] = []
+        df = pd.DataFrame({
+            "sample_id":      ancestry.child,
+            "start_pos":      ancestry.left,
+            "end_pos":        ancestry.right,
+            "ancestry_label": [census_node_population[p] for p in ancestry.parent],
+        })
 
-        for tree in tqdm(ts.trees(sample_lists=True),
-                         desc=f"Reading ground-truth ancestry ({Path(ts_path).name})",
-                         total=ts.num_trees):
-            start, end = tree.interval.left, tree.interval.right
-            sample_ancestry: dict[int, Any] = {s: None for s in self.admixed_sample_ids}
+        if df.empty:
+            raise ValueError(
+                f"No ancestry segments found for {ts_path}. Check that "
+                "`admixed_sample_ids` and census nodes are correct."
+            )
 
-            for cp_node, cp_population in census_populations.items():
-                # tree.samples(u) iterates sample descendants of u in this
-                # tree — O(descendants), enabled by sample_lists=True.
-                for descendant in tree.samples(cp_node):
-                    if descendant in admixed_set:
-                        sample_ancestry[descendant] = cp_population
-
-            for sample_id in self.admixed_sample_ids:
-                rows.append({
-                    "sample_id":      sample_id,
-                    "start_pos":      start,
-                    "end_pos":        end,
-                    "ancestry_label": sample_ancestry[sample_id],
-                })
-
-        df = pd.DataFrame(
-            rows, columns=["sample_id", "start_pos", "end_pos", "ancestry_label"]
-        )
+        df = df.sort_values(["sample_id", "start_pos"]).reset_index(drop=True)
         return _merge_segments(df, self.admixed_sample_ids)
 
-    def infer_all(
-        self,
-        output_dir: str | Path,
-        num_threads: int = 1,
-    ) -> None:
+    def infer_all(self, output_dir: str | Path) -> None:
         """
         Recover ground-truth local ancestry across every ``.trees`` file in
         ``self.ts_dir`` and write one ``.parquet`` file per contig to
         ``output_dir``.
 
         Each output file is named ``<contig_id>.parquet`` where ``contig_id``
-        is the source filename without the ``.trees`` suffix.
+        is the source filename without the ``.trees`` suffix.  Processed
+        sequentially — ``link_ancestors`` is already a fast, vectorised
+        C-level call, so parallelising across files is unnecessary.
 
         Parameters
         ----------
         output_dir : str | Path
             Directory where parquet files are written.  Created if it does
             not exist.
-        num_threads : int
-            Number of parallel worker processes.  When 1 (default), processes
-            files sequentially.  When > 1, uses
-            ``pathos.multiprocessing.ProcessingPool`` with one file per worker.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        work_items = [
-            (str(p), self.admixed_sample_ids, self.admix_time, str(output_dir))
-            for p in self.ts_files
-        ]
-
-        if num_threads == 1:
-            for item in work_items:
-                print(f"Processing {Path(item[0]).name}...")
-                _true_ancestry_and_save_contig(item)
-        else:
-            from pathos.multiprocessing import ProcessingPool
-
-            pool = ProcessingPool(nodes=num_threads)
-            try:
-                for _ in tqdm(
-                    pool.imap(_true_ancestry_and_save_contig, work_items),
-                    total=len(work_items),
-                    desc=f"Processing contigs ({num_threads} threads)",
-                ):
-                    pass
-            finally:
-                pool.close()
-                pool.join()
-                pool.clear()
-
-
-def _true_ancestry_and_save_contig(args: tuple) -> str:
-    """
-    Module-level worker: load one .trees file, recover ground-truth
-    ancestry, and write the result as a parquet file.
-
-    Must be module-level (not nested) so pathos/dill can pickle it.
-
-    Parameters
-    ----------
-    args : tuple
-        (ts_path, admixed_sample_ids, admix_time, output_dir)
-
-    Returns
-    -------
-    str
-        Path to the written parquet file.
-    """
-    ts_path, admixed_sample_ids, admix_time, output_dir = args
-    ts_path    = Path(ts_path)
-    output_dir = Path(output_dir)
-    contig_id  = ts_path.stem
-
-    truth = TrueLocalAncestry(ts_path.parent, admixed_sample_ids, admix_time)
-    df = truth.infer_single(ts_path)
-
-    out_path = output_dir / f"{contig_id}.parquet"
-    df.to_parquet(out_path, index=False)
-    return str(out_path)
+        for ts_path in tqdm(self.ts_files, desc="Processing contigs"):
+            df = self.infer_single(ts_path)
+            out_path = output_dir / f"{ts_path.stem}.parquet"
+            df.to_parquet(out_path, index=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared segment utilities
@@ -610,24 +553,31 @@ def _merge_segments_with_probs(
     return pd.DataFrame(merged, columns=fixed_cols + prob_cols)
 
 
-def _collapse_short_segments_with_probs(
+def _collapse_short_segments(
     df: pd.DataFrame,
     sample_ids: list[int],
     prob_cols: list[str],
     min_segment_size: float,
 ) -> pd.DataFrame:
     """
-    Relabel segments shorter than ``min_segment_size`` to match a neighbour,
-    then re-merge so the output is again a table of maximal same-label runs.
+    Relabel segments shorter than ``min_segment_size`` to match a neighbour.
+
+    Only ``ancestry_label`` is overwritten — segment boundaries
+    (``start_pos``/``end_pos``) and the GNN probability columns are left
+    untouched, so the reported probabilities always reflect the tree(s)
+    that were actually observed in that interval, even after relabeling.
+    Consequently rows are NOT re-merged: two adjacent rows that end up
+    sharing a label after relabeling remain separate rows with their own
+    original probabilities, rather than being combined into one wider
+    segment with an averaged probability.
 
     For each sample's segment track (processed independently), a single
     left-to-right pass relabels any segment with span < min_segment_size to
-    the label of its left neighbour; the final segment (if too short) is
-    instead relabeled to its right neighbour, since it has no left neighbour
-    to inherit from only when it is also the first segment. Relabeling does
-    not cascade back over already-visited segments — each segment merges
-    into whatever its left neighbour's label currently is at the time it is
-    visited.
+    the label of its left neighbour; the first segment (if too short) is
+    instead relabeled to its right neighbour, since it has no left
+    neighbour to inherit from. Relabeling does not cascade back over
+    already-visited segments — each segment inherits whatever its left
+    neighbour's label currently is at the time it is visited.
 
     Parameters
     ----------
@@ -642,7 +592,8 @@ def _collapse_short_segments_with_probs(
     Returns
     -------
     pd.DataFrame
-        Re-merged segments, same schema as the input.
+        Same rows and probability values as the input, with
+        ``ancestry_label`` updated in place for short segments.
     """
     fixed_cols = ["sample_id", "start_pos", "end_pos", "ancestry_label"]
     relabeled: list[dict] = []
@@ -670,8 +621,7 @@ def _collapse_short_segments_with_probs(
             row["ancestry_label"] = labels[i]
             relabeled.append(row)
 
-    relabeled_df = pd.DataFrame(relabeled, columns=fixed_cols + prob_cols)
-    return _merge_segments_with_probs(relabeled_df, sample_ids, prob_cols)
+    return pd.DataFrame(relabeled, columns=fixed_cols + prob_cols)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -912,11 +862,19 @@ def plot_chromosome_painting(
 ) -> "matplotlib.figure.Figure":
     """
     Visualise inferred vs ground-truth local ancestry for a single sample
-    using two stacked axes that share the same genomic x-axis.
+    using three stacked axes that share the same genomic x-axis.
 
     Top axis — Ground truth
         A single-row seaborn heatmap.  Each bin is painted with a solid
         colour representing its ancestry label (probability = 1).
+
+    Middle axis — Inferred ancestry segments
+        A single-row seaborn heatmap in the same style as the ground-truth
+        axis, painted with the winning (argmax) inferred ``ancestry_label``
+        for each bin.  This reflects the discrete segments actually
+        assigned by :meth:`LocalAncestryInference.infer_single` (including
+        any ``min_segment_size`` relabeling), independent of the GNN
+        probabilities shown below.
 
     Bottom axis — Inferred (probability-aware)
         A stacked bar chart drawn with ``axvspan`` patches.  At each bin
@@ -927,7 +885,8 @@ def plot_chromosome_painting(
         filled with light grey.
 
     Mis-assigned bins (where the winning inferred label differs from the
-    true label) are highlighted with a red border drawn across both axes.
+    true label) are highlighted with a red border drawn on the ground-truth
+    axis only.
 
     Parameters
     ----------
@@ -1052,21 +1011,23 @@ def plot_chromosome_painting(
     if in_run:
         mis_ranges.append((run_start, bin_edges[-1]))
 
-    # ── build figure with two vertically stacked axes ─────────────────────
-    fig, (ax_true, ax_inf) = plt.subplots(
-        2, 1,
+    # ── build figure with three vertically stacked axes ────────────────────
+    fig, (ax_true, ax_seg, ax_inf) = plt.subplots(
+        3, 1,
         figsize=figsize,
-        sharex=False,           # x-ticks are set manually on both
-        gridspec_kw={"hspace": 0.08, "height_ratios": [1, 2]},
+        sharex=False,           # x-ticks are set manually on each
+        gridspec_kw={"hspace": 0.08, "height_ratios": [1, 1, 2]},
     )
 
-    # ── top axis: ground truth heatmap ────────────────────────────────────
+    # ── shared discrete colormap for the two solid-label heatmaps ─────────
     cmap_colors = [colour[lbl] for lbl in labels] + [MISSING_CLR]
     cmap = mcolors.ListedColormap(cmap_colors)
     norm = mcolors.BoundaryNorm(
         boundaries=np.arange(len(cmap_colors) + 1) - 0.5,
         ncolors=len(cmap_colors),
     )
+
+    # ── top axis: ground truth heatmap ────────────────────────────────────
     sns.heatmap(
         tru_grid.reshape(1, -1),
         ax=ax_true,
@@ -1080,6 +1041,24 @@ def plot_chromosome_painting(
     )
     ax_true.tick_params(axis="y", labelsize=9, rotation=0)
     ax_true.set_ylabel("")
+
+    # ── middle axis: inferred ancestry segments heatmap ────────────────────
+    # Winning (argmax) label per bin, same rendering as the truth axis, so
+    # the discrete segment calls can be compared directly by eye before
+    # looking at the probability-aware view below.
+    sns.heatmap(
+        inf_label_grid.reshape(1, -1),
+        ax=ax_seg,
+        cmap=cmap,
+        norm=norm,
+        cbar=False,
+        xticklabels=False,
+        yticklabels=["Inferred"],
+        linewidths=0,
+        rasterized=True,
+    )
+    ax_seg.tick_params(axis="y", labelsize=9, rotation=0)
+    ax_seg.set_ylabel("")
 
     # ── bottom axis: inferred stacked-probability bars ────────────────────
     ax_inf.set_xlim(seq_start, seq_end)
@@ -1116,20 +1095,20 @@ def plot_chromosome_painting(
     ax_inf.spines[["top", "right"]].set_visible(False)
 
     # ── coordinate converter: genomic position → heatmap bin index ────────
-    # ax_true is a seaborn heatmap whose x-axis spans [0, n_bins].
+    # ax_true and ax_seg are seaborn heatmaps whose x-axis spans [0, n_bins].
     # ax_inf uses real genomic coordinates [seq_start, seq_end].
     # All overlays and ticks must be expressed in each axis's own space.
     def _to_bin(pos: float) -> float:
         return (pos - seq_start) / (seq_end - seq_start) * n_bins
 
-    # ── mis-assignment overlay (true axis only) ───────────────────────────
+    # ── mis-assignment overlay (ground-truth axis only) ────────────────────
     # Use a blended transform: x in data (bin-index) coordinates,
     # y in axes-fraction coordinates (0=bottom, 1=top of the axis).
     # This makes the rectangle span the full row height regardless of
     # whatever ylim seaborn sets internally.
     from matplotlib.transforms import blended_transform_factory
-    blend = blended_transform_factory(ax_true.transData, ax_true.transAxes)
 
+    blend = blended_transform_factory(ax_true.transData, ax_true.transAxes)
     for p_start, p_end in mis_ranges:
         ax_true.add_patch(mpatches.Rectangle(
             (_to_bin(p_start), 0),
@@ -1147,9 +1126,11 @@ def plot_chromosome_painting(
     )
     mb_labels = [f"{t / 1e6:.1f}" for t in mb_ticks]
 
-    # ax_true ticks in bin-index space (hidden labels — top axis)
+    # ax_true / ax_seg ticks in bin-index space (hidden labels — top axes)
     ax_true.set_xticks([_to_bin(t) for t in mb_ticks])
     ax_true.set_xticklabels([])
+    ax_seg.set_xticks([_to_bin(t) for t in mb_ticks])
+    ax_seg.set_xticklabels([])
 
     # ax_inf ticks in genomic space (shown labels — bottom axis)
     ax_inf.set_xticks(mb_ticks)
@@ -1183,40 +1164,41 @@ def plot_chromosome_painting(
     fig.tight_layout()
     return fig
 
+import msprime
+def simulate_admix_ts(n=10, admix_time=100, sequence_length=5e6, recomb_rate=1e-8, Ne = 1e4, split_time=2000, random_seed=42):
+    demography = msprime.Demography()
+    demography.add_population(name="Ancestral", initial_size=Ne)
+    demography.add_population(name="A", initial_size=Ne)
+    demography.add_population(name="B", initial_size=Ne)
+    demography.add_population(name="C", initial_size=Ne)
+    demography.add_population_split(time=split_time, derived=["A", "B"], ancestral="Ancestral")
+    demography.add_admixture(time=admix_time, derived="C", ancestral=["A", "B"], proportions=[0.5, 0.5])
+    demography.add_census(time=admix_time + 1)
+    demography.sort_events()
+    ts = msprime.sim_ancestry(samples={"A": n, "B": n, "C": n}, demography=demography, sequence_length=sequence_length, recombination_rate=recomb_rate, random_seed=random_seed)
+    return ts
+# #%%
+# trees_dir = "./"
+# n = 10
+# ancestry_samples = {
+#     1.0: list(range(0, 2 * n)),
+#     2.0: list(range(2 * n, 4 * n)),
+# }
+# admixed_sample_ids = list(range(4 * n, 6 * n))
 
-#%%
-# ─────────────────────────────────────────────────────────────────────────────
-# Usage example
-# ─────────────────────────────────────────────────────────────────────────────
-trees_dir = "../results/simulations/outputs/admix/sim/trees"
-n = 10
-ancestry_samples = {
-    1.0: list(range(0, 2 * n)),
-    2.0: list(range(2 * n, 4 * n)),
-}
-admixed_sample_ids = list(range(4 * n, 6 * n))
+# #%%
+# min_segment_size = 1e4
+# ts = simulate_admix_ts(random_seed=42)
+# ts.dump("admix.trees")
+# true_ancestry = TrueLocalAncestry(ts_dir=trees_dir, admixed_sample_ids=admixed_sample_ids, admix_time=100)
+# true_ancestry_df = true_ancestry.infer_single("admix.trees")
+# GNN_ancestry = LocalAncestryInference(ts_dir=trees_dir, admixed_sample_ids=admixed_sample_ids, ancestry_samples=ancestry_samples)
+# GNN_ancestry_df = GNN_ancestry.infer_single("admix.trees", min_segment_size=min_segment_size)
 
-inference = LocalAncestryInference(trees_dir, admixed_sample_ids, ancestry_samples)
-df = inference.infer_single(trees_dir + "/contig_0.trees", min_segment_size=10000)
-# inference.infer_all(
-#     output_dir="../results/simulations/outputs/admix/sim/LAI_new",
-#     num_threads=12,
-#     min_segment_size=10000
-# )
-#%%
-truth = TrueLocalAncestry(trees_dir, admixed_sample_ids, admix_time=100)
-true_df = truth.infer_single(trees_dir + "/contig_0.trees")
-# truth.infer_all(
-#     output_dir="../results/simulations/outputs/admix/sim/LAI_true_new",
-#     num_threads=12,
-# )
-
-# %%
-comparison = compare_ancestry_paintings(df, true_df)
-# %%
-comparison.summary
-# %%
-plot_chromosome_painting(sample_id=40, inferred=df, truth=true_df, n_bins=2000)
-# %%
-np.median(comparison.misassigned_segments.span.values)
-# %%
+# comparator = AncestryPaintingComparator(inferred=GNN_ancestry_df, truth=true_ancestry_df)
+# summary, misinferred = comparator.compare()
+# #%%
+# fig = plot_chromosome_painting(sample_id=4*n, inferred=GNN_ancestry_df, truth=true_ancestry_df)
+# # %%
+# misinferred[misinferred["sample_id"] == 4*n]
+# # %%
