@@ -6,7 +6,10 @@ Runs RFMix2 for local ancestry inference from a tree sequence and returns
 results in the same DataFrame format used by LocalAncestryInference:
 
     columns = [sample_id, start_pos, end_pos, ancestry_label]
-    + prob_<label> columns from the forward-backward output (.fb.tsv)
+
+ancestry_label is RFMix2's Viterbi/CRF decoding from the .msp.tsv output
+(its single most likely ancestry call per window); forward-backward
+probabilities (.fb.tsv) are not parsed or retained.
 
 Accepts the same admixed_sample_ids (node IDs as ints) and ancestry_samples
 (dict keyed by any type) as the GNN-based LocalAncestryInference. The tree
@@ -38,6 +41,7 @@ Example
 
 from __future__ import annotations
 
+import msprime
 import logging
 import os
 import shutil
@@ -129,7 +133,7 @@ def _unique_vcf_names(ts: tskit.TreeSequence, node_ids: list[int]) -> list[str]:
     return result
 
 
-def write_ts_vcf(ts: tskit.TreeSequence, node_ids: list[int], output_path: str | Path) -> None:
+def write_ts_vcf(ts: tskit.TreeSequence, node_ids: list[int], output_path: str | Path, mutation_rate: float = None) -> None:
     """
     Write a VCF for exactly the individuals owning *node_ids*, using
     deterministic sample names ``"ind_{individual_id}"`` (rather than
@@ -151,8 +155,15 @@ def write_ts_vcf(ts: tskit.TreeSequence, node_ids: list[int], output_path: str |
             "individual; write_vcf() cannot include them as phased VCF samples."
         )
     individual_names = [f"ind_{iid}" for iid in individual_ids]
+    if ts.num_sites == 0:
+        if mutation_rate is None:
+            raise ValueError(
+                "Tree sequence has no sites and `mutation_rate` was not provided; "
+                "RFMix2 needs variant sites to call ancestry from."
+            )
+        ts = msprime.sim_mutations(ts, rate=mutation_rate)
     with open(output_path, "w") as fh:
-        ts.write_vcf(fh, individuals=individual_ids, individual_names=individual_names)
+        ts.write_vcf(fh, individuals=individual_ids, individual_names=individual_names, allow_position_zero=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,7 +190,7 @@ class RFMixInference:
     ancestry_samples : dict[Any, list[int]]
         label → list of reference node IDs (same format as GNN inference).
         Keys can be any type (int, float, str); they are stringified for
-        use in the sample map and prob_<label> column names.
+        use in the sample map and as ancestry_label values.
     recombination_rate : float
         Per-bp per-generation recombination rate (e.g. 1e-8).
         A two-point genetic map is generated from this value and
@@ -271,12 +282,10 @@ class RFMixInference:
                             genetic_map_path, chromosome)
 
             msp_path = Path(str(out_basename) + ".msp.tsv")
-            fb_path  = Path(str(out_basename) + ".fb.tsv")
 
             pop_order = self._read_population_order(msp_path)
             msp_df    = self._parse_msp(msp_path, pop_order)
-            fb_df     = self._parse_fb(fb_path, pop_order)
-            return self._build_output(msp_df, fb_df)
+            return self._build_output(msp_df)
         finally:
             if genetic_map_path.exists():
                 genetic_map_path.unlink()
@@ -459,56 +468,15 @@ class RFMixInference:
             rows.append(entry)
         return pd.DataFrame(rows)
 
-    def _parse_fb(self, fb_path: Path, pop_order: list[str]) -> pd.DataFrame:
-        """
-        Parse .fb.tsv forward-backward probabilities.
-
-        Stores haplotype probability vectors separately under keys
-        "<vcf_name>.0" and "<vcf_name>.1" so they can be independently
-        routed to their respective node IDs in _build_output.
-
-        Column format: "<vcf_sample>:::hap1:::<pop>" (hap1 = haplotype 0)
-                       "<vcf_sample>:::hap2:::<pop>" (hap2 = haplotype 1)
-        """
-        fb = pd.read_csv(fb_path, sep="\t", comment="#", header=0)
-
-        pos_col   = "physical_position"
-        prob_cols = [f"prob_{lbl}" for lbl in pop_order]
-        rows: list[dict] = []
-
-        for _, row in fb.iterrows():
-            pos = int(row[pos_col])
-
-            for vcf_name in self._admixed_vcf_names:
-                # Read each haplotype's probability vector independently
-                p0 = np.array([
-                    float(row.get(f"{vcf_name}:::hap1:::{lbl}", np.nan))
-                    for lbl in pop_order
-                ])
-                p1 = np.array([
-                    float(row.get(f"{vcf_name}:::hap2:::{lbl}", np.nan))
-                    for lbl in pop_order
-                ])
-
-                entry: dict[str, Any] = {"pos": pos, "vcf_name": vcf_name}
-                # Store under haplotype-specific keys
-                for col, v0, v1 in zip(prob_cols, p0, p1):
-                    entry[f"{col}.0"] = float(v0)
-                    entry[f"{col}.1"] = float(v1)
-                rows.append(entry)
-
-        return pd.DataFrame(rows)
-
     # ── private: build standardised output ────────────────────────────────
 
     def _build_output(
         self,
         msp_df: pd.DataFrame,
-        fb_df: pd.DataFrame,
     ) -> pd.DataFrame:
         """
-        Combine per-haplotype Viterbi calls (msp_df) with per-haplotype
-        forward-backward probabilities (fb_df).
+        Convert per-haplotype Viterbi calls (msp_df) into the standardised
+        long-format output.
 
         Each haplotype is routed to its own node ID:
           haplotype 0 (ind_20.0) → first  node ID (e.g. 40)
@@ -516,12 +484,6 @@ class RFMixInference:
 
         Segment boundaries are clamped to [0, sequence_length].
         """
-        # Prob col names as produced by _parse_fb (without hap suffix)
-        base_prob_cols = [c for c in fb_df.columns
-                          if c.startswith("prob_") and c.endswith(".0")]
-        # Strip the ".0" suffix to get base names e.g. "prob_1.0"
-        prob_cols = [c[:-2] for c in base_prob_cols]
-
         # Build map: VCF name → [first_node, second_node] in order
         vcf_to_nodes: dict[str, list[int]] = {}
         for nid in self._orig_admixed_node_ids:
@@ -533,77 +495,39 @@ class RFMixInference:
         for vcf_name in self._admixed_vcf_names:
             nodes = vcf_to_nodes[vcf_name]   # [node_hap0, node_hap1]
 
-            fb_sample = (
-                fb_df[fb_df["vcf_name"] == vcf_name]
-                .sort_values("pos")
-                .reset_index(drop=True)
-            )
-            fb_pos = fb_sample["pos"].to_numpy()
-
             # Process each haplotype independently
             for hap_idx, hap_suffix in enumerate([".0", ".1"]):
                 if hap_idx >= len(nodes):
                     continue          # haploid edge case
                 node_id  = nodes[hap_idx]
                 msp_col  = f"{vcf_name}{hap_suffix}"   # e.g. "tsk_20.0"
-                fb_cols  = [f"{pc}{hap_suffix}" for pc in prob_cols]  # "prob_1.0.0"
 
-                seg_rows: list[dict] = []
-
-                for _, seg in msp_df.iterrows():
-                    label     = seg[msp_col]
-                    seg_start = int(seg["start_pos"])
-                    seg_end   = int(seg["end_pos"])
-
-                    in_seg  = (fb_pos >= seg_start) & (fb_pos < seg_end)
-                    fb_here = fb_sample.loc[in_seg]
-
-                    entry: dict[str, Any] = {
-                        "start_pos":      seg_start,
-                        "end_pos":        seg_end,
-                        "ancestry_label": label,
+                seg_rows: list[dict] = [
+                    {
+                        "start_pos":      int(seg["start_pos"]),
+                        "end_pos":        int(seg["end_pos"]),
+                        "ancestry_label": seg[msp_col],
                     }
+                    for _, seg in msp_df.iterrows()
+                ]
 
-                    if fb_here.empty:
-                        for pc in prob_cols:
-                            entry[pc] = np.nan
-                    else:
-                        positions = fb_here["pos"].to_numpy().astype(float)
-                        if len(positions) == 1:
-                            weights = np.array([1.0])
-                        else:
-                            diffs   = np.diff(positions)
-                            left    = np.concatenate([[diffs[0] / 2], diffs / 2])
-                            right   = np.concatenate([diffs / 2, [diffs[-1] / 2]])
-                            weights = (left + right) / (left + right).sum()
-                        for pc, fbc in zip(prob_cols, fb_cols):
-                            if fbc in fb_here.columns:
-                                entry[pc] = float(np.dot(weights, fb_here[fbc].to_numpy()))
-                            else:
-                                entry[pc] = np.nan
-
-                    seg_rows.append(entry)
-
-                merged = _merge_rfmix_segments(seg_rows, prob_cols)
+                merged = _merge_rfmix_segments(seg_rows)
 
                 if merged:
                     merged[0]["start_pos"] = 0
                     merged[-1]["end_pos"]  = self.sequence_length
 
                 for seg in merged:
-                    row: dict[str, Any] = {
+                    all_rows.append({
                         "sample_id":      node_id,
                         "start_pos":      seg["start_pos"],
                         "end_pos":        seg["end_pos"],
                         "ancestry_label": seg["ancestry_label"],
-                    }
-                    for pc in prob_cols:
-                        row[pc] = seg[pc]
-                    all_rows.append(row)
+                    })
 
         return pd.DataFrame(
             all_rows,
-            columns=["sample_id", "start_pos", "end_pos", "ancestry_label"] + prob_cols,
+            columns=["sample_id", "start_pos", "end_pos", "ancestry_label"],
         )
 
 
@@ -611,48 +535,24 @@ class RFMixInference:
 # Segment merging
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _merge_rfmix_segments(
-    seg_rows: list[dict],
-    prob_cols: list[str] | None = None,
-) -> list[dict]:
+def _merge_rfmix_segments(seg_rows: list[dict]) -> list[dict]:
     """
     Merge consecutive rows with the same ancestry_label into one segment.
-    If prob_cols is provided, probabilities are span-weighted across merged
-    windows: Σ(span_i × prob_i) / Σ(span_i).
     """
     if not seg_rows:
         return []
 
-    prob_cols = prob_cols or []
     merged: list[dict] = []
     current = dict(seg_rows[0])
-    current["_span"] = current["end_pos"] - current["start_pos"]
 
     for row in seg_rows[1:]:
         if row["ancestry_label"] == current["ancestry_label"]:
-            new_span   = row["end_pos"] - row["start_pos"]
-            total_span = current["_span"] + new_span
-            for col in prob_cols:
-                cur_v = current.get(col, np.nan)
-                new_v = row.get(col, np.nan)
-                if np.isnan(cur_v) and np.isnan(new_v):
-                    current[col] = np.nan
-                elif np.isnan(cur_v):
-                    current[col] = new_v
-                elif np.isnan(new_v):
-                    pass   # keep current[col] unchanged
-                else:
-                    current[col] = (
-                        cur_v * current["_span"] + new_v * new_span
-                    ) / total_span
             current["end_pos"] = row["end_pos"]
-            current["_span"]   = total_span
         else:
-            merged.append({k: v for k, v in current.items() if k != "_span"})
+            merged.append(current)
             current = dict(row)
-            current["_span"] = row["end_pos"] - row["start_pos"]
 
-    merged.append({k: v for k, v in current.items() if k != "_span"})
+    merged.append(current)
     return merged
 
 
@@ -665,6 +565,7 @@ def infer_local_ancestry_single_ts(
     admixed_sample_ids: list[int],
     ancestry_samples: dict[Any, list[int]],
     recombination_rate: float,
+    mutation_rate: float | None = None,
     output_dir: str | Path | None = None,
     keep_temp: bool = False,
     rfmix_extra_args: list[str] | None = None,
@@ -693,6 +594,11 @@ def infer_local_ancestry_single_ts(
         label → list of reference node IDs, in the original ID space.
     recombination_rate : float
         Per-bp per-generation recombination rate (e.g. 1e-8).
+    mutation_rate : float | None
+        Per-bp per-generation mutation rate (e.g. 1e-8), used to simulate
+        mutations via ``msprime.sim_mutations`` only if *ts_path* has no
+        sites (RFMix2 needs variant sites to call ancestry from). Required
+        if the tree sequence has no sites; ignored otherwise.
     output_dir : str | Path | None
         Directory for RFMix2 output files. Temp dir used if None.
     keep_temp : bool
@@ -704,8 +610,8 @@ def infer_local_ancestry_single_ts(
     Returns
     -------
     pd.DataFrame
-        columns = [sample_id, start_pos, end_pos, ancestry_label]
-        + prob_<label> columns, with sample_id in the original node ID space.
+        columns = [sample_id, start_pos, end_pos, ancestry_label],
+        with sample_id in the original node ID space.
     """
     ts_path = Path(ts_path)
     if not ts_path.exists():
@@ -745,7 +651,7 @@ def infer_local_ancestry_single_ts(
     vcf_path = work_dir / f"{ts_path.stem}.vcf"
     try:
         sim_reference_ids = [nid for nodes in sim_ancestry_samples.values() for nid in nodes]
-        write_ts_vcf(ts, sim_admixed_ids + sim_reference_ids, vcf_path)
+        write_ts_vcf(ts, sim_admixed_ids + sim_reference_ids, vcf_path, mutation_rate=mutation_rate)
         rfmix_df = RFMixInference(
             vcf_path=vcf_path,
             ts=ts,
@@ -813,6 +719,7 @@ def infer_local_ancestry_all_ts(
     admixed_sample_ids: list[int],
     ancestry_samples: dict[Any, list[int]],
     recombination_rate: float,
+    mutation_rate: float | None = None,
     keep_temp: bool = False,
     rfmix_extra_args: list[str] | None = None,
     n_workers: int | None = None,
@@ -822,7 +729,11 @@ def infer_local_ancestry_all_ts(
     *ts_dir* and write each result as a Parquet file in *output_dir*.
 
     All RFMix parameters are shared across every tree sequence. Files are
-    processed in parallel using :mod:`pathos.multiprocessing`.
+    processed in parallel using :mod:`pathos.multiprocessing`, one ``rfmix``
+    process per tree sequence. RFMix2's own ``--n-threads`` flag is not used:
+    on this platform, passing it to RFMix2 segfaults the binary regardless
+    of thread count (reproduced with values 1-12), so internal multithreading
+    is avoided entirely in favor of this process-level parallelism.
 
     Parameters
     ----------
@@ -839,6 +750,8 @@ def infer_local_ancestry_all_ts(
         Passed unchanged to :func:`infer_local_ancestry_single_ts`.
     recombination_rate : float
         Per-bp per-generation recombination rate (e.g. 1e-8).
+    mutation_rate : float | None
+        Passed unchanged to :func:`infer_local_ancestry_single_ts`.
     keep_temp : bool
         Passed unchanged to :func:`infer_local_ancestry_single_ts`.
     rfmix_extra_args : list[str] | None
@@ -861,6 +774,7 @@ def infer_local_ancestry_all_ts(
     ...     admixed_sample_ids=list(range(80, 120)),
     ...     ancestry_samples={1.0: list(range(0, 40)), 2.0: list(range(40, 80))},
     ...     recombination_rate=1e-8,
+    ...     n_workers=12,
     ... )
     >>> failed = [k for k, v in results.items() if not v]
     """
@@ -887,6 +801,7 @@ def infer_local_ancestry_all_ts(
         admixed_sample_ids=admixed_sample_ids,
         ancestry_samples=ancestry_samples,
         recombination_rate=recombination_rate,
+        mutation_rate=mutation_rate,
         keep_temp=keep_temp,
         rfmix_extra_args=rfmix_extra_args,
     )
