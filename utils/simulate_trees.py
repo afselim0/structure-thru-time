@@ -17,7 +17,7 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
     n_pops = len(populations)
     n_samples_per_pop = n_samples // (2 * n_pops) # diploid samples
     samples = {pop_labels.loc[2*i*n_samples_per_pop,'population']: n_samples_per_pop for i in range(n_pops)} # diploid samples
-    admix_times = pop_labels.admix_time.unique()
+    admix_times = pop_labels.admix_time.unique() if "admix_time" in pop_labels.columns else np.array([])
     admix_times = admix_times[admix_times > 0]
     if len(admix_times) > 0:
         for admix_time in admix_times:
@@ -37,6 +37,8 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
         vcf = ts_mutated.as_vcf(contig_id=str(i),allow_position_zero=True)
         if len(admix_times) > 0:
             ancestry_df = compute_true_local_ancestry(ts, pop_labels)
+        else:
+            ancestry_df = pd.DataFrame(columns=["sample_id", "start_pos", "end_pos", "ancestry_label"])
         return i, ts, vcf, ancestry_df
 
     start_time = time()
@@ -44,7 +46,8 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
         for i, ts, vcf, ancestry_df in tqdm(pool.imap(simulate_replicate, range(num_contigs)), total=num_contigs):
             file_name = f"contig_{i}"
             ts.dump(f"{output_dir}/{file_name}.trees")
-            ancestry_df.to_parquet(f"{output_dir}/{file_name}.parquet", index=False)
+            if len(ancestry_df) > 0:
+                ancestry_df.to_parquet(f"{output_dir}/{file_name}.parquet", index=False)
             with open(f"{output_dir}/{file_name}.vcf", "w") as f:
                 f.write(vcf)
                 
@@ -56,7 +59,7 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
 def compute_true_local_ancestry(ts, pop_labels):
     pop_ids_to_pop_labels = { population.id: population.metadata['name'] for population in ts.populations()}
     node_times = ts.nodes_time
-    admix_times = pop_labels.admix_time.unique()
+    admix_times = pop_labels.admix_time.unique() if "admix_time" in pop_labels.columns else np.array([])
     admix_times = admix_times[admix_times > 0]
     admix_times_dict = {admix_time: pop_labels[pop_labels["admix_time"] == admix_time].sample_id.values for admix_time in admix_times}
     tables = ts.dump_tables()
