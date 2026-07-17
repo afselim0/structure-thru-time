@@ -1,13 +1,13 @@
 demography: two_admix
 demes_file_path: ../data/demes/main_1/two_admix.yaml
-output_path: ../results/simulations/outputs/two_admix
+output_path: ../results/simulations/outputs/two_admix_test
 version: 1
 num_threads: 12
 
 # Simulation Parameters
 num_contigs: 500
 contig_length: 5000000
-n_sim_per_pop: 5
+n_sim_per_pop: 10
 mutation_rate: 1.2e-8
 recombination_rate: 1.2e-8
 
@@ -19,11 +19,12 @@ n_timepoints: 2500
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
+compute_variance: false
 
 # Embeddings estimation parameters
 N_min: 100
 N_max: 1000000
-p: 2
+p: 1
 # l1: [0,0.05]
 # l2: [0,0.005]
 

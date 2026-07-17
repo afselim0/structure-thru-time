@@ -1,5 +1,6 @@
 demography: split
 demes_file_path: ../data/demes/main_1/split.yaml
+output_path: ../results/simulations/outputs/sim_test
 version: 1
 num_threads: 12
 

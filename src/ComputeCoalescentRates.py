@@ -172,10 +172,13 @@ def compute_coal_rates(
     # ndarray of shape (n_pairs, n_T).
     rates = H @ S.T
 
-    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
+    # Clip negative rates caused by numerical noise in non-monotone empirical H(t).
+    # Uses np.clip on the ndarray rather than DataFrame.clip: with numpy 2.4.6 and
+    # pandas 2.2.3, DataFrame.clip(lower=...) has been observed to zero out valid
+    # positive values well above the bound (a pandas/numpy version-mismatch bug).
+    rates = np.clip(rates, a_min=MIN_RATE, a_max=None)
 
-    # Clip negative rates caused by numerical noise in non-monotone empirical H(t)
-    rates_df = rates_df.clip(lower=MIN_RATE)
+    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
 
     if not per_haplotype:
         if sample_individal_ids is None or "individual_id" not in sample_individal_ids.columns:
@@ -215,28 +218,38 @@ def compute_coal_rates_variance(
     full_counts_df = pdf_df*coverage_df.sum(axis=1).values[:, np.newaxis]  # Total counts across all contigs for each pair (undo the normalization to get the total counts)
     full_counts_df.columns = full_counts_df.columns.astype(float)  # Ensure columns are float
     full_counts_df = full_counts_df.round().astype(int)  # Ensure counts are integers
-    pair_index = full_counts_df.index
-    times      = full_counts_df.columns.astype(float)
-    n_T        = len(times)
-    n_sample_pairs = len(pair_index)
+    times     = full_counts_df.columns.astype(float)
+    n_T       = len(times)
     time_step = times[1] - times[0]
     S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
 
-    sums = np.zeros((n_sample_pairs, n_T))
-    sums_of_squares = np.zeros((n_sample_pairs, n_T))
-    count_files = sorted(f for f in os.listdir(coal_counts_dir) if f.endswith(".parquet") and f != "coverage.parquet")
+    count_files = sorted(f for f in os.listdir(coal_counts_dir) if f.endswith(".npy"))
     n_contigs = len(count_files)
     if n_contigs<20:
         print(f"Warning: Only {n_contigs} contig count files found in {coal_counts_dir}.  Block-jackknife variance estimates may be unstable.")
 
+    # Accumulators are sized off the first jackknife replicate rather than
+    # full_counts_df: when per_haplotype=False, compute_coal_rates collapses
+    # haplotype pairs into individual pairs, so the rates index/shape differs
+    # from the (haplotype-level) counts index.
+    sums = None
+    sums_of_squares = None
+    rates_index = None
+    rates_columns = None
+
     for count_file in tqdm(count_files, desc="Block-jackknife over contigs"):
-        contig_counts_df = pd.read_parquet(os.path.join(coal_counts_dir, count_file))
-        contig_counts_df.columns = contig_counts_df.columns.astype(float)  # Ensure columns are float
-        contig_name = count_file.removesuffix(".parquet")
+        contig_counts = np.load(os.path.join(coal_counts_dir, count_file), allow_pickle=True)
+        contig_counts_df = pd.DataFrame(contig_counts, index=full_counts_df.index, columns=full_counts_df.columns)
+        contig_name = count_file.removesuffix(".npy")
         new_total_segments_per_pair = total_segments_per_pair - coverage_df[contig_name].values  # Total segments for each pair after dropping the current contig
         new_counts_df = full_counts_df - contig_counts_df # Subtract the current contig counts from the total counts
         pdf_without_contig = new_counts_df / new_total_segments_per_pair[:, np.newaxis]
         rates_without_contig = compute_coal_rates(pdf_without_contig, minimum_window_size, maximum_window_size, per_haplotype, sample_individal_ids, filter_matrix=S)
+        if sums is None:
+            rates_index = rates_without_contig.index
+            rates_columns = rates_without_contig.columns
+            sums = np.zeros((len(rates_index), n_T))
+            sums_of_squares = np.zeros((len(rates_index), n_T))
         sums += rates_without_contig.values
         sums_of_squares += rates_without_contig.values ** 2
 
@@ -251,8 +264,8 @@ def compute_coal_rates_variance(
 
     variance_df = pd.DataFrame(
         variance_values,
-        index=full_counts_df.index,
-        columns=full_counts_df.columns,
+        index=rates_index,
+        columns=rates_columns,
     )
 
     return variance_df
@@ -309,14 +322,3 @@ def compute_between_individual_rates(
         # Pairs absent from rates_df are silently dropped; see docstring note.
         between_individual_rates.loc[(ind1, ind2)] = rates_df.loc[pairs].mean()
     return between_individual_rates
-
-# %%
-pdf_df = pd.read_parquet("../results/empirical/Wohns/all.npp.2_0609/data/coal_pdf.V1.FS1.0.maxT4000.nT4000.parquet")
-coal_counts_dir = "../results/empirical/Wohns/all.npp.2_0609/data/bootstrap_pdf_samples"
-minimum_window_size = 100
-maximum_window_size = 1000
-per_haplotype = True
-sample_individal_ids = None
-
-variance_df = compute_coal_rates_variance(pdf_df,coal_counts_dir,minimum_window_size,maximum_window_size,per_haplotype)
-# %%

@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--maximum_window_size", type=float, required=True, help="maximum window size for rate calculation")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, per-sample-pair (haplotype) rates are returned. Otherwise rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv (with sample_id and individual_id columns). Used to map haploid samples to diploid individuals when phased=False. If omitted, consecutive sample IDs (2k, 2k+1) are assumed to belong to individual k.")
-    parser.add_argument("--compute_variance", action="store_true", help="Compute standard errors using bootstrap replicates")
+    parser.add_argument("--compute_variance", action="store_true", help="Compute standard errors using jackknife approach")
     args = parser.parse_args()
 
     pdf_path = args.pdf_path
@@ -31,7 +31,7 @@ def main():
     print(f"computing rates from estimates of the pdfs of pairwise coalescent times: {args.pdf_path}")
     pdf_df = pd.read_parquet(pdf_path)
     pdf_df.columns = pdf_df.columns.astype(float)
-    coal_counts_dir = output_path + "/bootstrap_pdf_samples"
+    coal_counts_dir = output_path + "/counts_dir" + "/" + os.path.basename(pdf_path).replace(".parquet", "")
 
     # Sample-to-individual mapping for averaging haplotype pairs into individuals
     # (only used when phased=False). Passing it explicitly avoids relying on the

@@ -15,8 +15,8 @@ INDIVIDUAL_LINE_ALPHA = 0.2
 MEAN_LINE_WIDTH = 2
 MEAN_LINE_ALPHA = 1
 # ___________________________________________________________________________
-def compute_mean_rates(rates_df, pop_labels, phased=False):
-    if phased:
+def compute_mean_rates(rates_df, pop_labels, per_haplotype=False):
+    if per_haplotype:
         id_label = "sample_id"
     else:
         id_label = "individual_id"
@@ -43,8 +43,8 @@ def compute_mean_rates(rates_df, pop_labels, phased=False):
             mean_rates[j,i,:] = mean_rates[i,j,:]
     return mean_rates, populations
     
-def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear", phased=False):
-    if phased:
+def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate_plot = None, ylabel="Coalescence Rate", time_scale="linear", per_haplotype=False):
+    if per_haplotype:
         id_label = "sample_id"
     else:
         id_label = "individual_id"
@@ -157,7 +157,7 @@ def main():
     pop_colors = colors_df[colors_df['population'].isin(populations)]
 
     if len(populations) <= 6 and len(populations) > 1:
-        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale, phased=per_haplotype)
+        rates_fig = plot_rates_multi_figs(rates_df=rates_df, pop_colors=pop_colors, pop_labels=pop_labels, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale, per_haplotype=per_haplotype)
         rates_fig_single = plot_rates_single_fig(rates_df=rates_df, min_time=min_time, max_rate_plot=max_rate_plot, time_scale=args.time_scale)
         rates_fig_single.savefig(os.path.join(output_path, output_name.replace(".png", "_single.png")), dpi=500)
     else:
