@@ -914,7 +914,7 @@ rule plot_2d_slice:
 
 # ______________________ancestry-specific STT Rules________________________
 # Repeats the STT rules above once per reference/ancestry population label,
-# rooted at {ancestry_STT_path}/{ancestry}/data and .../plot instead of
+# rooted at {ancestry_STT_path}/{ancestry}/data and .../plots instead of
 # data_output_path/plot_output_path. Ancestry labels are only known once the
 # infer_local_ancestry checkpoint has run (reference_pops may be None in
 # config, defaulted internally by infer_local_ancestry.py), so these are
