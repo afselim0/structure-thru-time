@@ -762,7 +762,7 @@ def make_app(
         style={"maxWidth": "1400px", "margin": "0 auto", "fontFamily": "system-ui",
                "padding": "0 8px"},
         children=[
-            html.H3("Coalescent Structure Through Time — 3D + 2D Linked View",
+            html.H3("CoaSTT — 3D + 2D Linked View",
                     style={"margin": "6px 0 4px 0"}),
 
             html.Div(

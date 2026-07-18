@@ -112,7 +112,7 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
 - Done Rerun chimps asap to identify what's gone awry since the 2025 set of results 
 - DONE reconstructed rates vs input rates [high]
 - DONE **Finalize choice of ARG inference method: Use tsinfer + new tsdate**
-    - Add a wrapper .sh script that runs the simulations + all 3 inference methods + STT on all of them [medium]
+    - Add a wrapper .sh script that runs the simulations + all 3 inference methods + CoaSTT on all of them [medium]
     - In simulations, compare trees inferred using SINGER with those inferred using tsinfer [medium]
     - Compare rates inferred from SINGER trees vs tsinfer trees (recent history?) [medium]
     - Follow up with Yan about new tsinfer/tsdate + new Wohns data
@@ -142,5 +142,5 @@ structure_thru_time/results/simulations/figs_all/ooa_4_no_mig_embeddings_true.ht
           - DONE chr 21 - whole chromosome with n=10(?) per pop
           - DONE Nuria's Singer chr 21 
           - Try a run that subsets chr 21 more aggressively but max's out n [ Haoyang ]
-             - Chop post-singer chr 21 into chunks and running stt with the goal of running larger sampler set [ Haoyang ]  
+             - Chop post-singer chr 21 into chunks and running CoaSTT with the goal of running larger sampler set [ Haoyang ]  
          - Run the "all" and the "combs" rule 

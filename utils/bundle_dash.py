@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a Structure-Through-Time dash embedding into a self-contained zip.
+"""Package a CoaSTT dash embedding into a self-contained zip.
 
 Collects the dash app plus the data files it needs (embeddings, rates,
 reconstructed rates, labels, colors, optional covariances), flattens all paths,
@@ -39,7 +39,7 @@ import zipfile
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 DASH_APP = os.path.join(THIS_DIR, "plot_embeddings_dash.py")
 
-# Minimal runtime deps for plot_embeddings_dash.py (NOT the full STT env).
+# Minimal runtime deps for plot_embeddings_dash.py (NOT the full CoaSTT env).
 DASH_DEPS = ["dash", "plotly", "pandas", "numpy", "scipy", "pyarrow"]
 
 # Rate parquets dominate bundle size and grow ~quadratically in sample count.
@@ -254,7 +254,7 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
         run_cmd = " \\\n    ".join(cmd)
 
         with open(os.path.join(root, "run.sh"), "w") as f:
-            f.write("#!/bin/bash\n# Launch the STT embedding dash app. Open the printed http://127.0.0.1:<port> URL.\n")
+            f.write("#!/bin/bash\n# Launch the CoaSTT embedding dash app. Open the printed http://127.0.0.1:<port> URL.\n")
             f.write('cd "$(dirname "$0")"\n')
             f.write(run_cmd + "\n")
         os.chmod(os.path.join(root, "run.sh"), 0o755)
@@ -265,13 +265,13 @@ def build_bundle(embeddings, labels, colors, output, rates=None,
 
         with open(os.path.join(root, "README.md"), "w") as f:
             f.write(textwrap.dedent(f"""\
-                # STT embedding — interactive dash bundle
+                # CoaSTT embedding — interactive dash bundle
 
-                Self-contained interactive Structure-Through-Time embedding.
+                Self-contained interactive CoaSTT embedding.
 
                 ## Environment (recommended: conda)
                 A pinned `environment.yml` is included (only the few deps the viewer
-                needs — not the full STT pipeline env):
+                needs — not the full CoaSTT pipeline env):
                 ```
                 conda env create -f environment.yml
                 conda activate stt_dash

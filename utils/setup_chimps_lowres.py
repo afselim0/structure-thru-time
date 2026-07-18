@@ -68,10 +68,10 @@ for k in COMPLETE_INDICES:
 
 # ── README ───────────────────────────────────────────────────────────────────
 readme = """\
-# chimps_lowres — low-resolution STT runs across all 100 SINGER posterior samples
+# chimps_lowres — low-resolution CoaSTT runs across all 100 SINGER posterior samples
 
 ## What this is
-Low-resolution (max_time=10000, n_timepoints=400) STT runs on all 100
+Low-resolution (max_time=10000, n_timepoints=400) CoaSTT runs on all 100
 SINGER posterior sample indices (0–99). Segment coverage decreases with index:
 
 | Indices | Segments |

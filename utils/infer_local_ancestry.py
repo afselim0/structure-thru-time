@@ -80,7 +80,7 @@ def main():
     parser.add_argument("--mu", type=float, default=1.2e-8, help="mutation_rate")
     parser.add_argument("--admix_pops", nargs='+',default=None, help="population labels to compute local ancestry for")
     parser.add_argument("--reference_pops", nargs='+',default=None, help="population labels to use as reference populations for local ancestry inference")
-    parser.add_argument("--significant_ancestry_threshold", type=float, default=0.05, help="threshold for significant ancestry proportion to include in STT analysis")
+    parser.add_argument("--significant_ancestry_threshold", type=float, default=0.05, help="threshold for significant ancestry proportion to include in CoaSTT analysis")
     parser.add_argument("--num_threads", type=int, default=1, help="number of tree sequences to process in parallel (one rfmix process each)")
     parser.add_argument("--pops", nargs='+', default=None, help="Optional restriction: population labels the whole analysis is scoped to (used to filter the default reference_pops when --reference_pops is not given).")
    
