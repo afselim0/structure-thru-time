@@ -253,8 +253,11 @@ class CountCoalEvents:
                     desc="Counting coalescent segments",
                 )
             )
-            pool.close()
-            pool.join()
+            # pathos caches ProcessPool instances by nodes count; close()+join()
+            # alone leaves the closed pool in that cache, so a later Pool(nodes=N)
+            # call with the same N returns the stale closed pool. clear() evicts
+            # it, forcing a fresh pool on the next construction.
+            pool.clear()
 
         # Persist the per-pair, per-contig coverage alongside the counts so that
         # downstream consumers (e.g. CountCoalEvents_admix, variance estimation)
@@ -746,8 +749,10 @@ class CountCoalEvents_admix:
                     desc="Counting per-ancestry coalescent segments",
                 )
             )
-            pool.close()
-            pool.join()
+            # See the matching comment in CountCoalEvents.count_coal_spans_all_ts:
+            # clear() evicts this pool from pathos's process-wide cache so a
+            # later Pool(nodes=N) call with the same N doesn't reuse a closed pool.
+            pool.clear()
 
         # --- Assemble and save each ancestry's coverage.parquet -----------
         contig_ids = [ts_file.removesuffix(".trees") for ts_file in ts_files]

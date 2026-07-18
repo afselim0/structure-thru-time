@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--reference_pops", nargs='+',default=None, help="population labels to use as reference populations for local ancestry inference")
     parser.add_argument("--significant_ancestry_threshold", type=float, default=0.05, help="threshold for significant ancestry proportion to include in STT analysis")
     parser.add_argument("--num_threads", type=int, default=1, help="number of tree sequences to process in parallel (one rfmix process each)")
+    parser.add_argument("--pops", nargs='+', default=None, help="Optional restriction: population labels the whole analysis is scoped to (used to filter the default reference_pops when --reference_pops is not given).")
    
     
     args = parser.parse_args()
@@ -98,12 +99,21 @@ def main():
     num_threads = int(args.num_threads)
 
     admix_samples = pop_labels[pop_labels["population"].isin(admix_pops)]["sample_id"].values if admix_pops is not None else None
-    reference_samples_dict = {pop_label: pop_labels[pop_labels["population"] == pop_label]["sample_id"].values for pop_label in reference_pops} if reference_pops is not None else None
 
     if admix_samples is None or len(admix_samples) == 0:
         raise ValueError(f"No samples found for admix_pops={admix_pops} in {args.pop_labels}")
-    if reference_samples_dict is None or len(reference_samples_dict) == 0:
-        raise ValueError(f"No samples found for reference_pops={reference_pops} in {args.pop_labels}")
+
+    if reference_pops is None:
+        # Default to every population in pop_labels.csv that isn't an admixed
+        # population, optionally further restricted to --pops if given.
+        reference_pops = [p for p in pop_labels["population"].unique() if p not in admix_pops]
+        if args.pops is not None:
+            reference_pops = [p for p in reference_pops if p in args.pops]
+        print(f"--reference_pops not specified; defaulting to: {reference_pops}")
+
+    reference_samples_dict = {pop_label: pop_labels[pop_labels["population"] == pop_label]["sample_id"].values for pop_label in reference_pops}
+    if len(reference_samples_dict) == 0:
+        raise ValueError(f"No reference populations resolved (reference_pops={reference_pops}) in {args.pop_labels}")
 
     print(f"Running RFMix local ancestry inference on tree sequences in: {input_path}")
     results = infer_local_ancestry_all_ts(

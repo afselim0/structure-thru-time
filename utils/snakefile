@@ -65,6 +65,31 @@ n_samples_per_pop                 = read_config("n_samples_per_pop", -1)
 pop_colors                        = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
 pop_labels                        = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
 
+# Admixture Parameters
+admixed_pops                      = read_config("admixed_pops", default=None)
+reference_pops                    = read_config("reference_pops", default=None)
+significant_ancestry_threshold    = read_config("significant_ancestry_threshold", default=0.05)
+
+def _to_list(x):
+    if x is None: return None
+    if isinstance(x, list): return [str(v).strip() for v in x]
+    return [v.strip() for v in str(x).replace(",", " ").split() if v.strip()]
+
+admixed_pops_list   = _to_list(admixed_pops)
+reference_pops_list = _to_list(reference_pops)   # stays None if unspecified — infer_local_ancestry.py defaults it at runtime
+admix_mode          = admixed_pops_list is not None and len(admixed_pops_list) > 0
+pops_list           = None if pops == "all" else pops.split()   # reuse existing `pops` var (already space-joined)
+
+if admix_mode and pops_list is not None:
+    _bad_admixed = [p for p in admixed_pops_list if p not in pops_list]
+    if _bad_admixed:
+        raise ValueError(f"admixed_pops {_bad_admixed} not in pops={pops_list}; admixed_pops must be a subset of pops.")
+    if reference_pops_list is not None:
+        _bad_ref = [p for p in reference_pops_list if p not in pops_list]
+        if _bad_ref:
+            raise ValueError(f"reference_pops {_bad_ref} not in pops={pops_list}; reference_pops must be a subset of pops.")
+    # if reference_pops_list is None, the subset restriction is deferred to infer_local_ancestry.py via --pops
+
 # Replicate optimization seeds (optional; used only by compute_embeddings_replicates rule)
 seeds                             = read_config("seeds", default = [])
 
@@ -103,6 +128,7 @@ compute_rates_true_script              = "compute_rates_true.py"
 simulate_trees_script                  = "simulate_trees.py"
 infer_trees_script                     = "infer_trees.py"
 compute_pdf_wrapper_script             = "compute_pdf.py"
+infer_local_ancestry_script            = "infer_local_ancestry.py"
 compute_rates_wrapper_script           = "compute_rates.py"
 plot_rates_script                      = "plot_rates.py"
 plot_relative_div_script               = "plot_relative_div.py"
@@ -120,6 +146,8 @@ dash_app_script                        = "plot_embeddings_dash.py"
 # Base Output directories
 data_output_path                       = os.path.join(output_path, "data")
 plot_output_path                       = os.path.join(output_path, "plots")
+LAI_path                                = os.path.join(output_path, "LAI")
+ancestry_STT_path                       = os.path.join(output_path, "ancestry_STT")
 
 # Target file names
 pca_plot_file_name                     = "pca.png"
@@ -222,7 +250,7 @@ true_targets = [
     pop_labels, pop_colors,
     rates_true, rates_true_plot,
     embeddings_true, embeddings_true_plot,
-    performance_true_data, performance_true_plot, performance_true_interactive,
+    # performance_true_data, performance_true_plot, performance_true_interactive,
     dash_launch_true]
 
 sim_targets = sim_finished
@@ -233,9 +261,12 @@ STT_targets = [
     relative_div_plot, relative_div_plot_summary,
     embeddings_data, embeddings_plot,
     slice_2d,
-    performance_plot, performance_data, performance_interactive,
+    # performance_plot, performance_data, performance_interactive,
     dash_launch,
     ]
+
+if admix_mode:
+    STT_targets = STT_targets + [os.path.join(output_path, "ancestry_STT_done.flag")]
 
 replicates_targets = ([rates_data]
                       + embeddings_replicate_data
@@ -582,13 +613,60 @@ rule infer_trees:
             --r {params.r} \
             --num_threads {params.num_threads}
         """
+# ______________________admixture Rules____________________
+if admix_mode:
+    checkpoint infer_local_ancestry:
+        input:
+            input_path  = trees_dir,
+            trees_ready = trees_ready,
+            pop_labels  = pop_labels,
+            pop_colors  = pop_colors,
+            script      = infer_local_ancestry_script,
+        output:
+            LAI_dir          = directory(LAI_path),
+            ancestry_STT_dir = directory(ancestry_STT_path),
+        params:
+            r                  = recombination_rate,
+            mu                 = mutation_rate,
+            admix_pops         = " ".join(admixed_pops_list),
+            reference_pops_arg = ("--reference_pops " + " ".join(reference_pops_list)) if reference_pops_list is not None else "",
+            pops_arg           = ("--pops " + " ".join(pops_list)) if pops_list is not None else "",
+            threshold          = significant_ancestry_threshold,
+            num_threads        = 1,  # parallelizing this step has been observed to be slower, not faster
+        shell:
+            """
+            mkdir -p {output.LAI_dir} {output.ancestry_STT_dir}
+            python {input.script} \
+                --input_path {input.input_path} \
+                --LAI_path {output.LAI_dir} \
+                --ancestry_STT_path {output.ancestry_STT_dir} \
+                --pop_labels {input.pop_labels} \
+                --pop_colors {input.pop_colors} \
+                --r {params.r} \
+                --mu {params.mu} \
+                --admix_pops {params.admix_pops} \
+                {params.reference_pops_arg} \
+                {params.pops_arg} \
+                --significant_ancestry_threshold {params.threshold} \
+                --num_threads {params.num_threads}
+            """
+
+    # Re-globs the checkpoint's output directory to discover the realized
+    # ancestry labels (unknown at parse time whenever reference_pops is None).
+    def ancestry_labels_from_checkpoint(wildcards):
+        ck_dir = checkpoints.infer_local_ancestry.get(**wildcards).output.ancestry_STT_dir
+        return sorted(set(glob_wildcards(os.path.join(ck_dir, "{label}", "data", "pop_labels.csv")).label))
+
+    compute_pdf_ancestry_flag = os.path.join(output_path, "compute_pdf_ancestry_done.flag")
+
 # # ______________________rates Rules_____________________
 rule compute_pdf:
     input:
         main_script = COUNT_COAL_EVENTS_SCRIPT,
         script = compute_pdf_wrapper_script,
         pop_labels = pop_labels,
-        trees_ready = trees_ready
+        trees_ready = trees_ready,
+        **({"LAI_dir": LAI_path, "ancestry_STT_dir": ancestry_STT_path} if admix_mode else {})
     params:
         trees_dir = trees_dir,
         outdir = data_output_path,
@@ -596,13 +674,22 @@ rule compute_pdf:
         max_time = max_time,
         n_timepoints = n_timepoints,
         n_samples_per_pop = n_samples_per_pop,
-        num_posterior_samples = num_posterior_samples,
         fraction_samples = fraction_samples,
         pops = pops,
-        num_threads = num_threads
+        num_threads = num_threads,
+        admix_args = (f"--LAI_dir {LAI_path} --ancestry_STT_dir {ancestry_STT_path}" if admix_mode else "")
 
     output:
-        pdf_data
+        pdf_data = pdf_data,
+        # compute_pdf.py (admix mode) writes one pdf parquet per ancestry label
+        # as a side effect of this same shell invocation, into subdirectories
+        # whose names aren't known until the infer_local_ancestry checkpoint
+        # has run. Snakemake 9.x doesn't support function-valued outputs, so
+        # those per-label files can't be declared individually; this flag is
+        # the real tracked output that downstream per-ancestry rules depend on
+        # for ordering, while the actual per-label file path is resolved via
+        # params (see ancestry_labels_from_checkpoint / *_ancestry rules below).
+        ancestry_flag = touch(compute_pdf_ancestry_flag) if admix_mode else []
     shell:
         """
         mkdir -p {params.outdir}
@@ -613,11 +700,11 @@ rule compute_pdf:
             --max_time {params.max_time} \
             --n_timepoints {params.n_timepoints} \
             --pops {params.pops} \
-            --num_posterior_samples {params.num_posterior_samples} \
             --n_samples_per_pop {params.n_samples_per_pop} \
             --fraction_samples {params.fraction_samples} \
             --pop_labels {input.pop_labels} \
-            --num_threads {params.num_threads}
+            --num_threads {params.num_threads} \
+            {params.admix_args}
         """
 
 rule compute_rates:
@@ -824,6 +911,248 @@ rule plot_2d_slice:
             --max_time {params.embeddings_max_time} \
             --lims {params.embeddings_plot_lims}
         """
+
+# ______________________ancestry-specific STT Rules________________________
+# Repeats the STT rules above once per reference/ancestry population label,
+# rooted at {ancestry_STT_path}/{ancestry}/data and .../plot instead of
+# data_output_path/plot_output_path. Ancestry labels are only known once the
+# infer_local_ancestry checkpoint has run (reference_pops may be None in
+# config, defaulted internally by infer_local_ancestry.py), so these are
+# plain wildcard rules driven by the aggregator function/sentinel rule below.
+if admix_mode:
+    def ancestry_data_dir(ancestry):  return os.path.join(ancestry_STT_path, ancestry, "data")
+    def ancestry_plot_dir(ancestry):  return os.path.join(ancestry_STT_path, ancestry, "plot")
+
+    rule compute_rates_ancestry:
+        input:
+            ancestry_flag = compute_pdf_ancestry_flag,
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script = compute_rates_wrapper_script,
+            main_script = COMPUTE_RATES_SCRIPT
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name)
+        params:
+            outdir = lambda wc: ancestry_data_dir(wc.ancestry),
+            output_name = rates_data_file_name,
+            pdf_data = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), pdf_data_file_name),
+            min_window_size = min_window_size,
+            max_window_size = max_window_size,
+            per_haplotype = "--per-haplotype" if per_haplotype else "",
+            compute_variance = "--compute_variance" if compute_variance else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --pdf_path {params.pdf_data} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --minimum_window_size {params.min_window_size} \
+                --maximum_window_size {params.max_window_size} \
+                --pop_labels {input.pop_labels} \
+                {params.per_haplotype} \
+                {params.compute_variance}
+            """
+
+    rule plot_rates_ancestry:
+        input:
+            rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script = plot_rates_script
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "plot", rates_plot_file_name)
+        params:
+            outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
+            output_name = rates_plot_file_name,
+            min_time = min_time,
+            max_rate_plot = max_rate_plot,
+            time_scale = time_scale,
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.rates} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --min_time {params.min_time} \
+                --max_rate_plot {params.max_rate_plot} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --time_scale {params.time_scale} \
+                {params.per_haplotype}
+            """
+
+    rule plot_relative_div_ancestry:
+        input:
+            rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script = plot_relative_div_script
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "plot", relative_div_plot_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "plot", relative_div_plot_summary_file_name)
+        params:
+            outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
+            output_name = relative_div_plot_file_name,
+            min_time = min_time,
+            time_scale = time_scale,
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.rates} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --min_time {params.min_time} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --time_scale {params.time_scale} \
+                {params.per_haplotype}
+            """
+
+    rule compute_embeddings_ancestry:
+        input:
+            rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            script = compute_embeddings_wrapper_script,
+            main_script = COMPUTE_EMBEDDINGS_SCRIPT,
+            support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name)
+        params:
+            N_min = N_min,
+            N_max = N_max,
+            p = p,
+            link = link,
+            l1_penalties = l1_penalties,
+            l2_penalties = l2_penalties,
+            outdir = lambda wc: ancestry_data_dir(wc.ancestry),
+            output_name = embeddings_data_file_name,
+            n_components = n_components,
+            n_timepoints_emb = n_timepoints_emb,
+            pop_labels = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), "pop_labels.csv"),
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.rates} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --N_min {params.N_min} \
+                --N_max {params.N_max} \
+                --p {params.p} \
+                --link {params.link} \
+                --l1_penalties {params.l1_penalties} \
+                --l2_penalties {params.l2_penalties} \
+                --n_components {params.n_components} \
+                --n_timepoints_emb {params.n_timepoints_emb} \
+                --pop_labels {params.pop_labels} \
+                {params.per_haplotype}
+            """
+
+    rule plot_embeddings_ancestry:
+        input:
+            embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name),
+            pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script = plot_embeddings_wrapper_script,
+            main_script = PLOT_EMBEDDINGS_SCRIPT
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "plot", embeddings_plot_file_name),
+            dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plot", dash_launch_file_name),
+        params:
+            outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
+            output_name = embeddings_plot_file_name,
+            min_time = min_time,
+            embeddings_plot_lims = embeddings_plot_lims,
+            embeddings_max_time = embeddings_max_time,
+            time_scale = time_scale,
+            N_max = N_max,
+            rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), rates_data_file_name),
+            reconstructed_rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), performance_data_file_name),
+            per_haplotype = "--per-haplotype" if per_haplotype else "",
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.embeddings} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --lims {params.embeddings_plot_lims} \
+                --min_time {params.min_time} \
+                --max_time {params.embeddings_max_time} \
+                --time_scale {params.time_scale} \
+                {params.per_haplotype}
+            cat > {output.dash_script} << 'DASHEOF'
+#!/bin/bash
+# Run from the utils/ directory
+python plot_embeddings_dash.py \\
+    {input.embeddings} \\
+    --labels {input.pop_labels} \\
+    --colors {input.pop_colors} \\
+    --rates {params.rates_path} \\
+    --reconstructed_rates {params.reconstructed_rates_path} \\
+    --N_max {params.N_max} \\
+    --time_scale {params.time_scale} \\
+    --min_time {params.min_time} \\
+    --max_time {params.embeddings_max_time}
+DASHEOF
+            chmod +x {output.dash_script}
+            """
+
+    rule plot_2d_slice_ancestry:
+        input:
+            embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name),
+            pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script     = "plot_2d_slice.py"
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "plot", slice_2d_file_name)
+        params:
+            outdir               = lambda wc: ancestry_plot_dir(wc.ancestry),
+            output_name          = slice_2d_file_name,
+            min_time             = min_time,
+            embeddings_max_time  = embeddings_max_time,
+            embeddings_plot_lims = embeddings_plot_lims,
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.embeddings} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --min_time {params.min_time} \
+                --max_time {params.embeddings_max_time} \
+                --lims {params.embeddings_plot_lims}
+            """
+
+    def ancestry_targets(wildcards):
+        labels = ancestry_labels_from_checkpoint(wildcards)
+        return expand(
+            [
+                os.path.join(ancestry_STT_path, "{label}", "data", rates_data_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", rates_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", relative_div_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", relative_div_plot_summary_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "data", embeddings_data_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", embeddings_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", slice_2d_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plot", dash_launch_file_name),
+            ],
+            label=labels,
+        )
+
+    rule ancestry_STT_all:
+        input:
+            ancestry_targets
+        output:
+            touch(os.path.join(output_path, "ancestry_STT_done.flag"))
 
 # Not in STT_targets yet — run explicitly with: snakemake plot_embeddings_pyvista
 rule plot_embeddings_pyvista:

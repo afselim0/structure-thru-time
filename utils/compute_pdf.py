@@ -88,7 +88,8 @@ def main():
             label: os.path.join(ancestry_STT_dir, label, "data", "pop_labels.csv") for label in ancestry_labels
         }
         ancestry_count_dirs = {
-            label: os.path.join(ancestry_STT_dir, label, "data", "counts_dir") for label in ancestry_labels
+            label: os.path.join(ancestry_STT_dir, label, "data", "counts_dir", args.output_name.removesuffix('.parquet'))
+            for label in ancestry_labels
         }
 
         CCE_admix = CountCoalEvents_admix(
