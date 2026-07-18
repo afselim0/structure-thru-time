@@ -921,7 +921,7 @@ rule plot_2d_slice:
 # plain wildcard rules driven by the aggregator function/sentinel rule below.
 if admix_mode:
     def ancestry_data_dir(ancestry):  return os.path.join(ancestry_STT_path, ancestry, "data")
-    def ancestry_plot_dir(ancestry):  return os.path.join(ancestry_STT_path, ancestry, "plot")
+    def ancestry_plot_dir(ancestry):  return os.path.join(ancestry_STT_path, ancestry, "plots")
 
     rule compute_rates_ancestry:
         input:
@@ -960,7 +960,7 @@ if admix_mode:
             pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
             script = plot_rates_script
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "plot", rates_plot_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", rates_plot_file_name)
         params:
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = rates_plot_file_name,
@@ -990,8 +990,8 @@ if admix_mode:
             pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
             script = plot_relative_div_script
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "plot", relative_div_plot_file_name),
-            os.path.join(ancestry_STT_path, "{ancestry}", "plot", relative_div_plot_summary_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", relative_div_plot_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", relative_div_plot_summary_file_name)
         params:
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = relative_div_plot_file_name,
@@ -1060,8 +1060,8 @@ if admix_mode:
             script = plot_embeddings_wrapper_script,
             main_script = PLOT_EMBEDDINGS_SCRIPT
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "plot", embeddings_plot_file_name),
-            dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plot", dash_launch_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", embeddings_plot_file_name),
+            dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plots", dash_launch_file_name),
         params:
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = embeddings_plot_file_name,
@@ -1111,7 +1111,7 @@ DASHEOF
             pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
             script     = "plot_2d_slice.py"
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "plot", slice_2d_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", slice_2d_file_name)
         params:
             outdir               = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name          = slice_2d_file_name,
@@ -1137,13 +1137,13 @@ DASHEOF
         return expand(
             [
                 os.path.join(ancestry_STT_path, "{label}", "data", rates_data_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", rates_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", relative_div_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", relative_div_plot_summary_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", rates_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_summary_file_name),
                 os.path.join(ancestry_STT_path, "{label}", "data", embeddings_data_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", embeddings_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", slice_2d_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plot", dash_launch_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", embeddings_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", slice_2d_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", dash_launch_file_name),
             ],
             label=labels,
         )

@@ -142,7 +142,7 @@ def main():
     for reference_pop in reference_pops:
         dirname = os.path.join(ancestry_STT_path, reference_pop)
         data_dir = os.path.join(dirname, "data")
-        plots_dir = os.path.join(dirname, "plot")
+        plots_dir = os.path.join(dirname, "plots")
         os.makedirs(data_dir, exist_ok=True)
         os.makedirs(plots_dir, exist_ok=True)
 
