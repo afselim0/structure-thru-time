@@ -72,18 +72,48 @@ The following are parameters that can be passed to `--config` and that affect do
 | **fraction_samples**     | Fraction of samples used per contig (default: 1.0)                           | Coalescent PDF |
 | **min_window_size**      | Minimum window size for local regression when computing rates                | Rates          |
 | **max_window_size**      | Maximum window size for local regression when computing rates (linear growth)| Rates          |
+| **per_haplotype**        | If `true`, rates/embeddings/plots are per-haplotype rather than per-individual (default: `false`) | Rates, Embeddings, Plotting |
+| **compute_variance**     | If `true`, estimate standard errors of rates via block-jackknife (default: `true`) | Rates     |
 | **N_min**                | Population size for two samples at zero distance                             | Embeddings     |
 | **N_max**                | Population size for two samples at max distance                              | Embeddings     |
+| **p**                    | Exponent of the link function (default: 1)                                  | Embeddings     |
+| **link**                 | Link function relating latent distance to coalescent rate (default: `inverse_distance`) | Embeddings |
 | **l1**                   | list of l1 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
 | **l2**                   | list of l2 penalties, comma seperated, on (first, second, ...) derivatives   | Embeddings     |
+| **n_components**         | Number of latent dimensions for embeddings (default: 2)                     | Embeddings     |
+| **n_timepoints_emb**     | Number of timepoints used when computing/plotting embeddings (default: `n_timepoints`) | Embeddings, Plotting |
+| **seeds**                | List of seeds for `snakemake STT_replicates` (repeated optimizations with different random seeds; default: none) | Embeddings |
+| **rates_time_stride**    | Thinning stride for rate-parquet timepoints when bundling a dash app (`"auto"`\|`N`\|`1`, default: `auto`) | dash bundle |
 | **max_rate_plot**        | Maximum rate (y-axis) in rate plots (for easy comparisons)                   | Plotting       |
 | **min_time**             | Minimum time shown in plots                                                  | Plotting       |
 | **embeddings_plot_lims** | Limits of X and Y axes in embeddings plots (for easy comparisons)            | Plotting       |
+| **embeddings_max_time**  | Maximum time shown in embeddings plots (default: `max_time`)                 | Plotting       |
+| **time_scale**           | Axis scale for time in plots (`linear` or `log`, default: `linear`)          | Plotting       |
 | **pop_labels**           | Path to population labels for each sample                                    | Plotting       |
 | **pop_colors**           | Path to population colors                                                    | Plotting       |
 
 
 Since we can't push large files on github, we will start gathering interesting outputs in the directory `/project/jnovembre/STT_data` on `Midway3`.  
+
+## Admixture extension
+If some of your samples are admixed, STT can additionally infer local ancestry and repeat the whole rates/embeddings/plotting pipeline once per reference (ancestry) population — on top of the regular genome-wide run. This is activated automatically whenever `snakemake STT` (or `STT_sim`/`STT_infer`) is run with `admixed_pops` set in the config; no separate rule or command is needed.
+
+Pipeline, in order:
+1. The regular genome-wide STT pipeline runs as usual (counts, PDF, rates, embeddings).
+2. `infer_local_ancestry.py` runs RFMix2 to infer local ancestry along the genome for samples in `admixed_pops`, using samples in `reference_pops` as reference panels.
+3. `compute_pdf.py` additionally computes a per-reference-population coalescent-time PDF (using the local ancestry calls from step 2).
+4. The rates/embeddings/plotting pipeline is repeated once per reference population, using each population's own PDF and (ancestry-filtered) sample labels.
+
+| Parameter                          | Description                                                                                          | Affected files |
+|-------------------------------------|--------------------------------------------------------------------------------------------------------|----------------|
+| **admixed_pops**                   | List of population names (as they appear in `pop_labels`) to treat as admixed. Setting this activates admixture mode. | ALL (admixture) |
+| **reference_pops**                 | List of population names to use as reference/ancestry labels. If omitted, defaults to every population in `pop_labels` other than `admixed_pops` (and, if `pops` restricts the run, further limited to that set) | ALL (admixture) |
+| **significant_ancestry_threshold** | Minimum genome-wide ancestry proportion (per reference population) an admixed sample needs to be kept in that reference population's analysis (default: `0.05`) | Local ancestry |
+
+Notes:
+- If `pops` is also set (restricting the whole run to a subset of populations), `admixed_pops` — and `reference_pops` if given explicitly — must be subsets of `pops`.
+- Local ancestry inference (`infer_local_ancestry`) always runs single-threaded regardless of `num_threads`, since parallelizing it has been observed to be slower, not faster.
+- Outputs are written under `{output_path}/LAI/` (per-contig local ancestry calls) and `{output_path}/ancestry_STT/{reference_pop}/{data,plot}/` (one subdirectory per reference population, mirroring the layout of the genome-wide `data/`/`plots/` directories — same rates/embeddings/plot filenames, just one level down per population).
 
 ## Simulations
 To simulate a set of tree sequences given a demography, use the rule `snakemake sim`. This rule also runs STT on the true rates from the demes file.
