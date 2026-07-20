@@ -2,7 +2,6 @@
 import argparse
 import sys
 import os
-import numpy as np
 sys.path.append("../src")
 sys.path.append("../../src")
 from CountCoalEvents import CountCoalEvents, CountCoalEvents_admix
@@ -16,9 +15,7 @@ def main():
     parser.add_argument("--max_time", type=int, required=True, help="Maximum time for rate calculation")
     parser.add_argument("--n_timepoints", type=int, required=True, help="Number of timepoints for rate calculation")
     parser.add_argument("--fraction_samples", type=float, default=1, help="Fraction of samples to use for coalescence counting")
-    parser.add_argument("--pops", nargs='+',default=None, help="Population labels to compute rates for")
-    parser.add_argument("--n_samples_per_pop", type=int, default= -1, help="Number of samples to draw per population")
-    parser.add_argument("--pop_labels", type=str, help="Path to population labels file")
+    parser.add_argument("--pop_labels", type=str, help="Path to population labels file (already sliced to the samples used in this run)")
     parser.add_argument("--num_threads", type=int, default=1, help="Number of threads to use for computation")
     parser.add_argument("--LAI_dir", type=str, default=None, help="Directory of per-contig local-ancestry parquet files. If set together with --ancestry_STT_dir, also compute per-ancestry coalescent-time PDFs.")
     parser.add_argument("--ancestry_STT_dir", type=str, default=None, help="Directory with one subdirectory per ancestry label, each containing data/pop_labels.csv. If set together with --LAI_dir, also compute per-ancestry coalescent-time PDFs.")
@@ -30,14 +27,11 @@ def main():
     n_timepoints = args.n_timepoints
     num_threads = args.num_threads
     fraction_samples = args.fraction_samples
-    chosen_pops = args.pops
-    n_samples_per_pop = args.n_samples_per_pop
     pop_labels_path = args.pop_labels
     LAI_dir = args.LAI_dir
     ancestry_STT_dir = args.ancestry_STT_dir
     population_labels = pd.read_csv(pop_labels_path)
-    n_samples_per_pop = None if n_samples_per_pop == -1 else n_samples_per_pop
-    chosen_pops = None if chosen_pops == ["all"] else chosen_pops
+    chosen_samples = population_labels["sample_id"].values
 
     if (LAI_dir is None) != (ancestry_STT_dir is None):
         raise ValueError("--LAI_dir and --ancestry_STT_dir must be provided together to enable admix mode.")
@@ -45,28 +39,7 @@ def main():
 
     print(f"estimating the probability density funciton of pairwise coalescent times for trees in {input_path}")
     os.makedirs(output_path, exist_ok=True)
-    all_pops = population_labels["population"].unique()
-    assert chosen_pops is None or np.all(np.isin(chosen_pops, all_pops)), "Some chosen populations are not in the population labels file."
 
-    population_labels = population_labels[population_labels["population"].isin(chosen_pops)] if chosen_pops is not None else population_labels
-
-    if n_samples_per_pop is None and chosen_pops is not None:
-        chosen_samples = population_labels["sample_id"].values
-
-    if n_samples_per_pop is not None:
-        chosen_samples = []
-        for pop in population_labels["population"].unique():
-            sample_ids = population_labels[population_labels["population"] == pop]["sample_id"].values
-            if n_samples_per_pop < len(sample_ids):
-                subsample_ids = sample_ids[:n_samples_per_pop]
-            else:
-                subsample_ids = sample_ids
-            chosen_samples.extend(subsample_ids)
-    elif chosen_pops is not None:
-        chosen_samples = population_labels["sample_id"].values
-    elif chosen_pops is None and n_samples_per_pop is None:
-        chosen_samples = None
-    
     coal_counts_dir = os.path.join(output_path, "counts_dir")
     coal_counts_dir = os.path.join(coal_counts_dir, f"{args.output_name.removesuffix('.parquet')}")
     os.makedirs(coal_counts_dir, exist_ok=True)

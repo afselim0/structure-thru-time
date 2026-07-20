@@ -62,8 +62,13 @@ time_scale                        = read_config("time_scale", default = "linear"
 # Empirical dataset parameters
 pops                              = read_config("pops", "all").replace(","," ")
 n_samples_per_pop                 = read_config("n_samples_per_pop", -1)
-pop_colors                        = read_config("pop_colors", os.path.join(output_path,"data/pop_colors.csv"))
-pop_labels                        = read_config("pop_labels", os.path.join(output_path,"data/pop_labels.csv"))
+subsample_seed                    = read_config("subsample_seed", default = 0) # Seed for random subsampling in preprocess_samples (empirical runs only)
+# raw_pop_colors/raw_pop_labels are the user-supplied metadata files for empirical runs (unused in simulation mode).
+# pop_colors/pop_labels always point at the run-local, already-sliced copies that downstream rules consume.
+raw_pop_colors                    = read_config("pop_colors", default = "")
+raw_pop_labels                    = read_config("pop_labels", default = "")
+pop_colors                        = os.path.join(output_path, "data/pop_colors.csv")
+pop_labels                        = os.path.join(output_path, "data/pop_labels.csv")
 
 # Admixture Parameters
 admixed_pops                      = read_config("admixed_pops", default=None)
@@ -122,6 +127,7 @@ PLOT_EMBEDDINGS_PYVISTA_SCRIPT    = "../src/PlotEmbeddingsPyVista.py"
 
 # Util Scripts
 preprocess_demography_script           = "preprocess_demography.py"
+preprocess_samples_script              = "preprocess_samples.py"
 plot_demography_script                 = "plot_demography.py"
 pca_script                             = "run_pca.py"
 compute_rates_true_script              = "compute_rates_true.py"
@@ -253,7 +259,7 @@ true_targets = [
     # performance_true_data, performance_true_plot, performance_true_interactive,
     dash_launch_true]
 
-sim_targets = sim_finished
+sim_targets = sim_finished, demography_plot
 
 STT_targets = [
     pdf_data,
@@ -302,7 +308,7 @@ rule STT_replicates: # Run multiple replicate optimizations with different seeds
 # =====================================================
 
 # ______________________sim Rules______________________
-if pop_colors ==  os.path.join(output_path,"data/pop_colors.csv") or pop_labels == os.path.join(output_path,"data/pop_colors.csv"):
+if demes_file_path: # A demes file path is specified
     rule preprocess_data:
         input:
             demes_file_path = demes_file_path,
@@ -321,29 +327,56 @@ if pop_colors ==  os.path.join(output_path,"data/pop_colors.csv") or pop_labels 
                 --output_path {params.outdir} \
                 --n {params.n_per_pop}
             """
-rule plot_demography:
-    input:
-        demes_file_path = demes_file_path,
-        pop_colors = pop_colors,
-        script = plot_demography_script
-    output:
-        demography_plot
-    params:
-        outdir = plot_output_path,
-        min_time = min_time,
-        max_time = max_time,
-        time_scale = time_scale
-    shell:
-        """
-        mkdir -p {params.outdir}
-        python {input.script} \
-            --demes_file_path {input.demes_file_path} \
-            --colors {input.pop_colors} \
-            --output_path {params.outdir} \
-            --min_time {params.min_time} \
-            --max_time {params.max_time} \
-            --time_scale {params.time_scale}
-        """
+    rule plot_demography:
+        input:
+            demes_file_path = demes_file_path,
+            pop_colors = pop_colors,
+            script = plot_demography_script
+        output:
+            demography_plot
+        params:
+            outdir = plot_output_path,
+            min_time = min_time,
+            max_time = max_time,
+            time_scale = time_scale
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --demes_file_path {input.demes_file_path} \
+                --colors {input.pop_colors} \
+                --output_path {params.outdir} \
+                --min_time {params.min_time} \
+                --max_time {params.max_time} \
+                --time_scale {params.time_scale}
+            """
+else: # No demes file path: this is an empirical run, slice the user-supplied pop_labels/pop_colors instead
+    if not raw_pop_labels or not raw_pop_colors:
+        raise ValueError("pop_labels and pop_colors must be specified in the config when demes_file_path is not provided (empirical run).")
+    rule preprocess_data:
+        input:
+            pop_labels = raw_pop_labels,
+            pop_colors = raw_pop_colors,
+            script = preprocess_samples_script
+        output:
+            pop_colors,
+            pop_labels
+        params:
+            outdir = data_output_path,
+            pops = pops,
+            n_samples_per_pop = n_samples_per_pop,
+            seed = subsample_seed
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --pop_labels {input.pop_labels} \
+                --pop_colors {input.pop_colors} \
+                --output_path {params.outdir} \
+                --pops {params.pops} \
+                --n_samples_per_pop {params.n_samples_per_pop} \
+                --seed {params.seed}
+            """
 
 rule run_pca:
     input:
@@ -673,9 +706,7 @@ rule compute_pdf:
         output_name = os.path.basename(pdf_data),
         max_time = max_time,
         n_timepoints = n_timepoints,
-        n_samples_per_pop = n_samples_per_pop,
         fraction_samples = fraction_samples,
-        pops = pops,
         num_threads = num_threads,
         admix_args = (f"--LAI_dir {LAI_path} --ancestry_STT_dir {ancestry_STT_path}" if admix_mode else "")
 
@@ -699,8 +730,6 @@ rule compute_pdf:
             --output_name {params.output_name} \
             --max_time {params.max_time} \
             --n_timepoints {params.n_timepoints} \
-            --pops {params.pops} \
-            --n_samples_per_pop {params.n_samples_per_pop} \
             --fraction_samples {params.fraction_samples} \
             --pop_labels {input.pop_labels} \
             --num_threads {params.num_threads} \
