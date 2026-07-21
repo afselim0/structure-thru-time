@@ -98,6 +98,16 @@ if admix_mode and pops_list is not None:
 # Replicate optimization seeds (optional; used only by compute_embeddings_replicates rule)
 seeds                             = read_config("seeds", default = [])
 
+# Scan Parameters (optional; scan_p/scan_d rules only activate if their respective config keys are all present)
+min_p                             = read_config("min_p", default=None)
+max_p                             = read_config("max_p", default=None)
+num_p                             = read_config("num_p", default=None)
+min_d                             = read_config("min_d", default=None)
+max_d                             = read_config("max_d", default=None)
+num_d                             = read_config("num_d", default=None)
+scan_p_mode                       = min_p is not None and max_p is not None and num_p is not None
+scan_d_mode                       = min_d is not None and max_d is not None and num_d is not None
+
 # Parameter label for plot titles (optional — pass to --param_label in plotting rules)
 _l1_str = f" | l1={l1_penalties}" if l1_penalties != "None" else ""
 _l2_str = f" | l2={l2_penalties}" if l2_penalties != "None" else ""
@@ -116,6 +126,9 @@ RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_s
 STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
+# STT_TAG with the swept field omitted, for use by the scan_p/scan_d rules (the value varies within the rule, so it can't appear in a single output filename)
+STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 
 # Main scripts
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
@@ -142,6 +155,8 @@ compute_embeddings_wrapper_script      = "compute_embeddings.py"
 plot_embeddings_wrapper_script         = "plot_embeddings.py"
 plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
 evaluate_performance_script            = "evaluate_performance.py"
+scan_p_script                          = "scan_p.py"
+scan_d_script                          = "scan_d.py"
 run_population_combs_script            = "run_pop_combs.py"
 bundle_dash_script                     = "bundle_dash.py"
 dash_app_script                        = "plot_embeddings_dash.py"
@@ -156,17 +171,17 @@ LAI_path                                = os.path.join(output_path, "LAI")
 ancestry_STT_path                       = os.path.join(output_path, "ancestry_STT")
 
 # Target file names
-pca_plot_file_name                     = "pca.png"
-demography_plot_file_name              = "demography.png"
-rates_true_file_name                   = "rates_true.parquet"
-rates_true_plot_file_name              = "rates_true.png"
-embeddings_true_file_name              = f"embeddings_true{TRUE_TAG}.parquet"
-embeddings_true_plot_file_name         = f"embeddings_true{TRUE_TAG}.html"
-performance_true_file_name             = f"reconstructed_rates_true{TRUE_TAG}.parquet"
-performance_true_plot_file_name        = f"performance_true{TRUE_TAG}.png"
-performance_true_interactive_file_name = f"performance_true{TRUE_TAG}.html"
-sim_finished_file_name                 = f"sim_trees_ready{SIM_TAG}.txt"
-infer_finished_file_name               = f"infer_trees_ready{SIM_TAG}.txt"
+pca_plot_file_name                                      = "pca.png"
+demography_plot_file_name                               = "demography.png"
+rates_true_file_name                                    = "rates_true.parquet"
+rates_true_plot_file_name                               = "rates_true.png"
+embeddings_true_file_name                               = f"embeddings_true{TRUE_TAG}.parquet"
+embeddings_true_plot_file_name                          = f"embeddings_true{TRUE_TAG}.html"
+reconstructed_rates_true_file_name                      = f"reconstructed_rates_true{TRUE_TAG}.parquet"
+input_vs_reconstructed_rates_true_plot_file_name        = f"input_vs_reconstructed_rates_true{TRUE_TAG}.png"
+input_vs_reconstructed_rates_true_interactive_file_name = f"input_vs_reconstructed_rates_true{TRUE_TAG}.html"
+sim_finished_file_name                                  = f"sim_trees_ready{SIM_TAG}.txt"
+infer_finished_file_name                                = f"infer_trees_ready{SIM_TAG}.txt"
 
 if trees_dir == tree_output_path: # The case of simulation or inference
     if infer_method == "None": # Simulation
@@ -184,15 +199,21 @@ rates_plot_file_name                   = f"rates{RATES_TAG}.png"
 relative_div_plot_file_name            = f"relative_div{RATES_TAG}.png"
 relative_div_plot_summary_file_name    = f"relative_div{RATES_TAG}_summary.png"
 
-embeddings_data_file_name              = f"embeddings{STT_TAG}.parquet"
-embeddings_plot_file_name              = f"embeddings{PLOT_TAG}.html"
-performance_data_file_name             = f"reconstructed_rates{STT_TAG}.parquet"
-performance_plot_file_name             = f"performance{STT_TAG}.png"
-performance_interactive_file_name      = f"performance{STT_TAG}.html"
-embeddings_pyvista_plot_file_name      = f"embeddings_pyvista{PLOT_TAG}.html"
-dash_launch_file_name                  = f"launch_dash{STT_TAG}.sh"
-dash_launch_true_file_name             = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
-dash_bundle_file_name                  = f"dash_bundle{STT_TAG}.zip"
+embeddings_data_file_name                                = f"embeddings{STT_TAG}.parquet"
+embeddings_plot_file_name                                = f"embeddings{PLOT_TAG}.html"
+reconstructed_rates_file_name                            = f"reconstructed_rates{STT_TAG}.parquet"
+input_vs_reconstructed_rates_plot_file_name             = f"input_vs_reconstructed_rates{STT_TAG}.png"
+input_vs_reconstructed_rates_interactive_file_name      = f"input_vs_reconstructed_rates{STT_TAG}.html"
+true_rates_vs_reconstructed_rates_plot_file_name        = f"true_rates_vs_reconstructed_rates{STT_TAG}.png"
+true_rates_vs_reconstructed_rates_interactive_file_name = f"true_rates_vs_reconstructed_rates{STT_TAG}.html"
+embeddings_pyvista_plot_file_name                        = f"embeddings_pyvista{PLOT_TAG}.html"
+dash_launch_file_name                                    = f"launch_dash{STT_TAG}.sh"
+dash_launch_true_file_name                               = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
+dash_bundle_file_name                                    = f"dash_bundle{STT_TAG}.zip"
+
+# Scan diagnostics file names (one row per swept value, per rates comparison)
+scan_p_file_name                                          = f"scan_p{STT_TAG_NO_P}.csv"
+scan_d_file_name                                          = f"scan_d{STT_TAG_NO_D}.csv"
 
 # Target file paths
 pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
@@ -201,9 +222,9 @@ rates_true                        = os.path.join(data_output_path, rates_true_fi
 rates_true_plot                   = os.path.join(plot_output_path, rates_true_plot_file_name)
 embeddings_true                   = os.path.join(data_output_path, embeddings_true_file_name)
 embeddings_true_plot              = os.path.join(plot_output_path, embeddings_true_plot_file_name)
-performance_true_data             = os.path.join(data_output_path, performance_true_file_name)
-performance_true_plot             = os.path.join(plot_output_path, performance_true_plot_file_name)
-performance_true_interactive      = os.path.join(plot_output_path, performance_true_interactive_file_name)
+reconstructed_rates_true             = os.path.join(data_output_path, reconstructed_rates_true_file_name)
+input_vs_reconstructed_rates_true_plot             = os.path.join(plot_output_path, input_vs_reconstructed_rates_true_plot_file_name)
+input_vs_reconstructed_rates_true_interactive      = os.path.join(plot_output_path, input_vs_reconstructed_rates_true_interactive_file_name)
 sim_finished                      = os.path.join(tree_output_path, sim_finished_file_name)
 infer_finished                    = os.path.join(tree_output_path, infer_finished_file_name)
 
@@ -217,13 +238,19 @@ embeddings_data                   = os.path.join(data_output_path, embeddings_da
 embeddings_plot                   = os.path.join(plot_output_path, embeddings_plot_file_name)
 slice_2d_file_name                = f"2d_slice{PLOT_TAG}.png"
 slice_2d                          = os.path.join(plot_output_path, slice_2d_file_name)
-performance_data                  = os.path.join(data_output_path, performance_data_file_name)
-performance_plot                  = os.path.join(plot_output_path, performance_plot_file_name)
-performance_interactive           = os.path.join(plot_output_path, performance_interactive_file_name)
+reconstructed_rates                  = os.path.join(data_output_path, reconstructed_rates_file_name)
+input_vs_reconstructed_rates_plot                  = os.path.join(plot_output_path, input_vs_reconstructed_rates_plot_file_name)
+input_vs_reconstructed_rates_interactive           = os.path.join(plot_output_path, input_vs_reconstructed_rates_interactive_file_name)
+true_rates_vs_reconstructed_rates_plot             = os.path.join(plot_output_path, true_rates_vs_reconstructed_rates_plot_file_name)
+true_rates_vs_reconstructed_rates_interactive      = os.path.join(plot_output_path, true_rates_vs_reconstructed_rates_interactive_file_name)
 embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
 dash_bundle                       = os.path.join(plot_output_path, dash_bundle_file_name)
+scan_p_output                     = os.path.join(data_output_path, scan_p_file_name)
+scan_d_output                     = os.path.join(data_output_path, scan_d_file_name)
+scan_p_outdir                     = os.path.join(data_output_path, "scan_p")
+scan_d_outdir                     = os.path.join(data_output_path, "scan_d")
 
 # Replicate embeddings file names (one per seed)
 embeddings_replicate_data              = [os.path.join(data_output_path, f"embeddings_seed{s}{STT_TAG}.parquet") for s in seeds]
@@ -256,7 +283,7 @@ true_targets = [
     pop_labels, pop_colors,
     rates_true, rates_true_plot,
     embeddings_true, embeddings_true_plot,
-    # performance_true_data, performance_true_plot, performance_true_interactive,
+    reconstructed_rates_true, input_vs_reconstructed_rates_true_plot, input_vs_reconstructed_rates_true_interactive,
     dash_launch_true]
 
 sim_targets = sim_finished, demography_plot
@@ -267,12 +294,21 @@ STT_targets = [
     relative_div_plot, relative_div_plot_summary,
     embeddings_data, embeddings_plot,
     slice_2d,
-    # performance_plot, performance_data, performance_interactive,
+    reconstructed_rates, input_vs_reconstructed_rates_plot, input_vs_reconstructed_rates_interactive,
     dash_launch,
     ]
 
+if demes_file_path: # Ground-truth demographic rates are only available for simulated demographies
+    STT_targets = STT_targets + [rates_true, true_rates_vs_reconstructed_rates_plot, true_rates_vs_reconstructed_rates_interactive]
+
 if admix_mode:
     STT_targets = STT_targets + [os.path.join(output_path, "ancestry_STT_done.flag")]
+
+if scan_p_mode:
+    STT_targets = STT_targets + [scan_p_output]
+
+if scan_d_mode:
+    STT_targets = STT_targets + [scan_d_output]
 
 replicates_targets = ([rates_data]
                       + embeddings_replicate_data
@@ -411,6 +447,7 @@ rule compute_rates_true:
     params:
         outdir = data_output_path,
         max_time = max_time,
+        n_timepoints = n_timepoints,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
@@ -419,6 +456,7 @@ rule compute_rates_true:
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
             --max_time {params.max_time} \
+            --n_timepoints {params.n_timepoints} \
             --labels {input.pop_labels} \
             {params.per_haplotype}
         """
@@ -457,10 +495,12 @@ rule compute_embeddings_true:
         script = compute_embeddings_wrapper_script,
         main_script = COMPUTE_EMBEDDINGS_SCRIPT
     output:
-        embeddings_true
+        embeddings_true,
+        reconstructed_rates_true
     params:
         outdir = data_output_path,
         output_name = embeddings_true_file_name,
+        reconstructed_rates_output_name = reconstructed_rates_true_file_name,
         N_min = N_min,
         N_max = N_max,
         p = p,
@@ -475,6 +515,7 @@ rule compute_embeddings_true:
             --input {input.rates} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
+            --reconstructed_rates_output_name {params.reconstructed_rates_output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
             --p {params.p} \
@@ -503,7 +544,7 @@ rule plot_embeddings_true:
         time_scale = time_scale,
         N_max = N_max,
         rates_path = rates_true,
-        reconstructed_rates_path = performance_true_data,
+        reconstructed_rates_path = reconstructed_rates_true,
         per_haplotype = "--per-haplotype" if per_haplotype else "",
     shell:
         """
@@ -538,46 +579,31 @@ DASHEOF
 
 rule evaluate_performance_true:
     input:
-        embeddings = embeddings_true,
         rates = rates_true,
+        reconstructed_rates = reconstructed_rates_true,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
         script = evaluate_performance_script
     output:
-        performance_true_data,
-        performance_true_plot,
-        performance_true_interactive
+        input_vs_reconstructed_rates_true_plot,
+        input_vs_reconstructed_rates_true_interactive
     params:
-        N_min = N_min,
         N_max = N_max,
-        p = p,
-        link = link,
-        data_output_path = data_output_path,
         plot_output_path = plot_output_path,
-        data_output_name = performance_true_file_name,
-        plot_output_name = performance_true_plot_file_name,
-        min_time = min_time,
-        max_rate_plot = max_rate_plot,
-        time_scale = time_scale,
+        hist2d_output_name = input_vs_reconstructed_rates_true_plot_file_name,
+        interactive_output_name = input_vs_reconstructed_rates_true_interactive_file_name,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         python {input.script} \
-            --embeddings {input.embeddings} \
             --rates {input.rates} \
-            --N_min {params.N_min} \
+            --reconstructed_rates {input.reconstructed_rates} \
             --N_max {params.N_max} \
-            --p {params.p} \
-            --link {params.link} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
-            --data_output_path {params.data_output_path} \
             --plot_output_path {params.plot_output_path} \
-            --data_output_name {params.data_output_name} \
-            --plot_output_name {params.plot_output_name} \
-            --min_time {params.min_time} \
-            --max_rate_plot {params.max_rate_plot} \
-            --time_scale {params.time_scale} \
+            --hist2d_output_name {params.hist2d_output_name} \
+            --interactive_output_name {params.interactive_output_name} \
             {params.per_haplotype}
         """
 
@@ -830,7 +856,8 @@ rule compute_embeddings:
         main_script = COMPUTE_EMBEDDINGS_SCRIPT,
         support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
     output:
-        embeddings_data
+        embeddings_data,
+        reconstructed_rates
     params:
         N_min = N_min,
         N_max = N_max,
@@ -840,6 +867,7 @@ rule compute_embeddings:
         l2_penalties = l2_penalties,
         outdir = data_output_path,
         output_name = embeddings_data_file_name,
+        reconstructed_rates_output_name = reconstructed_rates_file_name,
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
@@ -851,6 +879,7 @@ rule compute_embeddings:
             --input {input.rates} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
+            --reconstructed_rates_output_name {params.reconstructed_rates_output_name} \
             --N_min {params.N_min} \
             --N_max {params.N_max} \
             --p {params.p} \
@@ -881,7 +910,7 @@ rule plot_embeddings:
         time_scale = time_scale,
         N_max = N_max,
         rates_path = rates_data,
-        reconstructed_rates_path = performance_data,
+        reconstructed_rates_path = reconstructed_rates,
         per_haplotype = "--per-haplotype" if per_haplotype else "",
     shell:
         """
@@ -1048,7 +1077,8 @@ if admix_mode:
             main_script = COMPUTE_EMBEDDINGS_SCRIPT,
             support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", reconstructed_rates_file_name)
         params:
             N_min = N_min,
             N_max = N_max,
@@ -1058,6 +1088,7 @@ if admix_mode:
             l2_penalties = l2_penalties,
             outdir = lambda wc: ancestry_data_dir(wc.ancestry),
             output_name = embeddings_data_file_name,
+            reconstructed_rates_output_name = reconstructed_rates_file_name,
             n_components = n_components,
             n_timepoints_emb = n_timepoints_emb,
             pop_labels = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), "pop_labels.csv"),
@@ -1069,6 +1100,7 @@ if admix_mode:
                 --input {input.rates} \
                 --output_path {params.outdir} \
                 --output_name {params.output_name} \
+                --reconstructed_rates_output_name {params.reconstructed_rates_output_name} \
                 --N_min {params.N_min} \
                 --N_max {params.N_max} \
                 --p {params.p} \
@@ -1100,7 +1132,7 @@ if admix_mode:
             time_scale = time_scale,
             N_max = N_max,
             rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), rates_data_file_name),
-            reconstructed_rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), performance_data_file_name),
+            reconstructed_rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), reconstructed_rates_file_name),
             per_haplotype = "--per-haplotype" if per_haplotype else "",
         shell:
             """
@@ -1161,6 +1193,37 @@ DASHEOF
                 --lims {params.embeddings_plot_lims}
             """
 
+    rule evaluate_performance_ancestry:
+        input:
+            rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            reconstructed_rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", reconstructed_rates_file_name),
+            pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+            pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+            script = evaluate_performance_script
+        output:
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", input_vs_reconstructed_rates_plot_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "plots", input_vs_reconstructed_rates_interactive_file_name)
+        params:
+            N_max = N_max,
+            plot_output_path = lambda wc: ancestry_plot_dir(wc.ancestry),
+            hist2d_output_name = input_vs_reconstructed_rates_plot_file_name,
+            interactive_output_name = input_vs_reconstructed_rates_interactive_file_name,
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.plot_output_path}
+            python {input.script} \
+                --rates {input.rates} \
+                --reconstructed_rates {input.reconstructed_rates} \
+                --N_max {params.N_max} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --plot_output_path {params.plot_output_path} \
+                --hist2d_output_name {params.hist2d_output_name} \
+                --interactive_output_name {params.interactive_output_name} \
+                {params.per_haplotype}
+            """
+
     def ancestry_targets(wildcards):
         labels = ancestry_labels_from_checkpoint(wildcards)
         return expand(
@@ -1172,6 +1235,9 @@ DASHEOF
                 os.path.join(ancestry_STT_path, "{label}", "data", embeddings_data_file_name),
                 os.path.join(ancestry_STT_path, "{label}", "plots", embeddings_plot_file_name),
                 os.path.join(ancestry_STT_path, "{label}", "plots", slice_2d_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "data", reconstructed_rates_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_interactive_file_name),
                 os.path.join(ancestry_STT_path, "{label}", "plots", dash_launch_file_name),
             ],
             label=labels,
@@ -1221,7 +1287,7 @@ rule bundle_dash:
     input:
         embeddings = embeddings_data,
         rates = rates_data,
-        reconstructed_rates = performance_data,
+        reconstructed_rates = reconstructed_rates,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
         script = bundle_dash_script,
@@ -1248,50 +1314,155 @@ rule bundle_dash:
             --rates-time-stride {params.rates_time_stride} \
             -o {output}
         """
-rule evaluate_performance:
-    input:
-        embeddings = embeddings_data,
-        rates = rates_data,
-        pop_colors = pop_colors,
-        pop_labels = pop_labels,
-        script = evaluate_performance_script
-    output:
-        performance_data,
-        performance_plot,
-        performance_interactive
-    params:
-        N_min = N_min,
-        N_max = N_max,
-        p = p,
-        link = link,
-        data_output_path = data_output_path,
-        plot_output_path = plot_output_path,
-        data_output_name = performance_data_file_name,
-        plot_output_name = performance_plot_file_name,
-        min_time = min_time,
-        max_rate_plot = max_rate_plot,
-        time_scale = time_scale,
-        per_haplotype = "--per-haplotype" if per_haplotype else ""
-    shell:
-        """
-        python {input.script} \
-            --embeddings {input.embeddings} \
-            --rates {input.rates} \
-            --N_min {params.N_min} \
-            --N_max {params.N_max} \
-            --p {params.p} \
-            --link {params.link} \
-            --colors {input.pop_colors} \
-            --labels {input.pop_labels} \
-            --data_output_path {params.data_output_path} \
-            --plot_output_path {params.plot_output_path} \
-            --data_output_name {params.data_output_name} \
-            --plot_output_name {params.plot_output_name} \
-            --min_time {params.min_time} \
-            --max_rate_plot {params.max_rate_plot} \
-            --time_scale {params.time_scale} \
-            {params.per_haplotype}
-        """
+if demes_file_path: # Ground-truth demographic rates are available, so also compare true rates vs reconstructed rates
+    rule evaluate_performance:
+        input:
+            rates = rates_data,
+            reconstructed_rates = reconstructed_rates,
+            true_rates = rates_true,
+            pop_colors = pop_colors,
+            pop_labels = pop_labels,
+            script = evaluate_performance_script
+        output:
+            input_vs_reconstructed_rates_plot,
+            input_vs_reconstructed_rates_interactive,
+            true_rates_vs_reconstructed_rates_plot,
+            true_rates_vs_reconstructed_rates_interactive
+        params:
+            N_max = N_max,
+            plot_output_path = plot_output_path,
+            hist2d_output_name = input_vs_reconstructed_rates_plot_file_name,
+            interactive_output_name = input_vs_reconstructed_rates_interactive_file_name,
+            true_hist2d_output_name = true_rates_vs_reconstructed_rates_plot_file_name,
+            true_interactive_output_name = true_rates_vs_reconstructed_rates_interactive_file_name,
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            python {input.script} \
+                --rates {input.rates} \
+                --reconstructed_rates {input.reconstructed_rates} \
+                --true_rates {input.true_rates} \
+                --N_max {params.N_max} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --plot_output_path {params.plot_output_path} \
+                --hist2d_output_name {params.hist2d_output_name} \
+                --interactive_output_name {params.interactive_output_name} \
+                --true_hist2d_output_name {params.true_hist2d_output_name} \
+                --true_interactive_output_name {params.true_interactive_output_name} \
+                {params.per_haplotype}
+            """
+else:
+    rule evaluate_performance:
+        input:
+            rates = rates_data,
+            reconstructed_rates = reconstructed_rates,
+            pop_colors = pop_colors,
+            pop_labels = pop_labels,
+            script = evaluate_performance_script
+        output:
+            input_vs_reconstructed_rates_plot,
+            input_vs_reconstructed_rates_interactive
+        params:
+            N_max = N_max,
+            plot_output_path = plot_output_path,
+            hist2d_output_name = input_vs_reconstructed_rates_plot_file_name,
+            interactive_output_name = input_vs_reconstructed_rates_interactive_file_name,
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            python {input.script} \
+                --rates {input.rates} \
+                --reconstructed_rates {input.reconstructed_rates} \
+                --N_max {params.N_max} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --plot_output_path {params.plot_output_path} \
+                --hist2d_output_name {params.hist2d_output_name} \
+                --interactive_output_name {params.interactive_output_name} \
+                {params.per_haplotype}
+            """
+
+# ______________________scan Rules______________________
+if scan_p_mode: # Scan the exponent p over a grid, holding n_components fixed
+    rule scan_p:
+        input:
+            rates = rates_data,
+            script = scan_p_script,
+            main_script = COMPUTE_EMBEDDINGS_SCRIPT,
+            support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
+        output:
+            scan_p_output
+        params:
+            min_p = min_p,
+            max_p = max_p,
+            num_p = num_p,
+            N_min = N_min,
+            N_max = N_max,
+            link = link,
+            n_components = n_components,
+            n_timepoints_emb = n_timepoints_emb,
+            outdir = scan_p_outdir,
+            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path else "",
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --rates {input.rates} \
+                --output_path {params.outdir} \
+                --output {output} \
+                --min_p {params.min_p} \
+                --max_p {params.max_p} \
+                --num_p {params.num_p} \
+                --N_min {params.N_min} \
+                --N_max {params.N_max} \
+                --link {params.link} \
+                --n_components {params.n_components} \
+                --n_timepoints_emb {params.n_timepoints_emb} \
+                {params.true_rates_arg} \
+                {params.per_haplotype}
+            """
+
+if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding p fixed
+    rule scan_d:
+        input:
+            rates = rates_data,
+            script = scan_d_script,
+            main_script = COMPUTE_EMBEDDINGS_SCRIPT,
+            support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
+        output:
+            scan_d_output
+        params:
+            min_d = min_d,
+            max_d = max_d,
+            num_d = num_d,
+            N_min = N_min,
+            N_max = N_max,
+            p = p,
+            link = link,
+            n_timepoints_emb = n_timepoints_emb,
+            outdir = scan_d_outdir,
+            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path else "",
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --rates {input.rates} \
+                --output_path {params.outdir} \
+                --output {output} \
+                --min_d {params.min_d} \
+                --max_d {params.max_d} \
+                --num_d {params.num_d} \
+                --N_min {params.N_min} \
+                --N_max {params.N_max} \
+                --p {params.p} \
+                --link {params.link} \
+                --n_timepoints_emb {params.n_timepoints_emb} \
+                {params.true_rates_arg} \
+                {params.per_haplotype}
+            """
 
 # ______________________replicate Rules______________________
 rule compute_embeddings_replicate:
