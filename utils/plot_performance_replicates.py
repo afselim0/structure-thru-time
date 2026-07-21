@@ -13,7 +13,7 @@ sys.path.append("../src")
 sys.path.append("../../src")
 sys.path.append("src")
 
-from evaluate_performance import compute_distance_df, reconstruct_rates
+from OptimzationFunctions import compute_distance_df, reconstruct_rates
 
 
 def _perf_on_ax(ax, input_rates, rec_rates, pop_labels, pop_colors, N_max, seed):
