@@ -195,6 +195,42 @@ def compute_f_inverse(f, N_min, p=1, link="inverse_distance", eps=1e-10):
 
     return x
 
+def compute_distance_df(embeddings, id_label="sample_id"):
+    """Compute pairwise Euclidean distances between samples at each time point from a latent embeddings dataframe.
+
+    Args:
+        embeddings (pd.DataFrame): long-format embeddings with columns id_label, "time", and one column per latent dimension (named "X...").
+        id_label (str, optional): column identifying samples/individuals. Defaults to "sample_id".
+
+    Returns:
+        pd.DataFrame: distances indexed by (id_label_1, id_label_2) pairs, columns are time points.
+    """
+    x_cols = sorted(c for c in embeddings.columns if c.startswith("X"))
+
+    # Pivot each dimension to (n_individuals, n_times), then stack to
+    # (n_individuals, n_times, n_dims). Avoids the O(n²·T) cross-join.
+    pivots = [
+        embeddings.pivot_table(index=id_label, columns="time", values=c, aggfunc="first")
+        for c in x_cols
+    ]
+    individuals = pivots[0].index.values
+    times       = pivots[0].columns.values
+    X = np.stack([p.values for p in pivots], axis=-1)  # (n, n_times, n_dims)
+
+    ii, jj   = np.triu_indices(len(individuals), k=1)
+    distances = np.linalg.norm(X[ii] - X[jj], axis=-1)  # (n_pairs, n_times)
+
+    pair_index = pd.MultiIndex.from_arrays(
+        [individuals[ii], individuals[jj]],
+        names=[f"{id_label}_1", f"{id_label}_2"],
+    )
+    return pd.DataFrame(distances, index=pair_index, columns=times)
+
+def reconstruct_rates(D_df, N_min, p=1, link="inverse_distance"):
+    """Apply the link function f to a pairwise distance dataframe to reconstruct coalescence rates."""
+    reconstructed_rates, _ = compute_f(D_df, N_min, p=p, link=link)
+    return reconstructed_rates
+
 import numpy as np
 
 def procrustes_single_time(X_reference, Y, allow_reflection=True):
