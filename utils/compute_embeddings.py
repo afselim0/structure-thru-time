@@ -8,6 +8,7 @@ sys.path.append("src")
 import os
 
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
+from OptimzationFunctions import compute_distance_df, reconstruct_rates
 import numpy as np
 
 def main():
@@ -15,6 +16,7 @@ def main():
     parser.add_argument("--input", required=True, help="Path to rates parquet file")
     parser.add_argument("--output_path", required=True, help="Output directory for embeddings data")
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
+    parser.add_argument("--reconstructed_rates_output_name", required=True, help="Output filename for the reconstructed rates parquet file")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
     parser.add_argument("--p", type=int, default=1, help="Exponent of the distance in the link function")
@@ -116,6 +118,12 @@ def main():
     unsmoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     unsmoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.output_name}")
     loss_df.to_parquet(f"{args.output_path}/loss_{args.output_name}")
+
+    # Reconstructed rates: apply the link function to pairwise distances in the fitted embeddings,
+    # giving the rate the model implies at each latent position (used by evaluate_performance.py)
+    D_df = compute_distance_df(unsmoothed_embeddings_df, id_label=id_label)
+    reconstructed_rates_df = reconstruct_rates(D_df, N_min=args.N_min, p=args.p, link=args.link)
+    reconstructed_rates_df.to_parquet(f"{args.output_path}/{args.reconstructed_rates_output_name}")
 
     if args.compute_uncertainty:
         covariances_df = LSE.get_covariances_df()
