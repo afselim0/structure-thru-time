@@ -144,11 +144,11 @@ def anomaly_zone_4(Ne, AB_split_time, distant_split_branch_length):
 
     return demography
 
-def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, distant_split_branch_length):
-    b = lambda x: np.log(2/3 + (5*np.exp(2*x)-2)/(6*(3*np.exp(2*x)-2*np.exp(x))))
-    recent_split_branch_length = (b(distant_split_branch_length/Ne) / 2)*Ne
-    AB_C_split_time = A_B_split_time + recent_split_branch_length
-    ABC_D_split_time = AB_C_split_time + distant_split_branch_length
+def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time):
+    # b = lambda x: np.log(2/3 + (5*np.exp(2*x)-2)/(6*(3*np.exp(2*x)-2*np.exp(x))))
+    # recent_split_branch_length = (b(distant_split_branch_length/Ne) / 2)*Ne
+    # AB_C_split_time = A_B_split_time + recent_split_branch_length
+    # ABC_D_split_time = AB_C_split_time + distant_split_branch_length
 
     growth_rate_A = (1/A_B_split_time)*np.log(Ne_A_recent/Ne_bottleneck)
     growth_rate_B = (1/A_B_split_time)*np.log(Ne_B_recent/Ne_bottleneck)
@@ -280,19 +280,19 @@ graph = demography.to_demes()
 demes.dump(graph, main_demes_dir_1 + "anomaly_zone.yaml")
 #%%
 # 6- Complex 4 pops
-Ne = 1e4
+Ne = 1.5e4
 Ne_bottleneck = Ne/10
 A_B_split_time = 1000
-distant_split_branch_length = 1000
+AB_C_split_time = 1200
+ABC_D_split_time = 1400
 
 Ne_A_recent = 2*Ne
 Ne_B_recent = 4*Ne
 Ne_C_recent = 4*Ne
 C_recent_growth_stop_time = 30
 
-demography = complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, distant_split_branch_length)
-graph = demography.to_demes()
-demes.dump(graph, main_demes_dir_1 + "complex_4_pops.yaml")
+demography = complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time)
+demes.dump(demography.to_demes(), main_demes_dir_1 + "complex_4_pops.yaml")
 # %%
 # 7- Stepping Stones 2D
 N = 100
