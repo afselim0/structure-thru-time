@@ -29,6 +29,8 @@ Intended usage
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -38,6 +40,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from PIL import Image
+from matplotlib.axes import Axes
 
 # ----------------------- tunables ------------------------------------------
 sample_line_width = 2
@@ -347,6 +350,44 @@ class PlotEmbeddings:
             )
         )
 
+    def find_aspect_ratio(
+        self,
+        *,
+        eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
+        up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
+        probe_size: int = 800,
+    ) -> float:
+        """
+        Render a throwaway export at the given camera angle, crop whitespace, and
+        return the cropped image's width/height ratio.
+
+        The static export's true aspect ratio depends on the camera angle and
+        data extent, so it can't be known ahead of a render. Call this first to
+        learn the ratio, then size the target axis/figure to match before calling
+        save_static or save_static_to_axis for the final render -- avoids ever
+        stretching or shrinking the image to fit a mismatched axis.
+
+        probe_size only needs to be large enough for a stable crop; it does not
+        need to match the final render's resolution.
+        """
+        if self.fig is None:
+            raise RuntimeError("Call init_plot() before finding the aspect ratio.")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            probe_path = os.path.join(tmp_dir, "probe")
+            self.save_static(
+                filename=probe_path,
+                format="png",
+                width=probe_size,
+                height=probe_size,
+                scale=1,
+                eye=eye,
+                up=up,
+                crop_white=True,
+            )
+            with Image.open(f"{probe_path}.png") as img:
+                return img.width / img.height
+
     def save_static(
         self,
         filename: str,
@@ -357,13 +398,18 @@ class PlotEmbeddings:
         scale: int = 2,
         eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
         up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
-        crop_white = True
+        crop_white = True,
+        font_size: Optional[int] = None
     ) -> None:
         if self.fig is None:
             raise RuntimeError("Call init_plot() before saving.")
         self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
         self.fig.update_layout(showlegend=False)
         self.fig.update_layout(scene=dict(zaxis=dict(title="")))
+        # Plotly's default font size is fixed in pixels regardless of export width/height,
+        # so small exports (e.g. sized to a fraction of a matplotlib panel) read as tiny text
+        if font_size is not None:
+            self.fig.update_layout(font=dict(size=font_size))
         pio.write_image(fig=self.fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
         if crop_white:
             assert format in ["png", "jpg", "jpeg"], "Cropping is only supported for raster formats like PNG or JPEG."
@@ -389,7 +435,92 @@ class PlotEmbeddings:
 
         self.fig.update_layout(showlegend=True)  # restore legend for interactive use if needed
         self.fig.update_layout(scene=dict(zaxis=dict(title="Time (generations ago)" if self.generation_time is None else "Time (years ago)")))  # restore z-axis title
-            
+
+    def save_static_to_axis(
+        self,
+        ax: Axes,
+        path: str,
+        *,
+        format: str = "png",
+        render_dpi: float = 300,
+        scale: int = 2,
+        eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
+        up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
+        crop_white: bool = True,
+        fit: str = "fill_height",
+    ) -> None:
+        """
+        Render the static plot and place it in a matplotlib axis with no
+        letterboxing/whitespace and no distortion of the plot's aspect ratio.
+
+        Rendered at ax's own physical size (in inches) times render_dpi, so
+        Plotly's default fonts come out near their true final size once
+        displayed -- call find_aspect_ratio() beforehand and size ax to match
+        it, or fonts/lines will still need heavy up- or down-scaling to fill
+        ax's box. crop_white then trims whitespace by a different amount from
+        each side, so the cropped image's aspect ratio may not exactly match
+        ax's box even when ax was sized from find_aspect_ratio (renders aren't
+        perfectly deterministic run to run).
+
+        fit controls how the (undistorted) image is fit to ax's box:
+          - "contain": shrink ax's box to the image's aspect ratio, centered
+            within ax's original box (image stays fully inside, box may shrink
+            in both dimensions).
+          - "fill_height": grow/shrink ax's box to match ax's original height
+            exactly, centered horizontally on ax's original box; width follows
+            the image's aspect ratio and may overflow or underflow ax's
+            original width on both sides evenly.
+        """
+        if self.fig is None:
+            raise RuntimeError("Call init_plot() before saving.")
+        if fit not in {"contain", "fill_height"}:
+            raise ValueError(f"fit must be 'contain' or 'fill_height', got {fit!r}")
+
+        pos = ax.get_position()
+        fig = ax.get_figure()
+        box_w_in = pos.width * fig.get_figwidth()
+        box_h_in = pos.height * fig.get_figheight()
+        width_px = int(round(box_w_in * render_dpi))
+        height_px = int(round(box_h_in * render_dpi))
+
+        self.save_static(
+            filename=path,
+            format=format,
+            width=width_px,
+            height=height_px,
+            scale=scale,
+            eye=eye,
+            up=up,
+            crop_white=crop_white,
+        )
+
+        img = Image.open(f"{path}.{format}")
+        ax.set_axis_off()
+        ax.imshow(img, aspect="equal")
+
+        img_aspect = img.width / img.height
+        if fit == "contain":
+            # shrink ax's box to the image's aspect ratio, centered in the original box
+            box_aspect = box_w_in / box_h_in
+            if img_aspect > box_aspect:
+                new_w_in, new_h_in = box_w_in, box_w_in / img_aspect
+            else:
+                new_w_in, new_h_in = box_h_in * img_aspect, box_h_in
+        else:
+            # fill ax's height exactly; width follows the image and may over-
+            # or under-shoot ax's original width, centered on the original box
+            new_h_in = box_h_in
+            new_w_in = box_h_in * img_aspect
+
+        new_x0_in = pos.x0 * fig.get_figwidth() + (box_w_in - new_w_in) / 2
+        new_y0_in = pos.y0 * fig.get_figheight() + (box_h_in - new_h_in) / 2
+
+        new_w = new_w_in / fig.get_figwidth()
+        new_h = new_h_in / fig.get_figheight()
+        new_x0 = new_x0_in / fig.get_figwidth()
+        new_y0 = new_y0_in / fig.get_figheight()
+        ax.set_position([new_x0, new_y0, new_w, new_h])
+
     # ------------------------- core layers --------------------------------
 
     def add_legend(self, *, marker_size: int = 10) -> None:
