@@ -3,31 +3,31 @@ generation_time: 1
 demes:
 - name: ABCD
   epochs:
-  - {end_time: 2644.0842904143947, start_size: 10000.0}
+  - {end_time: 1400, start_size: 15000.0}
 - name: D
   ancestors: [ABCD]
   epochs:
-  - {end_time: 0, start_size: 10000.0}
+  - {end_time: 0, start_size: 15000.0}
 - name: ABC
   ancestors: [ABCD]
   epochs:
-  - {end_time: 1644.0842904143947, start_size: 1000.0}
+  - {end_time: 1200, start_size: 1500.0}
 - name: C
   ancestors: [ABC]
   epochs:
-  - {end_time: 432.8357638500726, start_size: 999.9999999999983, end_size: 40000.0}
-  - {end_time: 113.9520641125126, start_size: 40000.0, end_size: 1000.0}
-  - {end_time: 29.999999999999996, start_size: 1000.0, end_size: 40000.0}
-  - {end_time: 0, start_size: 40000.0}
+  - {end_time: 350.8821285855439, start_size: 1499.9999999999948, end_size: 59999.99999999995}
+  - {end_time: 102.59855680060183, start_size: 59999.99999999995, end_size: 1499.9999999999995}
+  - {end_time: 29.999999999999996, start_size: 1499.9999999999995, end_size: 60000.0}
+  - {end_time: 0, start_size: 60000.0}
 - name: AB
   ancestors: [ABC]
   epochs:
-  - {end_time: 1000, start_size: 1000.0}
+  - {end_time: 1000, start_size: 1500.0}
 - name: A
   ancestors: [AB]
   epochs:
-  - {end_time: 0, start_size: 1000.0000000000002, end_size: 20000.0}
+  - {end_time: 0, start_size: 1500.0000000000002, end_size: 30000.0}
 - name: B
   ancestors: [AB]
   epochs:
-  - {end_time: 0, start_size: 999.9999999999997, end_size: 40000.0}
+  - {end_time: 0, start_size: 1499.9999999999995, end_size: 60000.0}
