@@ -154,7 +154,6 @@ class LatentSpaceEmbeddings:
 
     def compute_embeddings_through_time(self,
                                         X_init = None,
-                                        target_precision = 1e-8,
                                         p = 1,
                                         link = "inverse_distance",
                                         compute_uncertainty = False,
@@ -194,12 +193,11 @@ class LatentSpaceEmbeddings:
         self.embeddings = X
         return X, loss_df
     
-    def compute_embeddings_jointly(self, X_init=None, p=1, link="inverse_distance", precision=1e-5):
+    def compute_embeddings_jointly(self, X_init=None, p=1, link="inverse_distance"):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        ftol = precision * min(self.saturated_loss, 1.0)
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, p, link, self.smoothing_params, self.sampled_by_time, ftol=ftol)
+        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, p, link, self.smoothing_params, self.sampled_by_time)
         self.embeddings = X
-        X = procrustes_alignment(X)
+        # X = procrustes_alignment(X)
         return X, loss_df
     
     def smooth_embeddings_independently(self, X):

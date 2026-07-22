@@ -9,19 +9,17 @@ Loss and gradient can be computed for:
 The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
 """
 
-GTOL_TIMEPOINT     = 1e-32
-FTOL_TIMEPOINT     = 1e-32
-GTOL_TIMEPOINT     = 1e-32
-FTOL_TIMEPOINT     = 1e-32
+GTOL_TIMEPOINT     = 1e-16
+FTOL_TIMEPOINT     = 1e-12
 MAX_ITER_TIMEPOINT = 12000
 
 GTOL_SAMPLE        = 1e-16
 FTOL_SAMPLE        = 1e-12
 MAX_ITER_SAMPLE    = 6000
 
-GTOL_JOINT         = 1e-16
-FTOL_JOINT         = 1e-8
-MAX_ITER_JOINT     = 6000
+GTOL_JOINT         = 1e-8
+FTOL_JOINT         = 1e-6
+MAX_ITER_JOINT     = 1000
 
 DEFAULT_WEIGHTS = 1e6
 DEFAULT_W_PERCENTILE_CAP = 95
@@ -1050,17 +1048,21 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, p=1, link="invers
     if W is None:
         W = np.ones_like(R) * DEFAULT_WEIGHTS
     progress = []
-
+    print(f"Joint optimization with ftol = {ftol} and gtol = {gtol}")
     def callback(x):
         loss, grad = compute_loss_gradient_all(
             x, R, W, N_min, N_max, p, link, sampled_by_time, smoothing_params)
+        prev_loss = progress[-1]["loss"] if progress else None
+        rel_change = (prev_loss - loss) / max(abs(prev_loss), abs(loss), 1) if prev_loss is not None else np.nan
         progress.append({
             "iteration":    len(progress) + 1,
             "loss":         loss,
             "proj_grad_max": np.max(np.abs(grad)),
+            "rel_change":   rel_change,
         })
         print(f"  iter {progress[-1]['iteration']:4d}  "
               f"loss={loss:.10g}  "
+              f"rel_change={rel_change:.3g}  "
               f"max|grad|={progress[-1]['proj_grad_max']:.6g}")
 
     result = minimize(
