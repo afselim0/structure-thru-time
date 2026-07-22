@@ -233,7 +233,7 @@ def Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2):
                 x1,y1 = coor(i,K)
                 x2,y2 = coor(j,K)
                 if (abs(x1-x2)==1 and abs(y1-y2)==0) or (abs(y1-y2)==1 and abs(x1-x2)==0):
-                    demography.set_migration_rate(source=deme_names[offset+i], dest=deme_names[offset+j], rate=m_within/4)
+                    demography.set_migration_rate(source=deme_names[offset+i], dest=deme_names[offset+j], rate=m_within[g])
 
     # between-group migration: every deme pair belonging to different groups exchanges migrants at m_between
     for gi in range(n_groups):
@@ -360,7 +360,7 @@ demes.dump(graph, main_demes_dir_1 + "two_admix.yaml")
 #%%
 # Double 2d SS model
 N = 1e2
-m_within = 5e-2
+m_within = [1e-2, 5e-2]
 m_between = 1e-6
 K=5
 split_time = 2500

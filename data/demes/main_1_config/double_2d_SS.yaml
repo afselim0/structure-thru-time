@@ -18,14 +18,14 @@ n_timepoints: 1000
 # rate estimation parameters
 min_window_size: 50
 max_window_size: 200
-compute_variance: false
+compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 1
 N_max: 100000000
 p: 2
-l1: [1e-3, 1e-2]
-l2: [1e-2]
+l1: [1e-2, 1e-3]
+l2: [1e-3, 1e-4]
 
 # Plotting parameters
 min_time: 50

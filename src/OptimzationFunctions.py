@@ -743,8 +743,7 @@ def coordinate_descent_over_time(
         # --- Center (first step only) and Procrustes align ---
         if step == 0:
             X_t -= np.mean(X_t, axis=0)
-        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
-        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t)
+        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t, allow_reflection=False)
         X[extant_idx, :, t_idx] = X_t
 
         if return_covariances and covs is not None:
