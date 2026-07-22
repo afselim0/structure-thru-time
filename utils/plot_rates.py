@@ -39,7 +39,8 @@ def compute_mean_rates(rates_df, pop_labels, per_haplotype=False):
                     elif s1 > s2:
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
-            mean_rates[i,j,:] = np.mean(rates_df.loc[sample_pairs,:].values, axis=0)
+            # No pair exists when pop1 and pop2 have only one (shared) individual between them
+            mean_rates[i,j,:] = np.mean(rates_df.loc[sample_pairs,:].values, axis=0) if sample_pairs else np.nan
             mean_rates[j,i,:] = mean_rates[i,j,:]
     return mean_rates, populations
 
@@ -67,7 +68,8 @@ def compute_median_rates(rates_df, pop_labels, per_haplotype=False):
                     elif s1 > s2:
                         if (s2,s1) not in sample_pairs:
                             sample_pairs.append((s2,s1))
-            median_rates[i,j,:] = np.median(rates_df.loc[sample_pairs,:].values, axis=0)
+            # No pair exists when pop1 and pop2 have only one (shared) individual between them
+            median_rates[i,j,:] = np.median(rates_df.loc[sample_pairs,:].values, axis=0) if sample_pairs else np.nan
             median_rates[j,i,:] = median_rates[i,j,:]
     return median_rates, populations
 

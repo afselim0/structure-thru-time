@@ -214,7 +214,7 @@ def Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2):
     deme_names = [f"g{g}_{row}_{col}" for g in range(n_groups) for col,row in (coor(i,K) for i in range(demes_per_group))]
 
     demography = msprime.Demography()
-    demography.add_population(name="Ancestral", initial_size=N)
+    demography.add_population(name="Ancestral", initial_size=N*n_demes)
     for name in deme_names:
         demography.add_population(name=name, initial_size=N, default_sampling_time=0)
     demography.add_population_split(time=split_time, derived=deme_names, ancestral="Ancestral")
@@ -354,10 +354,10 @@ demes.dump(graph, main_demes_dir_1 + "two_admix.yaml")
 #%%
 # Double 2d SS model
 N = 1e2
-m_within = 1e-3
-m_between = 1e-5
+m_within = 5e-2
+m_between = 1e-6
 K=5
-split_time = 1e5
+split_time = 2500
 demography = Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2)
 graph = demography.to_demes()
 # simplified=False: demes' YAML simplification tries to collapse migration rates into

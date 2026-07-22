@@ -124,12 +124,20 @@ param_label = (
 SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
 PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
-STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+# STT_TAG (and everything built on it) is penalty-free: it tags the *unsmoothed* embeddings, which
+# are always computed regardless of whether smoothing is requested. Smoothed outputs use SMOOTH_TAG,
+# which is identical but carries the actual L1/L2 penalties.
+STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
+SMOOTH_TAG                        = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
+SMOOTH_PLOT_TAG                   = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + SMOOTH_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
-# STT_TAG with the swept field omitted, for use by the scan_p/scan_d rules (the value varies within the rule, so it can't appear in a single output filename)
-STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
-STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+# STT_TAG with the swept field omitted, for use by the scan_p/scan_d rules (the value varies within the rule, so it can't appear in a single output filename). Scans run unsmoothed, so these are penalty-free too.
+STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
+
+# Whether smoothing (joint optimization) is requested — gates the parallel smoothed rules/targets
+smoothing_on                      = (l1_penalties != "None") or (l2_penalties != "None")
 
 # Main scripts
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
@@ -212,6 +220,17 @@ dash_launch_file_name                                    = f"launch_dash{STT_TAG
 dash_launch_true_file_name                               = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
 dash_bundle_file_name                                    = f"dash_bundle{STT_TAG}.zip"
 
+# Smoothed (joint-optimization) counterparts, tagged with the actual L1/L2 penalties (SMOOTH_TAG).
+# Only produced when smoothing_on; mirror the unsmoothed names above.
+smooth_embeddings_data_file_name                                = f"smooth_embeddings{SMOOTH_TAG}.parquet"
+smooth_embeddings_plot_file_name                                = f"smooth_embeddings{SMOOTH_PLOT_TAG}.html"
+smooth_reconstructed_rates_file_name                            = f"smooth_reconstructed_rates{SMOOTH_TAG}.parquet"
+smooth_input_vs_reconstructed_rates_plot_file_name             = f"smooth_input_vs_reconstructed_rates{SMOOTH_TAG}.png"
+smooth_input_vs_reconstructed_rates_interactive_file_name      = f"smooth_input_vs_reconstructed_rates{SMOOTH_TAG}.html"
+smooth_true_rates_vs_reconstructed_rates_plot_file_name        = f"smooth_true_rates_vs_reconstructed_rates{SMOOTH_TAG}.png"
+smooth_true_rates_vs_reconstructed_rates_interactive_file_name = f"smooth_true_rates_vs_reconstructed_rates{SMOOTH_TAG}.html"
+smooth_dash_launch_file_name                                    = f"launch_dash_smooth{SMOOTH_TAG}.sh"
+
 # Scan diagnostics file names (one row per swept value, per rates comparison)
 scan_p_file_name                                          = f"scan_p{STT_TAG_NO_P}.csv"
 scan_d_file_name                                          = f"scan_d{STT_TAG_NO_D}.csv"
@@ -244,6 +263,18 @@ input_vs_reconstructed_rates_plot                  = os.path.join(plot_output_pa
 input_vs_reconstructed_rates_interactive           = os.path.join(plot_output_path, input_vs_reconstructed_rates_interactive_file_name)
 true_rates_vs_reconstructed_rates_plot             = os.path.join(plot_output_path, true_rates_vs_reconstructed_rates_plot_file_name)
 true_rates_vs_reconstructed_rates_interactive      = os.path.join(plot_output_path, true_rates_vs_reconstructed_rates_interactive_file_name)
+
+# Smoothed counterpart paths
+smooth_embeddings_data                        = os.path.join(data_output_path, smooth_embeddings_data_file_name)
+smooth_embeddings_plot                        = os.path.join(plot_output_path, smooth_embeddings_plot_file_name)
+smooth_slice_2d_file_name                     = f"smooth_2d_slice{SMOOTH_PLOT_TAG}.png"
+smooth_slice_2d                               = os.path.join(plot_output_path, smooth_slice_2d_file_name)
+smooth_reconstructed_rates                    = os.path.join(data_output_path, smooth_reconstructed_rates_file_name)
+smooth_input_vs_reconstructed_rates_plot        = os.path.join(plot_output_path, smooth_input_vs_reconstructed_rates_plot_file_name)
+smooth_input_vs_reconstructed_rates_interactive = os.path.join(plot_output_path, smooth_input_vs_reconstructed_rates_interactive_file_name)
+smooth_true_rates_vs_reconstructed_rates_plot        = os.path.join(plot_output_path, smooth_true_rates_vs_reconstructed_rates_plot_file_name)
+smooth_true_rates_vs_reconstructed_rates_interactive = os.path.join(plot_output_path, smooth_true_rates_vs_reconstructed_rates_interactive_file_name)
+smooth_dash_launch                            = os.path.join(plot_output_path, smooth_dash_launch_file_name)
 embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
@@ -313,6 +344,23 @@ if scan_p_mode:
 
 if scan_d_mode:
     STT_targets = STT_targets + [scan_d_output]
+
+# Smoothed (joint-optimization) targets: a full parallel set to the unsmoothed STT outputs, produced
+# only when smoothing penalties are set. Mirrors the conditional structure of the unsmoothed targets.
+if smoothing_on:
+    smooth_targets = [
+        smooth_embeddings_data, smooth_embeddings_plot,
+        smooth_slice_2d,
+        smooth_reconstructed_rates,
+        smooth_input_vs_reconstructed_rates_plot, smooth_input_vs_reconstructed_rates_interactive,
+        smooth_dash_launch,
+    ]
+    if demes_file_path and not is_SS_demography: # Ground-truth demographic rates available (non-SS)
+        smooth_targets = smooth_targets + [
+            smooth_true_rates_vs_reconstructed_rates_plot,
+            smooth_true_rates_vs_reconstructed_rates_interactive,
+        ]
+    STT_targets = STT_targets + smooth_targets
 
 replicates_targets = ([rates_data]
                       + embeddings_replicate_data
@@ -853,6 +901,9 @@ rule plot_relative_div:
             {params.per_haplotype}
         """
 # ______________________STT Rules_________________________
+# When smoothing is on, the single compute_embeddings invocation also writes the smoothed embeddings
+# + smoothed reconstructed rates (warm-started from the unsmoothed solution), so both are declared as
+# outputs and the extra --smooth_* names are passed through.
 rule compute_embeddings:
     input:
         rates = rates_data,
@@ -861,7 +912,8 @@ rule compute_embeddings:
         support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
     output:
         embeddings_data,
-        reconstructed_rates
+        reconstructed_rates,
+        *( [smooth_embeddings_data, smooth_reconstructed_rates] if smoothing_on else [] )
     params:
         N_min = N_min,
         N_max = N_max,
@@ -875,7 +927,10 @@ rule compute_embeddings:
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
-        per_haplotype = "--per-haplotype" if per_haplotype else ""
+        per_haplotype = "--per-haplotype" if per_haplotype else "",
+        smooth_args = (f"--smooth_output_name {smooth_embeddings_data_file_name} "
+                       f"--smooth_reconstructed_rates_output_name {smooth_reconstructed_rates_file_name}"
+                       if smoothing_on else "")
     shell:
         """
         mkdir -p {params.outdir}
@@ -893,7 +948,8 @@ rule compute_embeddings:
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
-            {params.per_haplotype}
+            {params.per_haplotype} \
+            {params.smooth_args}
         """
 rule plot_embeddings:
     input:
@@ -973,6 +1029,90 @@ rule plot_2d_slice:
             --max_time {params.embeddings_max_time} \
             --lims {params.embeddings_plot_lims}
         """
+
+# ______________________Smoothed STT Rules_________________________
+# Parallel to plot_embeddings / plot_2d_slice / evaluate_performance, but consuming the smoothed
+# embeddings + smoothed reconstructed rates produced by compute_embeddings when smoothing is on.
+if smoothing_on:
+    rule plot_embeddings_smooth:
+        input:
+            embeddings = smooth_embeddings_data,
+            pop_colors = pop_colors,
+            pop_labels = pop_labels,
+            script = plot_embeddings_wrapper_script,
+            main_script = PLOT_EMBEDDINGS_SCRIPT
+        output:
+            smooth_embeddings_plot,
+            dash_script = smooth_dash_launch,
+        params:
+            outdir = plot_output_path,
+            output_name = smooth_embeddings_plot_file_name,
+            min_time = min_time,
+            embeddings_plot_lims = embeddings_plot_lims,
+            embeddings_max_time = embeddings_max_time,
+            time_scale = time_scale,
+            N_max = N_max,
+            rates_path = rates_data,
+            reconstructed_rates_path = smooth_reconstructed_rates,
+            per_haplotype = "--per-haplotype" if per_haplotype else "",
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.embeddings} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --lims {params.embeddings_plot_lims} \
+                --min_time {params.min_time} \
+                --max_time {params.embeddings_max_time} \
+                --time_scale {params.time_scale} \
+                {params.per_haplotype}
+            cat > {output.dash_script} << 'DASHEOF'
+#!/bin/bash
+# Run from the utils/ directory
+python plot_embeddings_dash.py \\
+    {input.embeddings} \\
+    --labels {input.pop_labels} \\
+    --colors {input.pop_colors} \\
+    --rates {params.rates_path} \\
+    --reconstructed_rates {params.reconstructed_rates_path} \\
+    --N_max {params.N_max} \\
+    --time_scale {params.time_scale} \\
+    --min_time {params.min_time} \\
+    --max_time {params.embeddings_max_time}
+DASHEOF
+            chmod +x {output.dash_script}
+            """
+
+    rule plot_2d_slice_smooth:
+        input:
+            embeddings = smooth_embeddings_data,
+            pop_colors = pop_colors,
+            pop_labels = pop_labels,
+            script     = "plot_2d_slice.py"
+        output:
+            smooth_slice_2d
+        params:
+            outdir               = plot_output_path,
+            output_name          = smooth_slice_2d_file_name,
+            min_time             = min_time,
+            embeddings_max_time  = embeddings_max_time,
+            embeddings_plot_lims = embeddings_plot_lims,
+        shell:
+            """
+            mkdir -p {params.outdir}
+            python {input.script} \
+                --input {input.embeddings} \
+                --colors {input.pop_colors} \
+                --labels {input.pop_labels} \
+                --output_path {params.outdir} \
+                --output_name {params.output_name} \
+                --min_time {params.min_time} \
+                --max_time {params.embeddings_max_time} \
+                --lims {params.embeddings_plot_lims}
+            """
 
 # ______________________ancestry-specific STT Rules________________________
 # Repeats the STT rules above once per reference/ancestry population label,
@@ -1082,7 +1222,10 @@ if admix_mode:
             support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
         output:
             os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name),
-            os.path.join(ancestry_STT_path, "{ancestry}", "data", reconstructed_rates_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", reconstructed_rates_file_name),
+            *( [os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_embeddings_data_file_name),
+                os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_reconstructed_rates_file_name)]
+               if smoothing_on else [] )
         params:
             N_min = N_min,
             N_max = N_max,
@@ -1096,7 +1239,10 @@ if admix_mode:
             n_components = n_components,
             n_timepoints_emb = n_timepoints_emb,
             pop_labels = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), "pop_labels.csv"),
-            per_haplotype = "--per-haplotype" if per_haplotype else ""
+            per_haplotype = "--per-haplotype" if per_haplotype else "",
+            smooth_args = (f"--smooth_output_name {smooth_embeddings_data_file_name} "
+                           f"--smooth_reconstructed_rates_output_name {smooth_reconstructed_rates_file_name}"
+                           if smoothing_on else "")
         shell:
             """
             mkdir -p {params.outdir}
@@ -1114,7 +1260,8 @@ if admix_mode:
                 --n_components {params.n_components} \
                 --n_timepoints_emb {params.n_timepoints_emb} \
                 --pop_labels {params.pop_labels} \
-                {params.per_haplotype}
+                {params.per_haplotype} \
+                {params.smooth_args}
             """
 
     rule plot_embeddings_ancestry:
@@ -1228,24 +1375,146 @@ DASHEOF
                 {params.per_haplotype}
             """
 
+    # Smoothed ancestry rules: parallel to the three above, consuming the smoothed embeddings +
+    # smoothed reconstructed rates written per-ancestry by compute_embeddings_ancestry.
+    if smoothing_on:
+        rule plot_embeddings_ancestry_smooth:
+            input:
+                embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_embeddings_data_file_name),
+                pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+                pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+                script = plot_embeddings_wrapper_script,
+                main_script = PLOT_EMBEDDINGS_SCRIPT
+            output:
+                os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_embeddings_plot_file_name),
+                dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_dash_launch_file_name),
+            params:
+                outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
+                output_name = smooth_embeddings_plot_file_name,
+                min_time = min_time,
+                embeddings_plot_lims = embeddings_plot_lims,
+                embeddings_max_time = embeddings_max_time,
+                time_scale = time_scale,
+                N_max = N_max,
+                rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), rates_data_file_name),
+                reconstructed_rates_path = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), smooth_reconstructed_rates_file_name),
+                per_haplotype = "--per-haplotype" if per_haplotype else "",
+            shell:
+                """
+                mkdir -p {params.outdir}
+                python {input.script} \
+                    --input {input.embeddings} \
+                    --colors {input.pop_colors} \
+                    --labels {input.pop_labels} \
+                    --output_path {params.outdir} \
+                    --output_name {params.output_name} \
+                    --lims {params.embeddings_plot_lims} \
+                    --min_time {params.min_time} \
+                    --max_time {params.embeddings_max_time} \
+                    --time_scale {params.time_scale} \
+                    {params.per_haplotype}
+                cat > {output.dash_script} << 'DASHEOF'
+#!/bin/bash
+# Run from the utils/ directory
+python plot_embeddings_dash.py \\
+    {input.embeddings} \\
+    --labels {input.pop_labels} \\
+    --colors {input.pop_colors} \\
+    --rates {params.rates_path} \\
+    --reconstructed_rates {params.reconstructed_rates_path} \\
+    --N_max {params.N_max} \\
+    --time_scale {params.time_scale} \\
+    --min_time {params.min_time} \\
+    --max_time {params.embeddings_max_time}
+DASHEOF
+                chmod +x {output.dash_script}
+                """
+
+        rule plot_2d_slice_ancestry_smooth:
+            input:
+                embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_embeddings_data_file_name),
+                pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+                pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+                script     = "plot_2d_slice.py"
+            output:
+                os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_slice_2d_file_name)
+            params:
+                outdir               = lambda wc: ancestry_plot_dir(wc.ancestry),
+                output_name          = smooth_slice_2d_file_name,
+                min_time             = min_time,
+                embeddings_max_time  = embeddings_max_time,
+                embeddings_plot_lims = embeddings_plot_lims,
+            shell:
+                """
+                mkdir -p {params.outdir}
+                python {input.script} \
+                    --input {input.embeddings} \
+                    --colors {input.pop_colors} \
+                    --labels {input.pop_labels} \
+                    --output_path {params.outdir} \
+                    --output_name {params.output_name} \
+                    --min_time {params.min_time} \
+                    --max_time {params.embeddings_max_time} \
+                    --lims {params.embeddings_plot_lims}
+                """
+
+        rule evaluate_performance_ancestry_smooth:
+            input:
+                rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+                reconstructed_rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_reconstructed_rates_file_name),
+                pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
+                pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
+                script = evaluate_performance_script
+            output:
+                os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_input_vs_reconstructed_rates_plot_file_name),
+                os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_input_vs_reconstructed_rates_interactive_file_name)
+            params:
+                N_max = N_max,
+                plot_output_path = lambda wc: ancestry_plot_dir(wc.ancestry),
+                hist2d_output_name = smooth_input_vs_reconstructed_rates_plot_file_name,
+                interactive_output_name = smooth_input_vs_reconstructed_rates_interactive_file_name,
+                per_haplotype = "--per-haplotype" if per_haplotype else ""
+            shell:
+                """
+                mkdir -p {params.plot_output_path}
+                python {input.script} \
+                    --rates {input.rates} \
+                    --reconstructed_rates {input.reconstructed_rates} \
+                    --N_max {params.N_max} \
+                    --colors {input.pop_colors} \
+                    --labels {input.pop_labels} \
+                    --plot_output_path {params.plot_output_path} \
+                    --hist2d_output_name {params.hist2d_output_name} \
+                    --interactive_output_name {params.interactive_output_name} \
+                    {params.per_haplotype}
+                """
+
     def ancestry_targets(wildcards):
         labels = ancestry_labels_from_checkpoint(wildcards)
-        return expand(
-            [
-                os.path.join(ancestry_STT_path, "{label}", "data", rates_data_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", rates_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_summary_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "data", embeddings_data_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", embeddings_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", slice_2d_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "data", reconstructed_rates_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_plot_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_interactive_file_name),
-                os.path.join(ancestry_STT_path, "{label}", "plots", dash_launch_file_name),
-            ],
-            label=labels,
-        )
+        target_templates = [
+            os.path.join(ancestry_STT_path, "{label}", "data", rates_data_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", rates_plot_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", relative_div_plot_summary_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "data", embeddings_data_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", embeddings_plot_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", slice_2d_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "data", reconstructed_rates_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_plot_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", input_vs_reconstructed_rates_interactive_file_name),
+            os.path.join(ancestry_STT_path, "{label}", "plots", dash_launch_file_name),
+        ]
+        if smoothing_on:
+            target_templates += [
+                os.path.join(ancestry_STT_path, "{label}", "data", smooth_embeddings_data_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", smooth_embeddings_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", smooth_slice_2d_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "data", smooth_reconstructed_rates_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", smooth_input_vs_reconstructed_rates_plot_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", smooth_input_vs_reconstructed_rates_interactive_file_name),
+                os.path.join(ancestry_STT_path, "{label}", "plots", smooth_dash_launch_file_name),
+            ]
+        return expand(target_templates, label=labels)
 
     rule ancestry_STT_all:
         input:
@@ -1318,7 +1587,7 @@ rule bundle_dash:
             --rates-time-stride {params.rates_time_stride} \
             -o {output}
         """
-if demes_file_path: # Ground-truth demographic rates are available, so also compare true rates vs reconstructed rates
+if demes_file_path and not is_SS_demography: # Ground-truth demographic rates are available (non-SS), so also compare true rates vs reconstructed rates
     rule evaluate_performance:
         input:
             rates = rates_data,
@@ -1387,6 +1656,78 @@ else:
                 {params.per_haplotype}
             """
 
+# Smoothed performance evaluation: same as evaluate_performance but against the smoothed reconstructed
+# rates. Same non-SS/SS split (true-rate comparison only available for simulated, non-SS demographies).
+if smoothing_on:
+    if demes_file_path and not is_SS_demography:
+        rule evaluate_performance_smooth:
+            input:
+                rates = rates_data,
+                reconstructed_rates = smooth_reconstructed_rates,
+                true_rates = rates_true,
+                pop_colors = pop_colors,
+                pop_labels = pop_labels,
+                script = evaluate_performance_script
+            output:
+                smooth_input_vs_reconstructed_rates_plot,
+                smooth_input_vs_reconstructed_rates_interactive,
+                smooth_true_rates_vs_reconstructed_rates_plot,
+                smooth_true_rates_vs_reconstructed_rates_interactive
+            params:
+                N_max = N_max,
+                plot_output_path = plot_output_path,
+                hist2d_output_name = smooth_input_vs_reconstructed_rates_plot_file_name,
+                interactive_output_name = smooth_input_vs_reconstructed_rates_interactive_file_name,
+                true_hist2d_output_name = smooth_true_rates_vs_reconstructed_rates_plot_file_name,
+                true_interactive_output_name = smooth_true_rates_vs_reconstructed_rates_interactive_file_name,
+                per_haplotype = "--per-haplotype" if per_haplotype else ""
+            shell:
+                """
+                python {input.script} \
+                    --rates {input.rates} \
+                    --reconstructed_rates {input.reconstructed_rates} \
+                    --true_rates {input.true_rates} \
+                    --N_max {params.N_max} \
+                    --colors {input.pop_colors} \
+                    --labels {input.pop_labels} \
+                    --plot_output_path {params.plot_output_path} \
+                    --hist2d_output_name {params.hist2d_output_name} \
+                    --interactive_output_name {params.interactive_output_name} \
+                    --true_hist2d_output_name {params.true_hist2d_output_name} \
+                    --true_interactive_output_name {params.true_interactive_output_name} \
+                    {params.per_haplotype}
+                """
+    else:
+        rule evaluate_performance_smooth:
+            input:
+                rates = rates_data,
+                reconstructed_rates = smooth_reconstructed_rates,
+                pop_colors = pop_colors,
+                pop_labels = pop_labels,
+                script = evaluate_performance_script
+            output:
+                smooth_input_vs_reconstructed_rates_plot,
+                smooth_input_vs_reconstructed_rates_interactive
+            params:
+                N_max = N_max,
+                plot_output_path = plot_output_path,
+                hist2d_output_name = smooth_input_vs_reconstructed_rates_plot_file_name,
+                interactive_output_name = smooth_input_vs_reconstructed_rates_interactive_file_name,
+                per_haplotype = "--per-haplotype" if per_haplotype else ""
+            shell:
+                """
+                python {input.script} \
+                    --rates {input.rates} \
+                    --reconstructed_rates {input.reconstructed_rates} \
+                    --N_max {params.N_max} \
+                    --colors {input.pop_colors} \
+                    --labels {input.pop_labels} \
+                    --plot_output_path {params.plot_output_path} \
+                    --hist2d_output_name {params.hist2d_output_name} \
+                    --interactive_output_name {params.interactive_output_name} \
+                    {params.per_haplotype}
+                """
+
 # ______________________scan Rules______________________
 if scan_p_mode: # Scan the exponent p over a grid, holding n_components fixed
     rule scan_p:
@@ -1407,7 +1748,7 @@ if scan_p_mode: # Scan the exponent p over a grid, holding n_components fixed
             n_components = n_components,
             n_timepoints_emb = n_timepoints_emb,
             outdir = scan_p_outdir,
-            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path else "",
+            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path and not is_SS_demography else "",
             per_haplotype = "--per-haplotype" if per_haplotype else ""
         shell:
             """
@@ -1447,7 +1788,7 @@ if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding
             link = link,
             n_timepoints_emb = n_timepoints_emb,
             outdir = scan_d_outdir,
-            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path else "",
+            true_rates_arg = f"--true_rates {rates_true}" if demes_file_path and not is_SS_demography else "",
             per_haplotype = "--per-haplotype" if per_haplotype else ""
         shell:
             """
