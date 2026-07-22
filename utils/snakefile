@@ -17,7 +17,7 @@ version                           = read_config("version", default = 1)
 
 # Simulation Parameters
 demes_file_path                   = read_config("demes_file_path", default = "")
-skip_demography_plot              = "SS" in os.path.basename(demes_file_path) # Spatial (SS) demographies are not plotted
+is_SS_demography              = "SS" in os.path.basename(demes_file_path) # Spatial (SS) demographies: no demography plot, no true rates
 num_contigs                       = int(read_config("num_contigs", default = 500))
 contig_length                     = int(read_config("contig_length", default = 5e6))
 n_sim_per_pop                     = read_config("n_sim_per_pop", default = 20)
@@ -280,14 +280,15 @@ if trees_dir != tree_output_path and not os.path.exists(trees_ready): # In the c
 # =====================================================
 # Target Groups
 # =====================================================
-true_targets = [
-    pop_labels, pop_colors,
-    rates_true, rates_true_plot,
-    embeddings_true, embeddings_true_plot,
-    reconstructed_rates_true, input_vs_reconstructed_rates_true_plot, input_vs_reconstructed_rates_true_interactive,
-    dash_launch_true]
+true_targets = [pop_labels, pop_colors]
+if not is_SS_demography: # True coalescence rates are not computable for SS (stepping-stone) demographies
+    true_targets = true_targets + [
+        rates_true, rates_true_plot,
+        embeddings_true, embeddings_true_plot,
+        reconstructed_rates_true, input_vs_reconstructed_rates_true_plot, input_vs_reconstructed_rates_true_interactive,
+        dash_launch_true]
 
-sim_targets = [sim_finished] + ([] if skip_demography_plot else [demography_plot])
+sim_targets = [sim_finished] + ([] if is_SS_demography else [demography_plot])
 
 STT_targets = [
     pdf_data,
@@ -298,10 +299,10 @@ STT_targets = [
     dash_launch,
     ]
 
-if demes_file_path: # Ground-truth demographic rates are only available for simulated demographies
+if demes_file_path and not is_SS_demography: # Ground-truth demographic rates are only available for simulated, non-SS demographies
     STT_targets = STT_targets + [rates_true, true_rates_vs_reconstructed_rates_plot, true_rates_vs_reconstructed_rates_interactive]
 
-if "SS" not in demes_file_path: # Relative divergence plot is not applicable to stepping-stone simulations
+if not is_SS_demography: # Relative divergence plot is not applicable to stepping-stone simulations
     STT_targets = STT_targets + [relative_div_plot, relative_div_plot_summary]
 
 if admix_mode:
