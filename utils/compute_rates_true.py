@@ -79,6 +79,7 @@ def main():
         print("Cannot compute true rates for SS model")
         rates_df = pd.DataFrame(columns=np.linspace(0, max_time, n_timepoints))
         rates_df.to_parquet(f"{output_path}/rates_true.parquet")
+        return
     pop_rates_df = compute_true_rates(demes_file_path, max_time, n_timepoints)
     pop_labels = pd.read_csv(labels_path)
     expanded_rates_df = expand_true_rates(pop_rates_df, pop_labels, phased = per_haplotype)
