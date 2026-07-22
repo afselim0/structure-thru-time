@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--output_path", required=True, help="Output directory for embeddings data")
     parser.add_argument("--output_name", required=True, help="Output filename for embeddings parquet file")
     parser.add_argument("--reconstructed_rates_output_name", required=True, help="Output filename for the reconstructed rates parquet file")
+    parser.add_argument("--smooth_output_name", required=False, help="Output filename for the smoothed embeddings parquet file (only used when smoothing penalties are set)")
+    parser.add_argument("--smooth_reconstructed_rates_output_name", required=False, help="Output filename for the smoothed reconstructed rates parquet file (only used when smoothing penalties are set)")
     parser.add_argument("--N_min", type=int, required=False, help="N_min hyperparameter for the link function")
     parser.add_argument("--N_max", type=int, required=False, help="N_max hyperparameter for the link function")
     parser.add_argument("--p", type=int, default=1, help="Exponent of the distance in the link function")
@@ -132,12 +134,22 @@ def main():
         print(f"Covariances saved to {args.output_path}/{cov_name}")
 
     if LSE.smoothing_params is not None:
-        print("Computing smoothed embeddings...")
-        # X_smooth, loss_df_smooth = LSE.compute_smooth_embeddings(X_init=X, n_epochs=args.num_epochs)
-        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, precision = 1e-8, p=args.p, link=args.link)
+        if args.smooth_output_name is None or args.smooth_reconstructed_rates_output_name is None:
+            raise ValueError(
+                "Smoothing penalties are set but --smooth_output_name and/or "
+                "--smooth_reconstructed_rates_output_name were not provided."
+            )
+        print("Computing smoothed embeddings by joint optimization (warm-started from the unsmoothed solution)...")
+        X_smooth, loss_df_smooth = LSE.compute_embeddings_jointly(X_init=X, p=args.p, link=args.link)
         smoothed_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
-        smoothed_embeddings_df.to_parquet(f"{args.output_path}/smooth_{args.output_name}")
-        # loss_df_smooth.to_parquet(f"{args.output_path}/loss_smooth_{args.output_name}")
+        smoothed_embeddings_df.to_parquet(f"{args.output_path}/{args.smooth_output_name}")
+        loss_df_smooth.to_parquet(f"{args.output_path}/loss_{args.smooth_output_name}")
+
+        # Smoothed reconstructed rates: same link-function reconstruction as the unsmoothed branch,
+        # but applied to the smoothed embeddings (used by the smoothed performance evaluation)
+        D_smooth_df = compute_distance_df(smoothed_embeddings_df, id_label=id_label)
+        reconstructed_rates_smooth_df = reconstruct_rates(D_smooth_df, N_min=args.N_min, p=args.p, link=args.link)
+        reconstructed_rates_smooth_df.to_parquet(f"{args.output_path}/{args.smooth_reconstructed_rates_output_name}")
 
 
     
