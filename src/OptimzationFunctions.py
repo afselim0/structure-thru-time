@@ -31,7 +31,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
-import cvxpy as cp
+# import cvxpy as cp
 from sklearn.manifold import smacof
 
 ############################################################
@@ -1080,101 +1080,101 @@ def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, p=1, link="invers
 ############################################################
 # Smoothing the trajectories individually
 ############################################################
-def smooth_trajectories(X, smoothing_params, sampled_by_time=None):
-    """
-    Smooth trajectories in X using L1 and/or L2 difference penalties.
+# def smooth_trajectories(X, smoothing_params, sampled_by_time=None):
+#     """
+#     Smooth trajectories in X using L1 and/or L2 difference penalties.
 
-    Parameters
-    ----------
-    X : np.ndarray, shape (n, d, T)
-        Positions of n particles in d-dimensional space over T timepoints.
-        NaN values indicate missing observations.
-    smoothing_params : dict or None
-        Output of _parse_smoothing_params. Expected keys:
-            "l2"            : dict {order: lambda_value}
-            "l1"            : dict {order: lambda_value}
-            "diff_operators": dict {order: np.ndarray (T, T)}
-        If None, X is returned unchanged.
-    sampled_by_time : np.ndarray of bool, shape (n, T), optional
-        Whether particle i exists at timepoint t. If None, all timepoints
-        are assumed observed for all particles.
+#     Parameters
+#     ----------
+#     X : np.ndarray, shape (n, d, T)
+#         Positions of n particles in d-dimensional space over T timepoints.
+#         NaN values indicate missing observations.
+#     smoothing_params : dict or None
+#         Output of _parse_smoothing_params. Expected keys:
+#             "l2"            : dict {order: lambda_value}
+#             "l1"            : dict {order: lambda_value}
+#             "diff_operators": dict {order: np.ndarray (T, T)}
+#         If None, X is returned unchanged.
+#     sampled_by_time : np.ndarray of bool, shape (n, T), optional
+#         Whether particle i exists at timepoint t. If None, all timepoints
+#         are assumed observed for all particles.
 
-    Returns
-    -------
-    X_smooth : np.ndarray, shape (n, d, T)
-        Smoothed trajectories. Timepoints where sampled_by_time is False
-        are left as NaN.
-    """
-    if smoothing_params is None:
-        return X.copy()
+#     Returns
+#     -------
+#     X_smooth : np.ndarray, shape (n, d, T)
+#         Smoothed trajectories. Timepoints where sampled_by_time is False
+#         are left as NaN.
+#     """
+#     if smoothing_params is None:
+#         return X.copy()
 
-    l2      = smoothing_params.get("l2", {})
-    l1      = smoothing_params.get("l1", {})
-    D_dict  = smoothing_params.get("diff_operators", {})
-    has_l1  = bool(l1)
-    has_l2  = bool(l2)
+#     l2      = smoothing_params.get("l2", {})
+#     l1      = smoothing_params.get("l1", {})
+#     D_dict  = smoothing_params.get("diff_operators", {})
+#     has_l1  = bool(l1)
+#     has_l2  = bool(l2)
 
-    n, d, T = X.shape
-    X_smooth = np.full_like(X, np.nan)
+#     n, d, T = X.shape
+#     X_smooth = np.full_like(X, np.nan)
 
-    if sampled_by_time is None:
-        sampled_by_time = np.ones((n, T), dtype=bool)
+#     if sampled_by_time is None:
+#         sampled_by_time = np.ones((n, T), dtype=bool)
 
-    for i in tqdm(range(n)):
-        obs = sampled_by_time[i]          # (T,) boolean mask
-        obs_idx = np.where(obs)[0]        # indices of observed timepoints
-        T_i = len(obs_idx)
+#     for i in tqdm(range(n)):
+#         obs = sampled_by_time[i]          # (T,) boolean mask
+#         obs_idx = np.where(obs)[0]        # indices of observed timepoints
+#         T_i = len(obs_idx)
 
-        if T_i == 0:
-            continue
+#         if T_i == 0:
+#             continue
 
-        # Slice difference operators to observed timepoints only:
-        #   rows select which finite differences to penalise (only those
-        #   entirely within the observed support are meaningful),
-        #   columns select the observed timepoints.
-        D_dict_i = {order: Dk[np.ix_(obs_idx, obs_idx)]
-                    for order, Dk in D_dict.items()}
+#         # Slice difference operators to observed timepoints only:
+#         #   rows select which finite differences to penalise (only those
+#         #   entirely within the observed support are meaningful),
+#         #   columns select the observed timepoints.
+#         D_dict_i = {order: Dk[np.ix_(obs_idx, obs_idx)]
+#                     for order, Dk in D_dict.items()}
 
-        if has_l2 and not has_l1:
-            A = np.eye(T_i)
-            for order, lam in l2.items():
-                Dk = D_dict_i[order]
-                A += lam * (Dk.T @ Dk)
-            L = np.linalg.cholesky(A)
+#         if has_l2 and not has_l1:
+#             A = np.eye(T_i)
+#             for order, lam in l2.items():
+#                 Dk = D_dict_i[order]
+#                 A += lam * (Dk.T @ Dk)
+#             L = np.linalg.cholesky(A)
 
-            for dim in range(d):
-                x = X[i, dim, obs_idx]
-                x_smooth = np.linalg.solve(L.T, np.linalg.solve(L, x))
-                X_smooth[i, dim, obs_idx] = x_smooth
+#             for dim in range(d):
+#                 x = X[i, dim, obs_idx]
+#                 x_smooth = np.linalg.solve(L.T, np.linalg.solve(L, x))
+#                 X_smooth[i, dim, obs_idx] = x_smooth
 
-        elif has_l1:
-            for dim in range(d):
-                x = X[i, dim, obs_idx]
-                x_var = cp.Variable(T_i)
+#         elif has_l1:
+#             for dim in range(d):
+#                 x = X[i, dim, obs_idx]
+#                 x_var = cp.Variable(T_i)
 
-                cost = cp.sum_squares(x_var - x)
+#                 cost = cp.sum_squares(x_var - x)
 
-                for order, lam in l2.items():
-                    Dk = D_dict_i[order]
-                    cost = cost + lam * cp.sum_squares(Dk @ x_var)
+#                 for order, lam in l2.items():
+#                     Dk = D_dict_i[order]
+#                     cost = cost + lam * cp.sum_squares(Dk @ x_var)
 
-                for order, lam in l1.items():
-                    Dk = D_dict_i[order]
-                    cost = cost + lam * cp.norm1(Dk @ x_var)
+#                 for order, lam in l1.items():
+#                     Dk = D_dict_i[order]
+#                     cost = cost + lam * cp.norm1(Dk @ x_var)
 
-                prob = cp.Problem(cp.Minimize(cost))
-                prob.solve()
+#                 prob = cp.Problem(cp.Minimize(cost))
+#                 prob.solve()
 
-                if x_var.value is None:
-                    raise RuntimeError(
-                        f"CVXPY failed for particle {i}, dim {dim}. "
-                        f"Solver status: {prob.status}"
-                    )
-                X_smooth[i, dim, obs_idx] = x_var.value
+#                 if x_var.value is None:
+#                     raise RuntimeError(
+#                         f"CVXPY failed for particle {i}, dim {dim}. "
+#                         f"Solver status: {prob.status}"
+#                     )
+#                 X_smooth[i, dim, obs_idx] = x_var.value
 
-        else:
-            for dim in range(d):
-                X_smooth[i, dim, obs_idx] = X[i, dim, obs_idx]
+#         else:
+#             for dim in range(d):
+#                 X_smooth[i, dim, obs_idx] = X[i, dim, obs_idx]
 
-    return X_smooth
+#     return X_smooth
 # %%

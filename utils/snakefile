@@ -291,7 +291,6 @@ sim_targets = sim_finished, demography_plot
 STT_targets = [
     pdf_data,
     rates_data, rates_plot,
-    relative_div_plot, relative_div_plot_summary,
     embeddings_data, embeddings_plot,
     slice_2d,
     reconstructed_rates, input_vs_reconstructed_rates_plot, input_vs_reconstructed_rates_interactive,
@@ -300,6 +299,9 @@ STT_targets = [
 
 if demes_file_path: # Ground-truth demographic rates are only available for simulated demographies
     STT_targets = STT_targets + [rates_true, true_rates_vs_reconstructed_rates_plot, true_rates_vs_reconstructed_rates_interactive]
+
+if "SS" not in demes_file_path: # Relative divergence plot is not applicable to stepping-stone simulations
+    STT_targets = STT_targets + [relative_div_plot, relative_div_plot_summary]
 
 if admix_mode:
     STT_targets = STT_targets + [os.path.join(output_path, "ancestry_STT_done.flag")]
