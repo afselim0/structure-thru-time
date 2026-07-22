@@ -17,6 +17,7 @@ version                           = read_config("version", default = 1)
 
 # Simulation Parameters
 demes_file_path                   = read_config("demes_file_path", default = "")
+skip_demography_plot              = "SS" in os.path.basename(demes_file_path) # Spatial (SS) demographies are not plotted
 num_contigs                       = int(read_config("num_contigs", default = 500))
 contig_length                     = int(read_config("contig_length", default = 5e6))
 n_sim_per_pop                     = read_config("n_sim_per_pop", default = 20)
@@ -286,7 +287,7 @@ true_targets = [
     reconstructed_rates_true, input_vs_reconstructed_rates_true_plot, input_vs_reconstructed_rates_true_interactive,
     dash_launch_true]
 
-sim_targets = sim_finished, demography_plot
+sim_targets = [sim_finished] + ([] if skip_demography_plot else [demography_plot])
 
 STT_targets = [
     pdf_data,
