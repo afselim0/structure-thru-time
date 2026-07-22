@@ -11,7 +11,7 @@ supp_demes_dir = "../demes/supp/"
 stdpopsim_demes_dir = "../demes/stdpopsim/"
 #%%
 ##--------------------------------------------------------
-## Ancestral Demes
+## Demogaphy functions
 ##--------------------------------------------------------
 def pop_split(N0,N1,N2,t_split,t_mig_start=0,t_mig_end=0,m=0):
     """Creates a demography object of a population split that gave rise to 2 subpopulations, with no outgroup
@@ -187,19 +187,25 @@ def coor(index,K):
     y=index//K
     return x,y
 
+def Stepping_Stones_1d(N,K,m):
+    demography = msprime.Demography.stepping_stone_model([N]*K, m/2, boundaries=True)
+    return demography
+
 def Stepping_Stones_2d(N,K,m):
     #N: Ne of each deme
     #K: Number of demes per side (total number of demes is K*K)
     #m: probability of obtaining the new individual from a nearby deme (backward migration rate)
     #n: sample size drawn from each deme
-    demography = msprime.Demography.isolated_model(initial_size = [N]*(K**2))
-    M = demography.migration_matrix
+    deme_names = [f"x{row}y{col}" for col, row in (coor(i, K) for i in range(K**2))]
+    demography = msprime.Demography()
+    for name in deme_names:
+        demography.add_population(name=name, initial_size=N, default_sampling_time=0)
     for i in range(K**2):
         for j in range(K**2):
             x1,y1 = coor(i,K)
             x2,y2 = coor(j,K)
             if (abs(x1-x2)==1 and abs(y1-y2)==0) or (abs(y1-y2)==1 and abs(x1-x2)==0):
-                M[i,j] = m/4
+                demography.set_migration_rate(source=deme_names[i], dest=deme_names[j], rate=m/4)
     return demography
 
 def Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2):
@@ -364,4 +370,23 @@ graph = demography.to_demes()
 # symmetric groups via an all-subsets search (itertools.combinations over every deme
 # sharing a rate), which is combinatorial and hangs once m_between links many demes
 demes.dump(graph, main_demes_dir_1 + "double_2d_SS.yaml", simplified=False)
+# %%
+# SS demes
+import os
+SS_demes_dir_1 = "../demes/SS_demes/"
+os.makedirs(SS_demes_dir_1, exist_ok=True)
+Ne = 100
+K1 = 100
+K2 = 10
+Nm_list = [5,1,0.1]
+m_list = [Nm/Ne for Nm in Nm_list]
+for m in m_list:
+    demography = Stepping_Stones_1d(Ne,K1,m)
+    graph = demography.to_demes()
+    m_str = str(m).split(".")[1]
+    demes.dump(graph, SS_demes_dir_1 + f"SS_1d_N{Ne}_m{m_str}.yaml", simplified=False)
+
+    demography = Stepping_Stones_2d(Ne,K2,m)
+    graph = demography.to_demes()
+    demes.dump(graph, SS_demes_dir_1 + f"SS_2d_N{Ne}_m{m_str}.yaml", simplified=False)
 # %%

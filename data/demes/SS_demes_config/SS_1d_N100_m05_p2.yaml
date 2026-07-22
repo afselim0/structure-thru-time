@@ -1,8 +1,8 @@
-demography: SS_1d_N100_m0001
-demes_file_path: ../data/demes/SS_demes/SS_1d_N100_m0001.yaml
-output_path: ../results/simulations/outputs/SS/SS_1d_N100_m0001
+demography: SS_1d_N100_m05
+demes_file_path: ../data/demes/SS_demes/SS_1d_N100_m05.yaml
+output_path: ../results/simulations/outputs/SS/SS_1d_N100_m05
 version: 1
-num_threads: 8
+num_threads: 12
 
 # Simulation Parameters
 num_contigs: 500
@@ -13,20 +13,20 @@ recombination_rate: 1.2e-8
 
 # coal time pdf estimation
 max_time: 200000
-n_timepoints: 5000
+n_timepoints: 10000
 
 # rate estimation parameters
 min_window_size: 100
-max_window_size: 5000
+max_window_size: 10000
 compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 1
 N_max: 100000000
-p: 1
+p: 2
 
 # Plotting parameters
-min_time: 25
+min_time: 50
 max_rate_plot: 0.001
-embeddings_plot_lims: 100000000
+embeddings_plot_lims: 2000
 time_scale: log
