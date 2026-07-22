@@ -33,8 +33,9 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ploidy=2,
             random_seed=42+i
         )
-        ts_mutated = msprime.sim_mutations(ts,rate=mutation_rate,random_seed=i + 42)
-        vcf = ts_mutated.as_vcf(contig_id=str(i),allow_position_zero=True)
+        # ts_mutated = msprime.sim_mutations(ts,rate=mutation_rate,random_seed=i + 42)
+        # vcf = ts_mutated.as_vcf(contig_id=str(i),allow_position_zero=True)
+        vcf = None
         if len(admix_times) > 0:
             ancestry_df = compute_true_local_ancestry(ts, pop_labels)
         else:
@@ -48,8 +49,9 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ts.dump(f"{output_dir}/{file_name}.trees")
             if len(ancestry_df) > 0:
                 ancestry_df.to_parquet(f"{output_dir}/{file_name}.parquet", index=False)
-            with open(f"{output_dir}/{file_name}.vcf", "w") as f:
-                f.write(vcf)
+            if vcf is not None:
+                with open(f"{output_dir}/{file_name}.vcf", "w") as f:
+                    f.write(vcf)
                 
     end_time = time()
     time_taken = end_time - start_time

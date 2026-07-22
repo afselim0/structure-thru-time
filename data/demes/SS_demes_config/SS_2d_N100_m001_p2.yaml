@@ -1,0 +1,32 @@
+demography: SS_2d_N100_m001
+demes_file_path: ../data/demes/SS_demes/SS_2d_N100_m001.yaml
+output_path: ../results/simulations/outputs/SS/SS_2d_N100_m001
+version: 1
+num_threads: 8
+
+# Simulation Parameters
+num_contigs: 500
+contig_length: 5000000
+n_sim_per_pop: 1
+mutation_rate: 1.2e-8
+recombination_rate: 1.2e-8
+
+# coal time pdf estimation
+max_time: 200000
+n_timepoints: 5000
+
+# rate estimation parameters
+min_window_size: 50
+max_window_size: 2000
+compute_variance: False
+
+# Embeddings estimation parameters
+N_min: 1
+N_max: 100000000
+p: 2
+
+# Plotting parameters
+min_time: 25
+max_rate_plot: 0.001
+embeddings_plot_lims: 2000
+time_scale: log

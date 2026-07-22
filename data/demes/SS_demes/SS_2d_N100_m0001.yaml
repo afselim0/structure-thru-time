@@ -1,0 +1,159 @@
+time_units: generations
+generation_time: 1
+demes:
+- name: pop_0
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_1
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_2
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_3
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_4
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_5
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_6
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_7
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_8
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_9
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_10
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_11
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_12
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_13
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_14
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_15
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_16
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_17
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_18
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_19
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_20
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_21
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_22
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_23
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+- name: pop_24
+  epochs:
+  - {end_time: 0, start_size: 100.0}
+migrations:
+- demes: [pop_0, pop_1]
+  rate: 0.000025
+- demes: [pop_0, pop_5]
+  rate: 0.000025
+- demes: [pop_1, pop_2]
+  rate: 0.000025
+- demes: [pop_1, pop_6]
+  rate: 0.000025
+- demes: [pop_5, pop_6]
+  rate: 0.000025
+- demes: [pop_5, pop_10]
+  rate: 0.000025
+- demes: [pop_2, pop_3]
+  rate: 0.000025
+- demes: [pop_2, pop_7]
+  rate: 0.000025
+- demes: [pop_6, pop_7]
+  rate: 0.000025
+- demes: [pop_6, pop_11]
+  rate: 0.000025
+- demes: [pop_3, pop_4]
+  rate: 0.000025
+- demes: [pop_3, pop_8]
+  rate: 0.000025
+- demes: [pop_7, pop_8]
+  rate: 0.000025
+- demes: [pop_7, pop_12]
+  rate: 0.000025
+- demes: [pop_4, pop_9]
+  rate: 0.000025
+- demes: [pop_8, pop_9]
+  rate: 0.000025
+- demes: [pop_8, pop_13]
+  rate: 0.000025
+- demes: [pop_9, pop_14]
+  rate: 0.000025
+- demes: [pop_10, pop_11]
+  rate: 0.000025
+- demes: [pop_10, pop_15]
+  rate: 0.000025
+- demes: [pop_11, pop_12]
+  rate: 0.000025
+- demes: [pop_11, pop_16]
+  rate: 0.000025
+- demes: [pop_12, pop_13]
+  rate: 0.000025
+- demes: [pop_12, pop_17]
+  rate: 0.000025
+- demes: [pop_13, pop_14]
+  rate: 0.000025
+- demes: [pop_13, pop_18]
+  rate: 0.000025
+- demes: [pop_14, pop_19]
+  rate: 0.000025
+- demes: [pop_15, pop_16]
+  rate: 0.000025
+- demes: [pop_15, pop_20]
+  rate: 0.000025
+- demes: [pop_16, pop_17]
+  rate: 0.000025
+- demes: [pop_16, pop_21]
+  rate: 0.000025
+- demes: [pop_17, pop_18]
+  rate: 0.000025
+- demes: [pop_17, pop_22]
+  rate: 0.000025
+- demes: [pop_18, pop_19]
+  rate: 0.000025
+- demes: [pop_18, pop_23]
+  rate: 0.000025
+- demes: [pop_19, pop_24]
+  rate: 0.000025
+- demes: [pop_20, pop_21]
+  rate: 0.000025
+- demes: [pop_21, pop_22]
+  rate: 0.000025
+- demes: [pop_22, pop_23]
+  rate: 0.000025
+- demes: [pop_23, pop_24]
+  rate: 0.000025
