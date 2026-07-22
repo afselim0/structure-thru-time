@@ -202,6 +202,45 @@ def Stepping_Stones_2d(N,K,m):
                 M[i,j] = m/4
     return demography
 
+def Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2):
+    #N: Ne of each deme (and of the ancestral population)
+    #K: Number of demes per side within a group (each group has K*K demes, total demes is K*K*n_groups)
+    #m_within: backward migration rate between adjacent demes within the same group's 2D stepping-stone grid
+    #m_between: backward migration rate between every pair of demes belonging to different groups
+    #split_time: time in the past at which the single ancestral population splits into all K*K*n_groups demes
+    demes_per_group = K**2
+    n_demes = demes_per_group*n_groups
+    # name each deme by its group and its (row, column) position within the group's KxK grid
+    deme_names = [f"g{g}_{row}_{col}" for g in range(n_groups) for col,row in (coor(i,K) for i in range(demes_per_group))]
+
+    demography = msprime.Demography()
+    demography.add_population(name="Ancestral", initial_size=N)
+    for name in deme_names:
+        demography.add_population(name=name, initial_size=N, default_sampling_time=0)
+    demography.add_population_split(time=split_time, derived=deme_names, ancestral="Ancestral")
+
+    # within-group stepping-stone migration: adjacent demes (in the group's own KxK grid) exchange migrants at m_within
+    for g in range(n_groups):
+        offset = g*demes_per_group
+        for i in range(demes_per_group):
+            for j in range(demes_per_group):
+                x1,y1 = coor(i,K)
+                x2,y2 = coor(j,K)
+                if (abs(x1-x2)==1 and abs(y1-y2)==0) or (abs(y1-y2)==1 and abs(x1-x2)==0):
+                    demography.set_migration_rate(source=deme_names[offset+i], dest=deme_names[offset+j], rate=m_within/4)
+
+    # between-group migration: every deme pair belonging to different groups exchanges migrants at m_between
+    for gi in range(n_groups):
+        for gj in range(n_groups):
+            if gi==gj:
+                continue
+            for i in range(demes_per_group):
+                for j in range(demes_per_group):
+                    demography.set_migration_rate(source=deme_names[gi*demes_per_group+i], dest=deme_names[gj*demes_per_group+j], rate=m_between)
+
+    demography.sort_events()
+    return demography
+
 def two_admix(Ne, deep_split_time, recent_split_time, admix_time_1, admix_time_2,admix_prop_1=0.5, admix_prop_2=0.5):
     
     demography = msprime.Demography()
@@ -312,3 +351,17 @@ admix_time_2 = 100
 demography = two_admix(Ne, deep_split_time, recent_split_time, admix_time_1, admix_time_2,admix_prop_1=0.5, admix_prop_2=0.5)
 graph = demography.to_demes()
 demes.dump(graph, main_demes_dir_1 + "two_admix.yaml")
+#%%
+# Double 2d SS model
+N = 1e2
+m_within = 1e-3
+m_between = 1e-5
+K=5
+split_time = 1e5
+demography = Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2)
+graph = demography.to_demes()
+# simplified=False: demes' YAML simplification tries to collapse migration rates into
+# symmetric groups via an all-subsets search (itertools.combinations over every deme
+# sharing a rate), which is combinatorial and hangs once m_between links many demes
+demes.dump(graph, main_demes_dir_1 + "double_2d_SS.yaml", simplified=False)
+# %%
