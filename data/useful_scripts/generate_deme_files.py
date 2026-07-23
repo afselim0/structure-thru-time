@@ -360,10 +360,10 @@ demes.dump(graph, main_demes_dir_1 + "two_admix.yaml")
 #%%
 # Double 2d SS model
 N = 1e2
-m_within = [1e-2, 5e-2]
-m_between = 1e-6
+m_within = [1e-3, 5e-3]
+m_between = 1e-7
 K=5
-split_time = 2500
+split_time = 5000
 demography = Multi_Stepping_Stones_2d(N, K, m_within, m_between, split_time, n_groups=2)
 graph = demography.to_demes()
 # simplified=False: demes' YAML simplification tries to collapse migration rates into
