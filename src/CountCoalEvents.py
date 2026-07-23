@@ -215,6 +215,7 @@ class CountCoalEvents:
         self,
         coal_counts_dir: str,
         num_threads: int = 1,
+        resume: bool = True,
     ) -> None:
         """Count total genomic spans where a coalescent event occurs between each pair of samples in time bins for all tree sequences in a directory.
 
@@ -231,10 +232,23 @@ class CountCoalEvents:
             per-file numpy arrays are saved.
         num_threads : int, optional
             Number of parallel workers. Defaults to 1 (serial execution).
+        resume : bool, optional
+            If True (default), skip tree sequences whose ``.npy`` output
+            already exists in *coal_counts_dir* — allows a killed/timed-out
+            run (e.g. OOM or wall-clock cancellation) to pick up where it
+            left off instead of recomputing already-finished contigs.
         """
         os.makedirs(coal_counts_dir, exist_ok=True)
         ts_files = self.ts_files
-        num_threads = min(num_threads, len(ts_files))
+        if resume:
+            done = {
+                f.name for f in Path(coal_counts_dir).glob("*.npy")
+            }
+            ts_files = [
+                ts_file for ts_file in ts_files
+                if f"{ts_file.removesuffix('.trees')}.npy" not in done
+            ]
+        num_threads = min(num_threads, len(ts_files)) if ts_files else 1
 
         if num_threads == 1:
             # --- Serial execution -----------------------------------------
