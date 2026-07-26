@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import shutil
 import sys
 
 sys.path.append("../src")
@@ -55,6 +56,15 @@ def main():
         )
         variance_df.columns = variance_df.columns.astype(str)
         variance_df.to_parquet(f"{output_path}/variance_{output_name}")
+
+    # The per-contig coalescent counts are a bulky intermediate (hundreds of GB
+    # for fine time grids) needed only to build the pdf and, when requested, the
+    # jackknife variance. Both now exist on disk, so the directory is removed to
+    # reclaim the space. It is reproducible by re-running compute_pdf.py, which
+    # recounts from the tree sequences.
+    if os.path.isdir(coal_counts_dir):
+        print(f"removing coalescent counts directory: {coal_counts_dir}")
+        shutil.rmtree(coal_counts_dir)
 
 if __name__ == "__main__":
     main()

@@ -16,7 +16,7 @@ sys.path.append("../src")
 sys.path.append("../../src")
 sys.path.append("src")
 
-from OptimzationFunctions import compute_distance_df, reconstruct_rates
+from OptimizationFunctions import compute_distance_df, reconstruct_rates
 
 
 def compare_replicate_rates(rates_a, rates_b, pop_labels, pop_colors, label_a, label_b):

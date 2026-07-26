@@ -143,7 +143,7 @@ smoothing_on                      = (l1_penalties != "None") or (l2_penalties !=
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
 COMPUTE_RATES_SCRIPT              = "../src/ComputeCoalescentRates.py"
 COMPUTE_EMBEDDINGS_SCRIPT         = "../src/LatentSpaceEmbeddings.py"
-OPTIMIZATION_FUNCTIONS_SCRIPT     = "../src/OptimzationFunctions.py"
+OPTIMIZATION_FUNCTIONS_SCRIPT     = "../src/OptimizationFunctions.py"
 PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
 PLOT_EMBEDDINGS_PYVISTA_SCRIPT    = "../src/PlotEmbeddingsPyVista.py"
 

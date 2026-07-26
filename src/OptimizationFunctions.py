@@ -306,7 +306,8 @@ def procrustes_align_trajectories(X_reference, X, allow_reflections=True):
     return X_aligned
 
 
-def procrustes_align_trajectories_df(df_reference, df_X, allow_reflections=True):
+
+def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual_id", allow_reflections=True):
     """
     Dataframe wrapper around procrustes_align_trajectories.
 
@@ -329,21 +330,21 @@ def procrustes_align_trajectories_df(df_reference, df_X, allow_reflections=True)
     pd.DataFrame
         Same schema as df_X, with coordinate columns replaced by aligned values.
     """
-    coord_cols = [c for c in df_X.columns if c not in ("sample_id", "time")]
+    coord_cols = [c for c in df_X.columns if c not in (id_column, "time")]
 
     times = sorted(df_X["time"].unique())
     n_timepoints = len(times)
 
     # sample_id order is fixed by the first timepoint of df_X
     first_frame = df_X[df_X["time"] == times[0]]
-    sample_ids = first_frame["sample_id"].to_numpy()
+    sample_ids = first_frame[id_column].to_numpy()
     n = len(sample_ids)
     d = len(coord_cols)
 
     # Build (n, d, T) array for df_X, enforcing consistent sample_id order per frame
     X = np.zeros((n, d, n_timepoints))
     for i, t in enumerate(times):
-        frame = df_X[df_X["time"] == t].set_index("sample_id")
+        frame = df_X[df_X["time"] == t].set_index(id_column)
         try:
             X[:, :, i] = frame.loc[sample_ids, coord_cols].to_numpy()
         except KeyError as e:
@@ -353,7 +354,7 @@ def procrustes_align_trajectories_df(df_reference, df_X, allow_reflections=True)
 
     # Build (n, d, 1) array for the reference's first timepoint, same sample_id order
     ref_first_time = df_reference["time"].min()
-    ref_frame = df_reference[df_reference["time"] == ref_first_time].set_index("sample_id")
+    ref_frame = df_reference[df_reference["time"] == ref_first_time].set_index(id_column)
     try:
         X_ref0 = ref_frame.loc[sample_ids, coord_cols].to_numpy()
     except KeyError as e:
@@ -371,7 +372,7 @@ def procrustes_align_trajectories_df(df_reference, df_X, allow_reflections=True)
     # Reassemble into a dataframe with the same schema as df_X
     aligned_frames = []
     for i, t in enumerate(times):
-        frame = df_X[df_X["time"] == t].set_index("sample_id").loc[sample_ids].reset_index()
+        frame = df_X[df_X["time"] == t].set_index(id_column).loc[sample_ids].reset_index()
         frame[coord_cols] = X_aligned[:, :, i]
         aligned_frames.append(frame)
 

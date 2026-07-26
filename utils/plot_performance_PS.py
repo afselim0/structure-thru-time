@@ -17,7 +17,7 @@ sys.path.append("../src")
 sys.path.append("../../src")
 sys.path.append("src")
 
-from OptimzationFunctions import compute_distance_df, reconstruct_rates
+from OptimizationFunctions import compute_distance_df, reconstruct_rates
 
 
 def _discover(ps_data_dir, pattern, label):

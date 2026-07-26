@@ -14,7 +14,7 @@ sys.path.append("../src")
 sys.path.append("../../src")
 sys.path.append("src")
 
-from OptimzationFunctions import compute_distance_df, reconstruct_rates
+from OptimizationFunctions import compute_distance_df, reconstruct_rates
 
 
 # Max points to scatter per upper-triangle panel (for speed)

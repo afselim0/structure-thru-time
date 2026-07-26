@@ -8,7 +8,7 @@ sys.path.append("src")
 import os
 
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
-from OptimzationFunctions import compute_distance_df, reconstruct_rates
+from OptimizationFunctions import compute_distance_df, reconstruct_rates
 import numpy as np
 
 def main():
