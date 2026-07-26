@@ -4,7 +4,7 @@
 #SBATCH --partition=jnovembre
 #SBATCH --cpus-per-task=24
 #SBATCH --mem-per-cpu=4G
-#SBATCH --time=06:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=/project/jnovembre/afselim/structure-thru-time/job_logs//%x_%A_%a.out
 #SBATCH --error=/project/jnovembre/afselim/structure-thru-time/job_logs//%x_%A_%a.err
 
@@ -30,4 +30,4 @@ CONFIG=${CONFIG_FILES[$SLURM_ARRAY_TASK_ID - 1]}
 
 cd /project/jnovembre/afselim/structure-thru-time/utils
 
-snakemake STT_sim --configfile "${CONFIG}" --cores all --rerun-incomplete --nolock
+snakemake STT_sim --configfile "${CONFIG}" --config compute_variance=True --cores all --rerun-incomplete --nolock
