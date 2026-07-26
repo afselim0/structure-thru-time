@@ -26,6 +26,57 @@ from tqdm import tqdm
 
 
 # ---------------------------------------------------------------------------
+# Counts-file integrity
+# ---------------------------------------------------------------------------
+
+def is_valid_counts_file(path: str, expected_shape: tuple[int, int]) -> bool:
+    """Check whether a saved counts ``.npy`` file loads completely.
+
+    Counts are written with ``ndarray.dump`` (a raw pickle), which streams the
+    header before the data buffer, so a run killed mid-write leaves a file that
+    only fails when it is eventually loaded — deep inside a later summation.
+    This validates a file the only way that is conclusive for truncation: by
+    actually loading it. Every byte is read, so any file that fails to unpickle,
+    or that unpickles to the wrong shape, is reported as invalid.
+
+    The loaded array is discarded immediately, so peak memory is one array
+    rather than the whole directory. Because ``dump`` stores the data buffer as
+    a latin-1-encoded string, corruption inside the buffer generally breaks the
+    decoding too, so this catches mid-file damage and not just truncation. It
+    still cannot detect corruption that happens to leave a decodable buffer, so
+    it certifies that a file loads, not that its counts are numerically right.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ``.npy`` counts file.
+    expected_shape : tuple[int, int]
+        The ``(num_pairs, num_timepoints)`` shape the array must have. A file
+        that loads but was written under a different sample set or time grid is
+        treated as invalid so that it is recomputed rather than silently summed
+        into a mismatched total.
+
+    Returns
+    -------
+    bool
+        True if the file loads and holds an array of *expected_shape*; False if
+        it is missing, empty, truncated, unreadable, or of the wrong shape.
+    """
+    # Any failure to load (truncated pickle, missing file, unreadable path,
+    # failed cloud-storage fetch) means the file must be recomputed. The catch
+    # is deliberately broad: the point is to never let a bad file reach the
+    # summation, and the cost of a false negative is only recomputation.
+    try:
+        arr = np.load(path, allow_pickle=True)
+    except Exception:
+        return False
+
+    if not isinstance(arr, np.ndarray):
+        return False
+    return arr.shape == tuple(expected_shape)
+
+
+# ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
 
@@ -209,7 +260,18 @@ class CountCoalEvents:
 
             coal_segments_total[global_pair_idx, :] = coal_segments
 
-        coal_segments_total.dump(os.path.join(coal_counts_dir, f"{ts_file.removesuffix('.trees')}.npy"))
+        # Write to a temporary file and rename into place, so a run killed
+        # mid-write leaves no partially-written .npy that a later resume would
+        # mistake for finished output (os.replace is atomic within a filesystem).
+        out_path = os.path.join(coal_counts_dir, f"{contig_id}.npy")
+        tmp_path = f"{out_path}.tmp.{os.getpid()}"
+        try:
+            coal_segments_total.dump(tmp_path)
+            os.replace(tmp_path, out_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
     def count_coal_spans_all_ts(
         self,
@@ -233,21 +295,49 @@ class CountCoalEvents:
         num_threads : int, optional
             Number of parallel workers. Defaults to 1 (serial execution).
         resume : bool, optional
-            If True (default), skip tree sequences whose ``.npy`` output
-            already exists in *coal_counts_dir* — allows a killed/timed-out
-            run (e.g. OOM or wall-clock cancellation) to pick up where it
-            left off instead of recomputing already-finished contigs.
+            If True (default), every existing ``.npy`` file in *coal_counts_dir*
+            is loaded; those that load successfully with the expected shape are
+            skipped, and any that is missing, truncated or otherwise unloadable
+            is recomputed. This lets a killed/timed-out run (e.g. OOM or
+            wall-clock cancellation) pick up where it left off without trusting
+            files the interruption may have left half-written. Validation runs
+            serially and reads every counts file in full, so it is I/O-heavy but
+            far cheaper than recounting; pass False to skip it and recompute
+            everything.
         """
         os.makedirs(coal_counts_dir, exist_ok=True)
         ts_files = self.ts_files
         if resume:
-            done = {
-                f.name for f in Path(coal_counts_dir).glob("*.npy")
-            }
-            ts_files = [
+            # A contig counts as done only if its file actually loads: a run
+            # killed mid-write leaves a truncated pickle that must be redone.
+            # Validation is serial so that only one counts array is held in
+            # memory at a time; parallel workers would each hold their own.
+            expected_shape = (self.num_pairs, self.num_timepoints)
+            existing = [
                 ts_file for ts_file in ts_files
-                if f"{ts_file.removesuffix('.trees')}.npy" not in done
+                if os.path.exists(
+                    os.path.join(coal_counts_dir, f"{ts_file.removesuffix('.trees')}.npy")
+                )
             ]
+
+            skipped, corrupt = [], []
+            for ts_file in tqdm(existing, desc="Validating existing counts files"):
+                path = os.path.join(coal_counts_dir, f"{ts_file.removesuffix('.trees')}.npy")
+                if is_valid_counts_file(path, expected_shape):
+                    skipped.append(ts_file)
+                else:
+                    corrupt.append(ts_file)
+
+            if corrupt:
+                print(
+                    f"Found {len(corrupt)} incomplete/corrupt counts file(s) that will be "
+                    f"recomputed: {sorted(f.removesuffix('.trees') for f in corrupt)}"
+                )
+            if skipped:
+                print(f"Resuming: skipping {len(skipped)} tree sequence(s) with complete counts.")
+
+            skipped_set = set(skipped)
+            ts_files = [ts_file for ts_file in ts_files if ts_file not in skipped_set]
         num_threads = min(num_threads, len(ts_files)) if ts_files else 1
 
         if num_threads == 1:
@@ -318,11 +408,28 @@ class CountCoalEvents:
             )
 
         # --- Load and sum counts across all tree sequences ----------------
+        # Each file is loaded exactly once: a load failure or shape mismatch here
+        # is itself the integrity check, reported against the offending contig
+        # rather than as a bare UnpicklingError from deep inside the loop.
+        expected_shape = (self.num_pairs, self.num_timepoints)
         coal_segments_total = np.zeros((self.num_pairs, self.num_timepoints), dtype=self.datatype)
-        for basename in tqdm(expected_basenames, desc="Summing counts across tree sequences"):
-            coal_segments_total += np.load(
-                os.path.join(coal_counts_dir, f"{basename}.npy"), allow_pickle=True
-            )
+        for basename in tqdm(sorted(expected_basenames), desc="Summing counts across tree sequences"):
+            path = os.path.join(coal_counts_dir, f"{basename}.npy")
+            try:
+                counts = np.load(path, allow_pickle=True)
+            except Exception as err:
+                raise ValueError(
+                    f"coalescent-count file '{path}' is incomplete or malformed and could "
+                    "not be loaded. Re-run count_coal_spans_all_ts (resume=True recomputes "
+                    "only the unloadable files)."
+                ) from err
+            if counts.shape != expected_shape:
+                raise ValueError(
+                    f"coalescent-count file '{path}' has shape {counts.shape}, expected "
+                    f"{expected_shape}. It was written for a different sample set or time "
+                    "grid; delete it and re-run count_coal_spans_all_ts."
+                )
+            coal_segments_total += counts
 
         # --- Normalise counts into a PDF --------------------------------
         time_bin_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
@@ -715,11 +822,20 @@ class CountCoalEvents_admix:
                         np.sum(edges[window_idxs + 1] - edges[window_idxs])
                     )
 
-            np.save(
-                os.path.join(self.ancestry_count_dirs[label], f"{contig_id}.npy"),
-                counts_per_ancestry[label],
-                allow_pickle=True,
-            )
+            # Atomic write, as in CountCoalEvents.count_coal_spans_single_ts:
+            # an interrupted run must not leave a half-written counts file.
+            out_path = os.path.join(self.ancestry_count_dirs[label], f"{contig_id}.npy")
+            tmp_path = f"{out_path}.tmp.{os.getpid()}"
+            try:
+                # np.save appends .npy unless the name already ends in it, so the
+                # buffer is written explicitly to keep tmp_path exact.
+                with open(tmp_path, "wb") as fh:
+                    np.save(fh, counts_per_ancestry[label], allow_pickle=True)
+                os.replace(tmp_path, out_path)
+            except BaseException:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
 
         return coverage_per_ancestry
 
