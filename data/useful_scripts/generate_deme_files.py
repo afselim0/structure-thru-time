@@ -144,7 +144,7 @@ def anomaly_zone_4(Ne, AB_split_time, distant_split_branch_length):
 
     return demography
 
-def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time):
+def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time, m=0):
     # b = lambda x: np.log(2/3 + (5*np.exp(2*x)-2)/(6*(3*np.exp(2*x)-2*np.exp(x))))
     # recent_split_branch_length = (b(distant_split_branch_length/Ne) / 2)*Ne
     # AB_C_split_time = A_B_split_time + recent_split_branch_length
@@ -178,6 +178,8 @@ def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_r
     demography.add_population_parameters_change(time=C_growth_timepoints[1], population="C", growth_rate=growth_rate_C_2)
     demography.add_population_parameters_change(time=C_growth_timepoints[2], population="C", growth_rate=growth_rate_C_3)
 
+    if m > 0:
+        demography.set_symmetric_migration_rate(populations=["A","B"], rate=m)
 
     demography.sort_events()
     return demography
@@ -338,6 +340,11 @@ C_recent_growth_stop_time = 30
 
 demography = complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time)
 demes.dump(demography.to_demes(), main_demes_dir_1 + "complex_4_pops.yaml")
+
+m_list = [1e-4, 1e-3, 1e-2]
+for m in m_list:
+    demography = complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time,m=m)
+    demes.dump(demography.to_demes(), main_demes_dir_1 + f"complex_4_pops_m_{str(m).split('.')[1]}.yaml")
 # %%
 # 7- Stepping Stones 2D
 N = 100
