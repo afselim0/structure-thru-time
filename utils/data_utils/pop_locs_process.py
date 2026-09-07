@@ -1,4 +1,7 @@
 #%%
+# NOTE: geopandas is NOT in environment.yml — it is a heavy dependency used only by
+# this one-off map script, which is not part of any pipeline run. Install it
+# separately (`conda install -c conda-forge geopandas`) before running this.
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt

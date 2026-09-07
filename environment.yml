@@ -20,6 +20,10 @@ dependencies:
   - tqdm
   - pathos
   - scikit-image
+  - pillow
+  - pyyaml
+  - cycler
+  - zarr
   - fastparquet=2024.11.0
   - pyarrow=20.0.0
   - pip
