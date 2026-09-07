@@ -8,7 +8,7 @@ from matplotlib.patches import FancyArrowPatch
 from matplotlib.legend_handler import HandlerPatch
 import numpy as np
 import pandas as pd
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 import yaml
 import os

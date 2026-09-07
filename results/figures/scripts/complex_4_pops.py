@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 import demes
 import demesdraw

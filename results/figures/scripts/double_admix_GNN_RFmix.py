@@ -5,7 +5,7 @@ from matplotlib.lines import Line2D
 from copy import copy
 import numpy as np
 import pandas as pd
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 import os
 os.chdir(os.path.dirname(__file__))

@@ -2,7 +2,7 @@
 import numpy as np
 import msprime
 import matplotlib.pyplot as plt
-from plotting_style import *
+from results.figures.plotting_style import *
 from tqdm import tqdm
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))

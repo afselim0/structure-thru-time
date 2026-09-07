@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append("../../../src")
 import os
-from plotting_style import *
+from results.figures.plotting_style import *
 from optimization_functions import optimize_timepoint
 def compute_embeddings_panmictic(Ne, link, p, n=50, N_min = 1, N_max = 1e8, init_seed=42):
     np.random.seed(init_seed)

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 os.chdir(os.path.dirname(__file__))
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 from tqdm import tqdm
 sys.path.append("../../../src")

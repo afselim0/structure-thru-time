@@ -5,7 +5,7 @@ import matplotlib.ticker as ticker
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 import os
 import demes

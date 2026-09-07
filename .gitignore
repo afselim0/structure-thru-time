@@ -23,7 +23,8 @@ pop_labels.csv
 ## Tests
 tests/
 *old*
-misc/
+.misc/
+results/.tests
 local_data/
 
 ## Tree inference

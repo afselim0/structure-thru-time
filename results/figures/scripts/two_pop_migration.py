@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 os.chdir(os.path.dirname(__file__))
-from plotting_style import *
+from results.figures.plotting_style import *
 import sys
 import msprime
 import demes

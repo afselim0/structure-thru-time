@@ -6,7 +6,7 @@ sys.path.append("../../../src")
 from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os
-from plotting_style import *
+from results.figures.plotting_style import *
 from optimization_functions import optimize_timepoint, compute_f_inverse
 from tqdm import tqdm
 

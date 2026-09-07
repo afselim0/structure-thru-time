@@ -24,7 +24,7 @@ sys.path.append("../../../utils")
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../misc_scripts")
 file_name = os.path.basename(__file__).split(".")[0]
-from plotting_style import *
+from results.figures.plotting_style import *
 from compute_rates_true import compute_true_rates, expand_true_rates
 from preprocess_demography import preprocess_demography
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings

@@ -4,7 +4,7 @@ import tskit
 import demes
 import numpy as np
 from tqdm import tqdm
-from plotting_style import *
+from results.figures.plotting_style import *
 import matplotlib.pyplot as plt
 import os
 filename = os.path.basename(__file__).split(".")[0]
