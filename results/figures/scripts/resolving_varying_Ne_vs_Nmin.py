@@ -36,7 +36,8 @@ for N_min in N_min_list:
     plotter.add_sample_trajectories(alpha = 0.8)
     fig_3d = plotter.fig
     fig_3d.update_layout(showlegend=False)
-    plotter.save_static(f"../misc_figs/zigzag_Nmin_{N_min}", format = "png", width = 800, height = 800)
+    img, _ = plotter.save_static(width = 800, height = 800)
+    img.save(f"../misc_figs/zigzag_Nmin_{N_min}.png")
 #%%
 fig,axs = plt.subplots(1,4,figsize=(6, 1.5))
 for i, N_min in enumerate(N_min_list):

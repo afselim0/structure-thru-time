@@ -98,7 +98,7 @@ If some of your samples are admixed, CoaSTT can additionally infer local ancestr
 
 Pipeline, in order:
 1. The regular genome-wide CoaSTT pipeline runs as usual (counts, PDF, rates, embeddings).
-2. `infer_local_ancestry.py` runs RFMix2 to infer local ancestry along the genome for samples in `admixed_pops`, using samples in `reference_pops` as reference panels.
+2. `infer_local_ancestry.py` determines local ancestry along the genome for samples in `admixed_pops`, using samples in `reference_pops` as reference panels. The method is selected with `LAI_method` (see below).
 3. `compute_pdf.py` additionally computes a per-reference-population coalescent-time PDF (using the local ancestry calls from step 2).
 4. The rates/embeddings/plotting pipeline is repeated once per reference population, using each population's own PDF and (ancestry-filtered) sample labels.
 
@@ -107,11 +107,27 @@ Pipeline, in order:
 | **admixed_pops**                   | List of population names (as they appear in `pop_labels`) to treat as admixed. Setting this activates admixture mode. | ALL (admixture) |
 | **reference_pops**                 | List of population names to use as reference/ancestry labels. If omitted, defaults to every population in `pop_labels` other than `admixed_pops` (and, if `pops` restricts the run, further limited to that set) | ALL (admixture) |
 | **significant_ancestry_threshold** | Minimum genome-wide ancestry proportion (per reference population) an admixed sample needs to be kept in that reference population's analysis (default: `0.05`) | Local ancestry |
+| **LAI_method**                     | Local ancestry inference method: `RFmix` (default), `GNN`, or `True` | Local ancestry |
+
+### Local ancestry methods (`LAI_method`)
+
+| Value    | Source | Behaviour |
+|----------|--------|-----------|
+| `RFmix`  | `src/LocalAncestryRFmix.py` | Runs RFMix2 on a VCF exported from each contig's tree sequence. The default. |
+| `GNN`    | `src/LocalAncestryGNN.py`   | Assigns ancestry per local tree via genealogical nearest neighbours (argmax over reference groups). Uses the genealogy directly, so no VCF export or external binary is needed. |
+| `True`   | `utils/simulate_trees.py` (`compute_true_local_ancestry`) | Uses the ground-truth calls recorded from the msprime census nodes at simulation time. Nothing is inferred — useful as an upper bound when benchmarking `RFmix`/`GNN`. |
+
+`LAI_method: True` is only valid for simulated data: it requires `demes_file_path` to be set and the run to simulate its own trees (no external `trees_dir`). Both conditions are checked when the Snakefile is parsed. It also requires a demography with a positive `admix_time` in `pop_labels.csv`, since that is what makes `simulate_trees.py` emit the census-based calls.
+
+Note that in YAML, an unquoted `LAI_method: True` parses as a boolean; the Snakefile coerces it back to the string `"True"`, so both `True` and `"True"` work.
 
 Notes:
 - If `pops` is also set (restricting the whole run to a subset of populations), `admixed_pops` — and `reference_pops` if given explicitly — must be subsets of `pops`.
-- Local ancestry inference (`infer_local_ancestry`) always runs single-threaded regardless of `num_threads`, since parallelizing it has been observed to be slower, not faster.
-- Outputs are written under `{output_path}/LAI/` (per-contig local ancestry calls) and `{output_path}/ancestry_STT/{reference_pop}/{data,plot}/` (one subdirectory per reference population, mirroring the layout of the genome-wide `data/`/`plots/` directories — same rates/embeddings/plot filenames, just one level down per population).
+- `RFmix` inference always runs single-threaded regardless of `num_threads`, since parallelizing it has been observed to be slower, not faster. `GNN` and `True` are parallelized across contigs using `num_threads`.
+- Outputs are namespaced by method, so runs using different methods can share one `output_path` without overwriting each other:
+  - `{output_path}/LAI/{LAI_method}/` — per-contig local ancestry calls, plus `total_ancestry_proportions.parquet`.
+  - `{output_path}/ancestry_STT/{LAI_method}/{reference_pop}/{data,plots}/` — one subdirectory per reference population, mirroring the layout of the genome-wide `data/`/`plots/` directories (same rates/embeddings/plot filenames, just nested per method and population).
+- Ground-truth calls are always written to `{output_path}/LAI/True/` during simulation whenever the demography is admixed, regardless of which `LAI_method` the run uses — so they remain available as a reference for comparison against `RFmix`/`GNN` output.
 
 ## Simulations
 To simulate a set of tree sequences given a demography, use the rule `snakemake sim`. This rule also runs CoaSTT on the true rates from the demes file.

@@ -83,8 +83,10 @@ for m in m_list:
     fig_3d_deep = plotter_deep.fig
     fig_3d_early.update_layout(showlegend=False)
     fig_3d_deep.update_layout(showlegend=False)
-    plotter_early.save_static(f"../misc_figs/early_mig_{m}", format = "png", width = 800, height = 800)
-    plotter_deep.save_static(f"../misc_figs/deep_mig_{m}", format = "png", width = 800, height = 800)
+    img_early, _ = plotter_early.save_static(width = 800, height = 800)
+    img_early.save(f"../misc_figs/early_mig_{m}.png")
+    img_deep, _ = plotter_deep.save_static(width = 800, height = 800)
+    img_deep.save(f"../misc_figs/deep_mig_{m}.png")
 #%%
 target_embeddings = pd.read_parquet(f"{output_path}embeddings_early_mig_{m_list[0]}.parquet")
 fig,axs = plt.subplots(2,4,figsize=(6, 3))

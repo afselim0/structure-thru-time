@@ -9,7 +9,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 
-def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, recomb_rate=1.2e-8, mutation_rate=1.2e-8, num_threads=1):
+def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_length, recomb_rate=1.2e-8, mutation_rate=1.2e-8, num_threads=1, true_LAI_dir=None):
     graph = demes.load(demes_file_path)
     demography = msprime.Demography.from_demes(graph)
     populations = np.unique(pop_labels['population'])
@@ -42,13 +42,21 @@ def sim_contigs(demes_file_path, output_dir, pop_labels, num_contigs, contig_len
             ancestry_df = pd.DataFrame(columns=["sample_id", "start_pos", "end_pos", "ancestry_label"])
         return i, ts, vcf, ancestry_df
 
+    # Ground-truth local ancestry is written to its own directory (LAI/True/)
+    # rather than alongside the trees, so it mirrors the layout of the inferred
+    # LAI methods (LAI/RFmix, LAI/GNN) and is directly consumable by the
+    # ancestry-specific STT rules.
+    if true_LAI_dir is None:
+        true_LAI_dir = output_dir
+    os.makedirs(true_LAI_dir, exist_ok=True)
+
     start_time = time()
     with Pool(num_threads) as pool:
         for i, ts, vcf, ancestry_df in tqdm(pool.imap(simulate_replicate, range(num_contigs)), total=num_contigs):
             file_name = f"contig_{i}"
             ts.dump(f"{output_dir}/{file_name}.trees")
             if len(ancestry_df) > 0:
-                ancestry_df.to_parquet(f"{output_dir}/{file_name}.parquet", index=False)
+                ancestry_df.to_parquet(f"{true_LAI_dir}/{file_name}.parquet", index=False)
             if vcf is not None:
                 with open(f"{output_dir}/{file_name}.vcf", "w") as f:
                     f.write(vcf)
@@ -94,6 +102,7 @@ def main():
     parser.add_argument("--mu", type=float, default=1.2e-8, help="mutation_rate")
     parser.add_argument("--r", type=float, default=1.2e-8, help="recombination_rate")
     parser.add_argument("--num_threads", type=int, default=1, help="number of threads to use")
+    parser.add_argument("--true_LAI_path", type=str, default=None, help="Output directory for ground-truth local ancestry parquet files (default: alongside the trees)")
    
     
     args = parser.parse_args()
@@ -106,7 +115,7 @@ def main():
     mu = args.mu
     r = args.r
     num_threads = int(args.num_threads)
-    time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length, recomb_rate=r, mutation_rate=mu, num_threads=num_threads)
+    time_taken = sim_contigs(demes_file_path, output_path, labels, num_contigs, contig_length, recomb_rate=r, mutation_rate=mu, num_threads=num_threads, true_LAI_dir=args.true_LAI_path)
 
     with open(f"{output_path}/{sim_params}", "w") as f:
         f.write(f"Simulation took {time_taken/60:.2f} minutes")

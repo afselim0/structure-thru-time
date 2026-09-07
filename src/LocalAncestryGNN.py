@@ -143,8 +143,7 @@ class LocalAncestryInference:
         sample_sets = [self.ancestry_samples[lbl] for lbl in labels]
         rows: list[dict] = []
 
-        for tree in tqdm(ts.trees(), desc=f"Inferring local ancestry ({Path(ts_path).name})",
-                         total=ts.num_trees):
+        for tree in ts.trees():
             start, end = tree.interval.left, tree.interval.right
 
             # Isolate this single tree so that genealogical_nearest_neighbours
@@ -241,8 +240,7 @@ class LocalAncestryInference:
         ]
 
         if num_threads == 1:
-            for item in work_items:
-                print(f"Processing {Path(item[0]).name}...")
+            for item in tqdm(work_items, desc="Processing contigs"):
                 _infer_and_save_contig(item)
         else:
             from pathos.multiprocessing import ProcessingPool

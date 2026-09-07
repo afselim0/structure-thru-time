@@ -11,6 +11,11 @@ from pathos.multiprocessing import Pool
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
 from LocalAncestryRFmix import *
+from LocalAncestryGNN import LocalAncestryInference
+
+# Genome-wide ancestry proportions, written alongside the per-contig LAI files
+# in LAI/<method>/ and skipped when those per-contig files are enumerated.
+TOTAL_ANCESTRY_PROPORTIONS_FILE = "total_ancestry_proportions.parquet"
 
 
 def compute_total_ancestry_proportions(lai_dir: str, admixed_sample_ids, reference_pops: list[str]) -> pd.DataFrame:
@@ -39,7 +44,12 @@ def compute_total_ancestry_proportions(lai_dir: str, admixed_sample_ids, referen
     pd.DataFrame
         columns = [sample_id] + [f"{pop}_prop" for pop in reference_pops]
     """
-    lai_files = [f for f in os.listdir(lai_dir) if f.endswith(".parquet")]
+    # Exclude this function's own output, which is written into the same
+    # directory and would otherwise be re-read as if it were a contig on re-runs.
+    lai_files = [
+        f for f in os.listdir(lai_dir)
+        if f.endswith(".parquet") and f != TOTAL_ANCESTRY_PROPORTIONS_FILE
+    ]
     if not lai_files:
         raise FileNotFoundError(f"No .parquet files found in {lai_dir}")
 
@@ -69,33 +79,96 @@ def compute_total_ancestry_proportions(lai_dir: str, admixed_sample_ids, referen
     return prop_df.reset_index(drop=True)
 
 
+def run_local_ancestry(
+    LAI_method: str,
+    input_path: str,
+    LAI_path: str,
+    admix_samples: list[int],
+    reference_samples_dict: dict[str, list[int]],
+    recomb_rate: float,
+    mut_rate: float,
+    num_threads: int,
+) -> None:
+    """
+    Populate LAI_path with one per-contig local ancestry parquet file, using
+    the requested inference method.
+
+    RFmix : RFMix2 via src/LocalAncestryRFmix.py
+    GNN   : genealogical nearest neighbours via src/LocalAncestryGNN.py
+    True  : ground-truth calls already written by utils/simulate_trees.py
+            (compute_true_local_ancestry) into LAI_path — nothing is inferred,
+            the files are only validated to exist.
+
+    Parameters mirror the inference entry points; recomb_rate/mut_rate are
+    only consulted by RFmix.
+    """
+    if LAI_method == "RFmix":
+        print(f"Running RFMix local ancestry inference on tree sequences in: {input_path}")
+        results = infer_local_ancestry_all_ts(
+            ts_dir=input_path,
+            output_dir=LAI_path,
+            admixed_sample_ids=admix_samples,
+            ancestry_samples=reference_samples_dict,
+            recombination_rate=recomb_rate,
+            mutation_rate=mut_rate,
+            n_workers=num_threads,
+        )
+        n_failed = sum(1 for success in results.values() if not success)
+        print(f"Finished: {len(results) - n_failed}/{len(results)} tree sequences succeeded.")
+
+    elif LAI_method == "GNN":
+        print(f"Running GNN local ancestry inference on tree sequences in: {input_path}")
+        inference = LocalAncestryInference(
+            ts_dir=input_path,
+            admixed_sample_ids=admix_samples,
+            ancestry_samples=reference_samples_dict,
+        )
+        inference.infer_all(output_dir=LAI_path, num_threads=num_threads)
+        print(f"Finished: wrote GNN local ancestry for {len(inference.ts_files)} tree sequences.")
+
+    elif LAI_method == "True":
+        # simulate_trees.py wrote the ground-truth calls here during simulation;
+        # this branch only checks they are present and usable.
+        true_files = os.listdir(LAI_path) if os.path.isdir(LAI_path) else []
+        true_files = [
+            f for f in true_files
+            if f.endswith(".parquet") and f != TOTAL_ANCESTRY_PROPORTIONS_FILE
+        ]
+        if not true_files:
+            raise FileNotFoundError(
+                f"LAI_method='True' but no ground-truth local ancestry parquet files were found in {LAI_path}. "
+                "These are written by utils/simulate_trees.py during simulation, and only for demographies "
+                "with a positive admix_time in pop_labels.csv. Re-run the simulation, or use "
+                "LAI_method='RFmix' or 'GNN'."
+            )
+        print(f"Using {len(true_files)} ground-truth local ancestry files from: {LAI_path}")
+
+    else:
+        raise ValueError(f"Unknown LAI_method={LAI_method!r}; expected one of ['RFmix', 'GNN', 'True'].")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Infer local ancestry via RFMix2 for all tree sequences in a directory")
+    parser = argparse.ArgumentParser(description="Infer local ancestry (RFmix/GNN) or use ground-truth calls, for all tree sequences in a directory")
     parser.add_argument("--input_path", required=True, help="Path to tree sequence files")
     parser.add_argument("--LAI_path", required=True, help="Output directory for LAI dataframes")
-    parser.add_argument("--ancestry_STT_path", required=True, help="Output directory for ancestry STT runs")
     parser.add_argument("--pop_labels", required=True, help="Path to population labels parquet file")
-    parser.add_argument("--pop_colors", required=True, help="Path to population colors file")
     parser.add_argument("--r", type=float, default=1.2e-8, help="recombination_rate")
     parser.add_argument("--mu", type=float, default=1.2e-8, help="mutation_rate")
     parser.add_argument("--admix_pops", nargs='+',default=None, help="population labels to compute local ancestry for")
     parser.add_argument("--reference_pops", nargs='+',default=None, help="population labels to use as reference populations for local ancestry inference")
-    parser.add_argument("--significant_ancestry_threshold", type=float, default=0.05, help="threshold for significant ancestry proportion to include in CoaSTT analysis")
+    parser.add_argument("--LAI_method", choices=["RFmix", "GNN", "True"], default="RFmix", help="Local ancestry method: RFmix (RFMix2), GNN (genealogical nearest neighbours), or True (ground-truth calls written by simulate_trees.py)")
     parser.add_argument("--num_threads", type=int, default=1, help="number of tree sequences to process in parallel (one rfmix process each)")
     parser.add_argument("--pops", nargs='+', default=None, help="Optional restriction: population labels the whole analysis is scoped to (used to filter the default reference_pops when --reference_pops is not given).")
-   
-    
+
+
     args = parser.parse_args()
     input_path = args.input_path
     LAI_path = args.LAI_path
-    ancestry_STT_path = args.ancestry_STT_path
     pop_labels = pd.read_csv(args.pop_labels)
-    pop_colors = pd.read_csv(args.pop_colors)
     recomb_rate = args.r
     mut_rate = args.mu
     admix_pops = args.admix_pops
     reference_pops = args.reference_pops
-    significant_ancestry_threshold = args.significant_ancestry_threshold
     num_threads = int(args.num_threads)
 
     admix_samples = pop_labels[pop_labels["population"].isin(admix_pops)]["sample_id"].values if admix_pops is not None else None
@@ -115,19 +188,16 @@ def main():
     if len(reference_samples_dict) == 0:
         raise ValueError(f"No reference populations resolved (reference_pops={reference_pops}) in {args.pop_labels}")
 
-    print(f"Running RFMix local ancestry inference on tree sequences in: {input_path}")
-    results = infer_local_ancestry_all_ts(
-        ts_dir=input_path,
-        output_dir=LAI_path,
-        admixed_sample_ids=admix_samples.tolist(),
-        ancestry_samples={label: samples.tolist() for label, samples in reference_samples_dict.items()},
-        recombination_rate=recomb_rate,
-        mutation_rate=mut_rate,
-        n_workers=num_threads,
+    run_local_ancestry(
+        LAI_method=args.LAI_method,
+        input_path=input_path,
+        LAI_path=LAI_path,
+        admix_samples=admix_samples.tolist(),
+        reference_samples_dict={label: samples.tolist() for label, samples in reference_samples_dict.items()},
+        recomb_rate=recomb_rate,
+        mut_rate=mut_rate,
+        num_threads=num_threads,
     )
-
-    n_failed = sum(1 for success in results.values() if not success)
-    print(f"Finished: {len(results) - n_failed}/{len(results)} tree sequences succeeded.")
 
     print("Computing total ancestry proportions per sample")
     total_admix_prop = compute_total_ancestry_proportions(
@@ -135,28 +205,14 @@ def main():
         admixed_sample_ids=admix_samples,
         reference_pops=reference_pops,
     )
-    out_path = os.path.join(os.path.dirname(os.path.normpath(LAI_path)), "total_ancestry_proportions.parquet")
+    # Written inside the method's own LAI directory (LAI/<method>/) so the
+    # proportions stay attributable to the method that produced the calls.
+    # This file is the sole hand-off to select_ancestry_samples.py, which does
+    # the threshold-dependent sample selection in a separate rule — keeping
+    # significant_ancestry_threshold out of this (expensive) step entirely.
+    out_path = os.path.join(LAI_path, TOTAL_ANCESTRY_PROPORTIONS_FILE)
     total_admix_prop.to_parquet(out_path, index=False)
     print(f"Saved total ancestry proportions to: {out_path}")
-
-    for reference_pop in reference_pops:
-        dirname = os.path.join(ancestry_STT_path, reference_pop)
-        data_dir = os.path.join(dirname, "data")
-        plots_dir = os.path.join(dirname, "plots")
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs(plots_dir, exist_ok=True)
-
-        # Drop admixed samples that don't meet the ancestry threshold for
-        # this reference population; all other samples (reference panels,
-        # samples of other admixed pops, etc.) are kept as-is.
-        insignificant_admix_samples = total_admix_prop[total_admix_prop[f"{reference_pop}_prop"] <= significant_ancestry_threshold]["sample_id"].values
-        pop_labels_filtered = pop_labels[~pop_labels["sample_id"].isin(insignificant_admix_samples)]
-        pop_labels_filtered["is_admixed"] = pop_labels_filtered["population"].isin(admix_pops)
-        pop_labels_filtered.to_csv(os.path.join(data_dir, "pop_labels.csv"), index=False)
-        pop_colors.to_csv(os.path.join(data_dir, "pop_colors.csv"), index=False)
-
-        n_dropped = len(insignificant_admix_samples)
-        print(f"{reference_pop}: kept {len(pop_labels_filtered)}/{len(pop_labels)} samples ({n_dropped} admixed samples below threshold={significant_ancestry_threshold})")
 
 
 if __name__ == "__main__":

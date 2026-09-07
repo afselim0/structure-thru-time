@@ -75,8 +75,10 @@ def main():
                   if args.param_label else output_basename)
     plotter.fig.update_layout(title_text=title_text)
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
-    plotter.save_static(filename=f"{output_path}/{output_basename}_v1", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
-    plotter.save_static(filename=f"{output_path}/{output_basename}_v2", format="png", width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
+    img_v1, _ = plotter.save_static(width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+    img_v1.save(f"{output_path}/{output_basename}_v1.png")
+    img_v2, _ = plotter.save_static(width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
+    img_v2.save(f"{output_path}/{output_basename}_v2.png")
 
     try:
         smooth_embeddings = pd.read_parquet(f"{args.input.replace('embeddings', 'smooth_embeddings')}")

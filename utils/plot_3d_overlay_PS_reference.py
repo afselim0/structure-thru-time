@@ -213,14 +213,13 @@ def main():
     fig.write_html(f"{out_base}.html")
     print(f"Saved HTML: {out_base}.html")
 
-    plotter.save_static(
-        out_base,
-        format="png",
+    img, _ = plotter.save_static(
         width=900,
         height=800,
         scale=2,
         eye=dict(x=args.eye_x, y=args.eye_y, z=args.eye_z),
     )
+    img.save(f"{out_base}.png")
     print(f"Saved PNG:  {out_base}.png")
 
 

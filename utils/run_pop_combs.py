@@ -44,7 +44,8 @@ def run_pop_combinations(data_dir, plots_dir, pop_labels, pop_colors, rates, N_m
         plotter.add_sample_trajectories()
         plotter.add_population_medians()
         plotter.add_legend()
-        plotter.save_static(filename=f"{plots_dir}/{filename}", format="png", width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+        img, _ = plotter.save_static(width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+        img.save(f"{plots_dir}/{filename}.png")
         plotter.fig.write_html(f"{plots_dir}/{filename}.html")
         plotter.fig.show()
 

@@ -25,6 +25,7 @@ reconstructed_rates = pd.read_parquet("../../../results/simulations/outputs/doub
 pop_labels = pd.read_csv("../../../results/simulations/outputs/double_2d_SS/data/pop_labels.csv")
 pop_colors = pd.read_csv("../../../results/simulations/outputs/double_2d_SS/data/pop_colors.csv")
 times = estimated_rates.columns.astype(float)
+min_time = 50
 # recolor demes by their "g<N>_" group: each group gets its own sequential colormap, so the
 # two groups stay visually distinct while the ramp within a group tracks deme order
 GROUP_CMAPS = {"g0": "spring", "g1": "winter"}
@@ -41,12 +42,15 @@ t2 = 1500
 t3 = 4500
 t4 = 5400
 plotter = PlotEmbeddings(embeddings_df = embeddings_df, labels_df = pop_labels, colors_df = pop_colors, sample_id_col = "individual_id")
-plotter.init_plot(xy_lims=2000)
+plotter.init_plot(xy_lims=2000, min_time = min_time)
 plotter.add_sample_trajectories()
 
 # the embeddings panel's width follows its true rendered aspect ratio, so it fills its
 # axis without whitespace or distortion; the schematic takes whatever width is left
-aspect_ratio = plotter.find_aspect_ratio()
+# the panel is TOP_H inches tall at 500 dpi; the cropped aspect ratio depends on this
+# canvas size, so the probe here and the final render below must share it
+RENDER_KW = dict(width=1500, height=1500)
+_, aspect_ratio = plotter.save_static(**RENDER_KW, scale=1)  # cheap probe: scale does not affect the ratio
 # %% figure layout
 FIG_W, FIG_H = 6.5, 6.5
 TOP_H = 3.0                      # height of the schematic / embeddings row
@@ -158,9 +162,10 @@ def nearest_embedding_time(t):
     return embedding_times[np.argmin(np.abs(embedding_times - t))]
 
 # color each pair by which groups its two individuals come from: within-g0, within-g1,
-# or between the two groups -- so the rate panels show how the fit differs by pair type
-# g0 is "Group A" and g1 is "Group B" in the schematic, so A is red and B is blue
-PAIR_COLORS = {"g0": "tab:red", "g1": "tab:blue", "between": "tab:purple"}
+# or between the two groups -- so the rate panels show how the fit differs by pair type.
+# chosen outside the red/blue/purple already used for the groups and their migration
+# rates elsewhere in the figure, so the two color codings don't get conflated
+PAIR_COLORS = {"g0": "tab:orange", "g1": "tab:green", "between": "tab:brown"}
 
 individual_groups = (
     pop_labels.drop_duplicates("individual_id")
@@ -171,11 +176,7 @@ group_1 = individual_groups.reindex(estimated_rates.index.get_level_values(0)).t
 group_2 = individual_groups.reindex(estimated_rates.index.get_level_values(1)).to_numpy()
 if pd.isna(group_1).any() or pd.isna(group_2).any():
     raise ValueError("Some rate pairs reference individuals missing from pop_labels")
-pair_colors = np.where(
-    group_1 == group_2,
-    pd.Series(group_1).map(PAIR_COLORS).to_numpy(),
-    PAIR_COLORS["between"],
-)
+pair_types = np.where(group_1 == group_2, group_1, "between")
 
 # shared limits so panels are comparable across timepoints
 emb_lim = np.abs(embeddings_df[["X1", "X2"]].values).max() * 1.05
@@ -245,13 +246,13 @@ for i, t in enumerate(panel_times):
     pair_left = emb_ax.get_position().x0
     pair_right = rate_ax.get_position().x1
     fig.text((pair_left + pair_right) / 2, emb_ax.get_position().y1 + 0.008,
-             f"t = {t}", ha="center", va="bottom", fontsize=10)
+             f"{t} generations ago", ha="center", va="bottom", fontsize=10)
 
     # b) estimated vs reconstructed rates for all pairs at this timepoint, colored by
     # pair type; between-group pairs dominate in number so they are drawn underneath
     col = nearest_rate_idx(t)
     for pair_type in ("between", "g0", "g1"):
-        sel = pair_colors == PAIR_COLORS[pair_type]
+        sel = pair_types == pair_type
         rate_ax.scatter(estimated_rates.iloc[:, col][sel], reconstructed_rates.iloc[:, col][sel],
                         s=4, color=PAIR_COLORS[pair_type], alpha=0.5, linewidths=0)
     rate_ax.plot([rate_lo, rate_hi], [rate_lo, rate_hi], color="black", lw=0.8, zorder=3)
@@ -286,9 +287,11 @@ pair_legend_handles = [
     Line2D([], [], marker="o", linestyle="none", markersize=2.5,
            color=PAIR_COLORS["between"], label="Rates between Groups"),
 ]
-# centred on the gap between the two middle panels of the top row, sitting just above
-# them; a figure-level legend is used because the target spans two axes
-gap_centre_x = (bottom_axes[0][1].get_position().x1 + bottom_axes[0][2].get_position().x0) / 2
+# centred on the gap between the two middle panels of the top row (nudged right of true
+# centre), sitting just above them; a figure-level legend is used because the target
+# spans two axes
+LEGEND_X_SHIFT = 0.03
+gap_centre_x = (bottom_axes[0][1].get_position().x1 + bottom_axes[0][2].get_position().x0) / 2 + LEGEND_X_SHIFT
 fig.legend(
     handles=pair_legend_handles, loc="lower center",
     bbox_to_anchor=(gap_centre_x, bottom_axes[0][1].get_position().y1 + 0.005),
@@ -357,6 +360,9 @@ for x in grid_centers.values():
     schematic_ax.annotate("", xy=(x, box_top), xytext=(x, split_y),
                           arrowprops=dict(arrowstyle="-|>", color="black", lw=0.9,
                                           shrinkA=0, shrinkB=0, mutation_scale=8))
+SPLIT_TIME = 5000
+schematic_ax.text(anc_xy[0], split_y - 0.012, f"{SPLIT_TIME} generations ago",
+                  ha="center", va="top", fontsize=10)
 
 # ---- the two 5x5 deme grids ----
 for group, cx in grid_centers.items():
@@ -445,8 +451,7 @@ schematic_ax.legend(
 )
 
 # ---- subfigure labels, one per group of panels ----
-# placed in figure coords from each group's own top-left corner; the embeddings panel is
-# labelled last because save_static_to_axis resizes its axis, so its position is read after
+# placed in figure coords from each group's own top-left corner
 SUBFIG_LABEL_SIZE = 12
 
 def add_subfig_label(letter, ax, dx=-0.005, dy=0.005, y=None):
@@ -462,9 +467,11 @@ def add_subfig_label(letter, ax, dx=-0.005, dy=0.005, y=None):
 add_subfig_label("A", schematic_ax)
 add_subfig_label("C", bottom_axes[0][0], dy=0.022)
 
-plotter.save_static_to_axis(embeddings_ax, "../misc_figs/double_2d")
-# B shares A's baseline: save_static_to_axis shrinks the embeddings axis to the cropped
-# render, so its own top edge sits lower than the schematic's
+img, _ = plotter.save_static(**RENDER_KW)
+img.save("../misc_figs/double_2d.png")
+embeddings_ax.set_axis_off()
+embeddings_ax.imshow(img, aspect="equal")
+# B shares A's baseline so the two labels line up across the top row
 add_subfig_label("B", embeddings_ax, y=schematic_ax.get_position().y1)
 fig.savefig(f"../outputs/{filename}.pdf")
 # %%

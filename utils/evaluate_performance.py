@@ -115,7 +115,7 @@ def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_label
 
 def reconstructed_vs_input_hist2d(input_rates, reconstructed_rates, N_max, ax=None, x_label="input rates",
                                    shared_lims=None, shared_vmax=None, draw_colorbar=True, ylabel=True,
-                                   n_bins=None):
+                                   n_bins=None, stats_fontsize=8):
     # Default (cheap) performance summary: 2D log-log histogram instead of an O(n_pairs*T) scatter
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5))
@@ -170,8 +170,11 @@ def reconstructed_vs_input_hist2d(input_rates, reconstructed_rates, N_max, ax=No
     log_r2 = np.corrcoef(log_x, log_y)[0, 1] ** 2
     corr, _ = spearmanr(x_v, y_v)
     stats_text = f"$r^2$ = {r2:.3f}\n$r^2$ (log) = {log_r2:.3f}\nSpearman $\\rho$ = {corr:.3f}"
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8, va='top', color='white',
-            bbox=dict(facecolor='black', edgecolor='white', alpha=0.6, boxstyle='round,pad=0.3'))
+    # box padding scales with the font so the annotation shrinks as a whole in small multi-panel figures
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=stats_fontsize, va='top', color='white',
+            linespacing=1.1,
+            bbox=dict(facecolor='black', edgecolor='white', alpha=0.6,
+                      boxstyle=f'round,pad={0.3 * stats_fontsize / 8:.3f}', linewidth=0.8 * stats_fontsize / 8))
 
     return fig, mesh
 

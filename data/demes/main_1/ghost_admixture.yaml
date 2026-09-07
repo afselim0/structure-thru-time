@@ -19,7 +19,7 @@ demes:
 - name: X
   ancestors: [temp_1]
   epochs:
-  - {end_time: 0, start_size: 20000}
+  - {end_time: 100, start_size: 20000}
 - name: C
   ancestors: [temp_1]
   epochs:

@@ -1,12 +1,15 @@
 demography: two_admix
 demes_file_path: ../data/demes/main_1/two_admix.yaml
-output_path: ../results/simulations/outputs/two_admix_test
+output_path: ../results/simulations/outputs/two_admix
 version: 1
 num_threads: 12
 
 # Admixture parameters (reference_pops left unset to test the None-defaulting
 # path in infer_local_ancestry.py, which should resolve it to [A, B, C, D])
 admixed_pops: [Admix_1, Admix_2]
+# Local ancestry method: RFmix (default), GNN, or True (ground-truth calls from
+# the simulation; simulated data only)
+LAI_method: RFmix
 
 # Simulation Parameters
 num_contigs: 500
@@ -23,7 +26,7 @@ n_timepoints: 2500
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
-compute_variance: true
+compute_variance: false
 
 # Embeddings estimation parameters
 N_min: 100
@@ -36,4 +39,4 @@ p: 1
 min_time: 50
 max_rate_plot: 0.0002
 embeddings_plot_lims: 1000000
-time_scale: linear
+time_scale: log

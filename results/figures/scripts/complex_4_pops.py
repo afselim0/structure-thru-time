@@ -45,7 +45,10 @@ plotter = PlotEmbeddings(
 )
 plotter.init_plot(min_time = config_data['min_time'], max_time = config_data['max_time'], time_scale = config_data['time_scale'])
 plotter.add_sample_trajectories()
-aspect_ratio = plotter.find_aspect_ratio()
+# the panel is 3in tall and rendered at 500 dpi; the cropped aspect ratio depends on
+# this canvas size, so the probe and the final render below must share it
+RENDER_KW = dict(width=1500, height=1500)
+_, aspect_ratio = plotter.save_static(**RENDER_KW, scale=1)  # cheap probe: scale does not affect the ratio
 
 
 filename = os.path.basename(__file__).split(".")[0]
@@ -106,7 +109,10 @@ plotter = PlotEmbeddings(
 )
 plotter.init_plot(min_time = config_data['min_time'], max_time = config_data['max_time'], time_scale = config_data['time_scale'])
 plotter.add_sample_trajectories()
-plotter.save_static_to_axis(embeddings_ax, "../misc_figs/complex_4_pops_embeddings")
+img, _ = plotter.save_static(**RENDER_KW)
+img.save("../misc_figs/complex_4_pops_embeddings.png")
+embeddings_ax.set_axis_off()
+embeddings_ax.imshow(img, aspect="equal")
 embeddings_ax.text(0, 1, "B", transform=embeddings_ax.transAxes,
            fontsize=12, fontweight="bold", va="top", ha="right")
 

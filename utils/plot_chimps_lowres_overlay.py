@@ -415,41 +415,41 @@ def main():
 
     # Static PNGs — two camera angles matching the standard pipeline views
     out_v1 = os.path.join(args.output_path, "overlay_3d_v1")
-    plotter.save_static(
-        filename=out_v1, format="png",
+    img_v1, _ = plotter.save_static(
         width=600, height=600, scale=2,
         eye=dict(x=1.8, y=1.8, z=0.3),
         up=dict(x=0, y=0, z=1),
     )
+    img_v1.save(f"{out_v1}.png")
     print(f"Saved {out_v1}.png")
 
     out_v2 = os.path.join(args.output_path, "overlay_3d_v2")
-    plotter.save_static(
-        filename=out_v2, format="png",
+    img_v2, _ = plotter.save_static(
         width=600, height=600, scale=2,
         eye=dict(x=-0.75, y=-1.5, z=0.3),
         up=dict(x=0, y=0, z=1),
     )
+    img_v2.save(f"{out_v2}.png")
     print(f"Saved {out_v2}.png")
 
     # v3: top-down (X1/X2 plane, time axis pointing away)
     out_v3 = os.path.join(args.output_path, "overlay_3d_v3")
-    plotter.save_static(
-        filename=out_v3, format="png",
+    img_v3, _ = plotter.save_static(
         width=600, height=600, scale=2,
         eye=dict(x=0.0, y=0.0, z=2.5),
         up=dict(x=0, y=1, z=0),
     )
+    img_v3.save(f"{out_v3}.png")
     print(f"Saved {out_v3}.png")
 
     # v4: side-on along X2 axis (shows time vs X1 profile)
     out_v4 = os.path.join(args.output_path, "overlay_3d_v4")
-    plotter.save_static(
-        filename=out_v4, format="png",
+    img_v4, _ = plotter.save_static(
         width=600, height=600, scale=2,
         eye=dict(x=2.5, y=0.0, z=0.3),
         up=dict(x=0, y=0, z=1),
     )
+    img_v4.save(f"{out_v4}.png")
     print(f"Saved {out_v4}.png")
 
     print("\nDone.")

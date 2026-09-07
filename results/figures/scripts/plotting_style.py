@@ -83,7 +83,7 @@ def setup_plotting_style():
 
     # -- Figure size --
     rcParams['figure.figsize'] = (6, 4)  # 6x6 is unusually square for most single-panel figures; 3:2 reads better
-    rcParams['figure.constrained_layout.use'] = True  # better auto-spacing than tight_layout for multi-panel figs
+    rcParams['figure.constrained_layout.use'] = False  # Turn auto-spacing off for more control
 
     # -- Errorbars (common in scientific figures) --
     rcParams['errorbar.capsize'] = 3

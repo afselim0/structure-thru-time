@@ -42,15 +42,18 @@ def _compute_metrics(rates_df, reconstructed_rates_df, N_max, label):
 
 # --- Compute embeddings for a single d value (one parallel task) ---
 def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_label,
-                    input_rates_df, true_rates_df):
+                    input_rates_df, true_rates_df, l1_penalties, l2_penalties):
     """Build a fresh LatentSpaceEmbeddings at n_components=d, fit it, save it, and return
     loss + goodness-of-fit records.
 
     Unlike p (a call-time argument), n_components is fixed at construction, so each worker
     builds its own LatentSpaceEmbeddings object rather than sharing one built in the parent.
+    If l1_penalties/l2_penalties are set, a smoothed (joint-optimization) embedding is also
+    computed at this d, warm-started from the unsmoothed solution, mirroring compute_embeddings.py.
     """
     print(f"Computing embeddings with d={d}...")
-    LSE = LatentSpaceEmbeddings(rates_df, se_df=se_df, N_min=N_min, N_max=N_max, n_components=d)
+    LSE = LatentSpaceEmbeddings(rates_df, se_df=se_df, N_min=N_min, N_max=N_max, n_components=d,
+                                 l1_strengths=l1_penalties, l2_strengths=l2_penalties)
     # Exact-Hessian covariances are only implemented for p == 1, but since p can be != 1 here too, keep it off
     X, _ = LSE.compute_embeddings_through_time(
         p=p, link=link, compute_uncertainty=False, exact_hessian=False
@@ -66,12 +69,35 @@ def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_la
     reconstructed_rates_df.columns = reconstructed_rates_df.columns.astype(float)
     reconstructed_rates_df.to_parquet(os.path.join(output_path, f"reconstructed_rates.d{d}.parquet"))
 
+    records = _metrics_records(d, loss, reconstructed_rates_df, input_rates_df, true_rates_df, N_max, smoothing="unsmoothed")
+
+    # --- Smoothed (joint-optimization) counterpart, only when smoothing penalties are set ---
+    if LSE.smoothing_params is not None:
+        X_smooth, _ = LSE.compute_embeddings_jointly(X_init=X, p=p, link=link)
+        smooth_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
+        smooth_loss = compute_total_unpenalized_loss(
+            X_smooth, LSE.R, W=LSE.W, N_min=LSE.N_min, N_max=LSE.N_max, p=p, link=link
+        )
+        smooth_embeddings_df.to_parquet(os.path.join(output_path, f"smooth_embeddings.d{d}.parquet"))
+
+        D_smooth_df = compute_distance_df(smooth_embeddings_df, id_label=id_label)
+        smooth_reconstructed_rates_df = reconstruct_rates(D_smooth_df, LSE.N_min, p=p, link=link)
+        smooth_reconstructed_rates_df.columns = smooth_reconstructed_rates_df.columns.astype(float)
+        smooth_reconstructed_rates_df.to_parquet(os.path.join(output_path, f"smooth_reconstructed_rates.d{d}.parquet"))
+
+        records += _metrics_records(d, smooth_loss, smooth_reconstructed_rates_df, input_rates_df, true_rates_df, N_max, smoothing="smoothed")
+
+    return records
+
+
+# --- Build the (d, loss, r2, r2_log, spearman_rho, vs, smoothing) records for one fitted embedding ---
+def _metrics_records(d, loss, reconstructed_rates_df, input_rates_df, true_rates_df, N_max, smoothing):
     r2, r2_log, spearman_rho = _compute_metrics(input_rates_df, reconstructed_rates_df, N_max, label="input")
-    records = [{"d": d, "loss": loss, "r2": r2, "r2_log": r2_log, "spearman_rho": spearman_rho, "vs": "input"}]
+    records = [{"d": d, "loss": loss, "r2": r2, "r2_log": r2_log, "spearman_rho": spearman_rho, "vs": "input", "smoothing": smoothing}]
 
     if true_rates_df is not None:
         r2_t, r2_log_t, spearman_rho_t = _compute_metrics(true_rates_df, reconstructed_rates_df, N_max, label="true")
-        records.append({"d": d, "loss": loss, "r2": r2_t, "r2_log": r2_log_t, "spearman_rho": spearman_rho_t, "vs": "true"})
+        records.append({"d": d, "loss": loss, "r2": r2_t, "r2_log": r2_log_t, "spearman_rho": spearman_rho_t, "vs": "true", "smoothing": smoothing})
 
     return records
 
@@ -79,9 +105,12 @@ def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_la
 # --- Compute embeddings over a grid of d (n_components) values ---
 def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d=10, num_d=9,
            N_min=1, N_max=1e7, p=1, link="inverse_distance", n_timepoints_emb=400,
-           id_label="sample_id", n_jobs=None):
+           id_label="sample_id", n_jobs=None, l1_penalties=None, l2_penalties=None):
     """Compute embeddings for a grid of n_components values (fixed p), saving each as a parquet
-    plus a single dataframe of per-d diagnostics (loss, r2, r2_log, spearman_rho).
+    plus a single dataframe of per-d diagnostics (loss, r2, r2_log, spearman_rho, smoothing).
+
+    If l1_penalties/l2_penalties are set, a smoothed (joint-optimization) embedding is computed
+    at each d in addition to the unsmoothed one, distinguished by the "smoothing" column.
     """
     os.makedirs(output_path, exist_ok=True)
 
@@ -122,11 +151,13 @@ def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d
             [id_label] * len(d_values),
             [input_rates_df] * len(d_values),
             [true_rates_df] * len(d_values),
+            [l1_penalties] * len(d_values),
+            [l2_penalties] * len(d_values),
         )
 
     # --- Collect and save the diagnostics across d ---
     metrics_df = pd.DataFrame([r for records in record_lists for r in records])
-    metrics_df = metrics_df.sort_values(["d", "vs"]).reset_index(drop=True)
+    metrics_df = metrics_df.sort_values(["d", "smoothing", "vs"]).reset_index(drop=True)
     return metrics_df
 
 
@@ -144,6 +175,8 @@ def main():
     parser.add_argument("--N_max", type=float, required=True, help="N_max hyperparameter for the link function.")
     parser.add_argument("--p", type=float, default=1, help="Exponent of the distance link function (held fixed while d is scanned).")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential).")
+    parser.add_argument("--l1_penalties", type=str, default="None", help="Comma-separated per-order L1 smoothing strengths (e.g. compute_embeddings.py's --l1_penalties). 'None' disables smoothing.")
+    parser.add_argument("--l2_penalties", type=str, default="None", help="Comma-separated per-order L2 smoothing strengths. 'None' disables smoothing.")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates).")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv file (unused directly, accepted for CLI symmetry with compute_embeddings.py).")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, rates are per-haplotype (sample_id). Otherwise per-individual (individual_id).")
@@ -157,11 +190,16 @@ def main():
     if true_rates_df is not None:
         true_rates_df.columns = true_rates_df.columns.astype(float)
 
+    # Parsing l1 and l2 penalties (same "order,order,..." -> {1: v1, 2: v2, ...} convention as compute_embeddings.py)
+    l1_penalties = None if args.l1_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l1_penalties.split(","))}
+    l2_penalties = None if args.l2_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l2_penalties.split(","))}
+
     metrics_df = scan_d(
         rates_df=rates_df, output_path=args.output_path, se_df=se_df, true_rates_df=true_rates_df,
         min_d=args.min_d, max_d=args.max_d, num_d=args.num_d,
         N_min=args.N_min, N_max=args.N_max, p=args.p, link=args.link,
         n_timepoints_emb=args.n_timepoints_emb, id_label=id_label, n_jobs=args.n_jobs,
+        l1_penalties=l1_penalties, l2_penalties=l2_penalties,
     )
     metrics_df.to_csv(args.output, index=False)
     print(f"Saved {args.num_d} embeddings and diagnostics to {args.output_path} / {args.output}")

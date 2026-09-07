@@ -81,7 +81,10 @@ for _, embeddings_df in panel_embeddings:
 # the three panels share a camera angle and data extent, so one probe render fixes the
 # aspect ratio for all of them; their widths follow from it and the rates panel takes
 # whatever width is left over
-aspect_ratio = plotters[0].find_aspect_ratio()
+# each panel is ROW_H inches tall at 500 dpi; the cropped aspect ratio depends on this
+# canvas size, so the probe here and the panel renders below must share it
+RENDER_KW = dict(width=1500, height=1500)
+_, aspect_ratio = plotters[0].save_static(**RENDER_KW, scale=1)  # cheap probe: scale does not affect the ratio
 
 # %% figure layout
 ROW_H = 3.0                       # height of the embeddings panels
@@ -151,7 +154,7 @@ population_handles = [
     Line2D([], [], color=A_color, label="A"),
     Line2D([], [], color=B_color, label="B"),
 ]
-rate_handles = [Line2D([], [], color="black", label="$1/(2N_e)$")] + [
+rate_handles = [Line2D([], [], color="black", label="$1/(2N)$")] + [
     Line2D([], [], color="black", linestyle=LINESTYLES[m], label=f"m = {m}")
     for m in ("0.0001", "0.001", "0.01")
 ]
@@ -173,10 +176,12 @@ SUBFIG_LABEL_SIZE = 12
 TITLE_SIZE = 10
 
 for letter, (title, _), plotter, ax in zip("ABC", panel_embeddings, plotters, embeddings_axes):
-    plotter.save_static_to_axis(ax, f"../misc_figs/{filename}_{letter}")
+    img, _ = plotter.save_static(**RENDER_KW)
+    img.save(f"../misc_figs/{filename}_{letter}.png")
+    ax.set_axis_off()
+    ax.imshow(img, aspect="equal")
 
-# labels and titles are placed after the renders, because save_static_to_axis resizes
-# each embeddings axis to its cropped image
+# labels and titles are placed against each embeddings axis's gridspec position
 label_baseline = max(ax.get_position().y1 for ax in embeddings_axes + [rates_cell])
 for letter, (title, _), ax in zip("ABC", panel_embeddings, embeddings_axes):
     pos = ax.get_position()

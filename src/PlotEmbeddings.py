@@ -29,8 +29,7 @@ Intended usage
 
 from __future__ import annotations
 
-import os
-import tempfile
+import io
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -40,7 +39,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from PIL import Image
-from matplotlib.axes import Axes
 
 # ----------------------- tunables ------------------------------------------
 sample_line_width = 2
@@ -350,176 +348,105 @@ class PlotEmbeddings:
             )
         )
 
-    def find_aspect_ratio(
-        self,
-        *,
-        eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
-        up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
-        probe_size: int = 800,
-    ) -> float:
-        """
-        Render a throwaway export at the given camera angle, crop whitespace, and
-        return the cropped image's width/height ratio.
-
-        The static export's true aspect ratio depends on the camera angle and
-        data extent, so it can't be known ahead of a render. Call this first to
-        learn the ratio, then size the target axis/figure to match before calling
-        save_static or save_static_to_axis for the final render -- avoids ever
-        stretching or shrinking the image to fit a mismatched axis.
-
-        probe_size only needs to be large enough for a stable crop; it does not
-        need to match the final render's resolution.
-        """
-        if self.fig is None:
-            raise RuntimeError("Call init_plot() before finding the aspect ratio.")
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            probe_path = os.path.join(tmp_dir, "probe")
-            self.save_static(
-                filename=probe_path,
-                format="png",
-                width=probe_size,
-                height=probe_size,
-                scale=1,
-                eye=eye,
-                up=up,
-                crop_white=True,
-            )
-            with Image.open(f"{probe_path}.png") as img:
-                return img.width / img.height
-
     def save_static(
         self,
-        filename: str,
         *,
-        format: str = "png",
-        width: int = 600,
-        height: int = 600,
-        scale: int = 2,
+        width: int = 1000,
+        height: int = 1000,
+        scale: float = 3,
         eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
+        center: Dict[str, float] = {"x": 0, "y": 0, "z": 0},
         up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
-        crop_white = True,
-        font_size: Optional[int] = None
-    ) -> None:
+        show_axes: bool = True,
+        crop_white: bool = True,
+        remove_zlabel: bool = True,
+        font_size: Optional[int] = None,
+    ) -> Tuple[Image.Image, float]:
+        """
+        Render the static plot and return it as a PIL image together with its
+        aspect ratio (width/height, measured after cropping).
+
+        Nothing is written to disk: save with img.save("name.png"), or place
+        the panel in a matplotlib axis with ax.imshow(img, aspect="equal").
+
+        Parameters
+        ----------
+        width, height : int
+            Render resolution in pixels *before* scale is applied. This is the
+            canvas Plotly lays the scene out on, and it is what controls the
+            text-to-plot proportion: Plotly sizes fonts in fixed pixels, so a
+            larger canvas makes the text a smaller share of the frame (and the
+            cropped content correspondingly wider). Raise both together to
+            shrink text relative to the plot; use font_size to set it directly.
+        scale : float
+            Multiplier on width/height for higher-DPI output (kaleido param).
+            Purely a resolution knob -- it re-rasterizes an unchanged layout,
+            so it does not affect the returned aspect ratio.
+
+        Because the cropped aspect ratio depends on width/height but not on
+        scale, a caller sizing a matplotlib axis to fit the panel can probe the
+        ratio cheaply at a low scale, then render at the same width/height with
+        a higher scale for the final image.
+        """
         if self.fig is None:
             raise RuntimeError("Call init_plot() before saving.")
-        self.fig.update_layout(scene=dict(camera=dict(eye=eye, up=up)))
+        if width <= 0 or height <= 0:
+            raise ValueError(f"width and height must be positive, got width={width!r}, height={height!r}")
+        if scale <= 0:
+            raise ValueError(f"scale must be positive, got {scale!r}")
+
+        # Camera and export-only styling. Each override is undone before returning
+        # so the plotter stays usable interactively after a render
+        self.fig.update_layout(scene=dict(camera=dict(eye=eye, center=center, up=up)))
         self.fig.update_layout(showlegend=False)
-        self.fig.update_layout(scene=dict(zaxis=dict(title="")))
+        if remove_zlabel:
+            self.fig.update_layout(scene=dict(zaxis=dict(title="")))
+        if not show_axes:
+            self.fig.update_layout(
+                scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
+            )
         # Plotly's default font size is fixed in pixels regardless of export width/height,
-        # so small exports (e.g. sized to a fraction of a matplotlib panel) read as tiny text
+        # so small canvases read as oversized text relative to the plot
         if font_size is not None:
             self.fig.update_layout(font=dict(size=font_size))
-        pio.write_image(fig=self.fig, file=f"{filename}.{format}", format=format, width=width, height=height, scale=scale)
+
+        img_bytes = pio.to_image(fig=self.fig, format="png", width=width, height=height, scale=scale)
+        img = Image.open(io.BytesIO(img_bytes))
+        img.load()  # decode now, so the BytesIO buffer can be released
+
+        # Trim the surrounding whitespace to the plot's true content bounds, so the
+        # image can be placed in an axis without letterboxing
         if crop_white:
-            assert format in ["png", "jpg", "jpeg"], "Cropping is only supported for raster formats like PNG or JPEG."
-            with Image.open(f"{filename}.{format}") as img:
-                img_array = np.array(img)
-                mask = ~(np.all(img_array[:, :, :3] == 255, axis=2))  # True wherever the image is not white
-                # Get bounding box
-                coords = np.argwhere(mask)
-                y0, x0 = coords.min(axis=0)
-                y1, x1 = coords.max(axis=0) + 1  # Add one since slicing is exclusive
-                cropped_img = img.crop((x0, y0, x1, y1))
-                # w, h = cropped_img.size
-                # size = max(w, h)
-                # if w != h:
-                #     # Create square white image and paste cropped plot in center
-                #     new_img = Image.new("RGB", (size, size), (255,255,255))
-                #     paste_x = (size - w) // 2
-                #     paste_y = (size - h) // 2
-                #     new_img.paste(cropped_img, (paste_x, paste_y))
-                #     new_img.save(f"{filename}.{format}")
-                # else:
-                cropped_img.save(f"{filename}.{format}")
+            img_array = np.array(img.convert("RGB"))
+            mask = ~(np.all(img_array == 255, axis=2))  # True wherever the image is not white
+            coords = np.argwhere(mask)
+            if coords.size == 0:
+                raise ValueError(
+                    "Rendered image is entirely white -- nothing to crop. Check that the "
+                    "plot has visible content at this camera angle."
+                )
+            y0, x0 = coords.min(axis=0)
+            y1, x1 = coords.max(axis=0) + 1  # Add one since slicing is exclusive
+            img = img.crop((x0, y0, x1, y1))
 
-        self.fig.update_layout(showlegend=True)  # restore legend for interactive use if needed
-        self.fig.update_layout(scene=dict(zaxis=dict(title="Time (generations ago)" if self.generation_time is None else "Time (years ago)")))  # restore z-axis title
+        # ---- restore the interactive layout state ----
+        self.fig.update_layout(showlegend=True)
+        if remove_zlabel:
+            self.fig.update_layout(
+                scene=dict(
+                    zaxis=dict(
+                        title="Time (generations ago)" if self.generation_time is None else "Time (years ago)"
+                    )
+                )
+            )
+        if not show_axes:
+            self.fig.update_layout(
+                scene=dict(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
+            )
+        if font_size is not None:
+            self.fig.update_layout(font=dict(size=None))
 
-    def save_static_to_axis(
-        self,
-        ax: Axes,
-        path: str,
-        *,
-        format: str = "png",
-        render_dpi: float = 300,
-        scale: int = 2,
-        eye: Dict[str, float] = {"x": 1.8, "y": 1.8, "z": 0.3},
-        up: Dict[str, float] = {"x": 0.0, "y": 0.0, "z": 1.0},
-        crop_white: bool = True,
-        fit: str = "fill_height",
-    ) -> None:
-        """
-        Render the static plot and place it in a matplotlib axis with no
-        letterboxing/whitespace and no distortion of the plot's aspect ratio.
-
-        Rendered at ax's own physical size (in inches) times render_dpi, so
-        Plotly's default fonts come out near their true final size once
-        displayed -- call find_aspect_ratio() beforehand and size ax to match
-        it, or fonts/lines will still need heavy up- or down-scaling to fill
-        ax's box. crop_white then trims whitespace by a different amount from
-        each side, so the cropped image's aspect ratio may not exactly match
-        ax's box even when ax was sized from find_aspect_ratio (renders aren't
-        perfectly deterministic run to run).
-
-        fit controls how the (undistorted) image is fit to ax's box:
-          - "contain": shrink ax's box to the image's aspect ratio, centered
-            within ax's original box (image stays fully inside, box may shrink
-            in both dimensions).
-          - "fill_height": grow/shrink ax's box to match ax's original height
-            exactly, centered horizontally on ax's original box; width follows
-            the image's aspect ratio and may overflow or underflow ax's
-            original width on both sides evenly.
-        """
-        if self.fig is None:
-            raise RuntimeError("Call init_plot() before saving.")
-        if fit not in {"contain", "fill_height"}:
-            raise ValueError(f"fit must be 'contain' or 'fill_height', got {fit!r}")
-
-        pos = ax.get_position()
-        fig = ax.get_figure()
-        box_w_in = pos.width * fig.get_figwidth()
-        box_h_in = pos.height * fig.get_figheight()
-        width_px = int(round(box_w_in * render_dpi))
-        height_px = int(round(box_h_in * render_dpi))
-
-        self.save_static(
-            filename=path,
-            format=format,
-            width=width_px,
-            height=height_px,
-            scale=scale,
-            eye=eye,
-            up=up,
-            crop_white=crop_white,
-        )
-
-        img = Image.open(f"{path}.{format}")
-        ax.set_axis_off()
-        ax.imshow(img, aspect="equal")
-
-        img_aspect = img.width / img.height
-        if fit == "contain":
-            # shrink ax's box to the image's aspect ratio, centered in the original box
-            box_aspect = box_w_in / box_h_in
-            if img_aspect > box_aspect:
-                new_w_in, new_h_in = box_w_in, box_w_in / img_aspect
-            else:
-                new_w_in, new_h_in = box_h_in * img_aspect, box_h_in
-        else:
-            # fill ax's height exactly; width follows the image and may over-
-            # or under-shoot ax's original width, centered on the original box
-            new_h_in = box_h_in
-            new_w_in = box_h_in * img_aspect
-
-        new_x0_in = pos.x0 * fig.get_figwidth() + (box_w_in - new_w_in) / 2
-        new_y0_in = pos.y0 * fig.get_figheight() + (box_h_in - new_h_in) / 2
-
-        new_w = new_w_in / fig.get_figwidth()
-        new_h = new_h_in / fig.get_figheight()
-        new_x0 = new_x0_in / fig.get_figwidth()
-        new_y0 = new_y0_in / fig.get_figheight()
-        ax.set_position([new_x0, new_y0, new_w, new_h])
+        return img, img.width / img.height
 
     # ------------------------- core layers --------------------------------
 

@@ -17,7 +17,7 @@ version                           = read_config("version", default = 1)
 
 # Simulation Parameters
 demes_file_path                   = read_config("demes_file_path", default = "")
-is_SS_demography              = "SS" in os.path.basename(demes_file_path) # Spatial (SS) demographies: no demography plot, no true rates
+is_SS_demography                  = "SS" in os.path.basename(demes_file_path) # Spatial (SS) demographies: no demography plot, no true rates
 num_contigs                       = int(read_config("num_contigs", default = 500))
 contig_length                     = int(read_config("contig_length", default = 5e6))
 n_sim_per_pop                     = read_config("n_sim_per_pop", default = 20)
@@ -74,7 +74,16 @@ pop_labels                        = os.path.join(output_path, "data/pop_labels.c
 # Admixture Parameters
 admixed_pops                      = read_config("admixed_pops", default=None)
 reference_pops                    = read_config("reference_pops", default=None)
-significant_ancestry_threshold    = read_config("significant_ancestry_threshold", default=0.05)
+significant_ancestry_threshold    = read_config("significant_ancestry_threshold", default=0.1)
+LAI_method                        = str(read_config("LAI_method", default="RFmix"))
+
+# Local ancestry inference method: RFmix (src/LocalAncestryRFmix.py), GNN
+# (src/LocalAncestryGNN.py), or True (ground-truth calls emitted by
+# simulate_trees.py alongside the simulated trees). LAI and ancestry_STT
+# outputs are namespaced by method so the three can coexist in one output_path.
+LAI_METHODS = ["RFmix", "GNN", "True"]
+if LAI_method not in LAI_METHODS:
+    raise ValueError(f"LAI_method={LAI_method!r} is not one of {LAI_METHODS}.")
 
 def _to_list(x):
     if x is None: return None
@@ -95,6 +104,18 @@ if admix_mode and pops_list is not None:
         if _bad_ref:
             raise ValueError(f"reference_pops {_bad_ref} not in pops={pops_list}; reference_pops must be a subset of pops.")
     # if reference_pops_list is None, the subset restriction is deferred to infer_local_ancestry.py via --pops
+
+# True local ancestry only exists for simulated trees: it is derived from the
+# msprime census nodes written by simulate_trees.py, so it requires a demes
+# file and a trees_dir that this run actually simulates into.
+if admix_mode and LAI_method == "True":
+    if not demes_file_path:
+        raise ValueError("LAI_method='True' requires a simulation: set demes_file_path in the config.")
+    if trees_dir != tree_output_path:
+        raise ValueError(
+            f"LAI_method='True' requires trees simulated by this run, but trees_dir={trees_dir} "
+            f"is external (expected {tree_output_path}). Use LAI_method='RFmix' or 'GNN' instead."
+        )
 
 # Replicate optimization seeds (optional; used only by compute_embeddings_replicates rule)
 seeds                             = read_config("seeds", default = [])
@@ -157,6 +178,7 @@ simulate_trees_script                  = "simulate_trees.py"
 infer_trees_script                     = "infer_trees.py"
 compute_pdf_wrapper_script             = "compute_pdf.py"
 infer_local_ancestry_script            = "infer_local_ancestry.py"
+select_ancestry_samples_script         = "select_ancestry_samples.py"
 compute_rates_wrapper_script           = "compute_rates.py"
 plot_rates_script                      = "plot_rates.py"
 plot_relative_div_script               = "plot_relative_div.py"
@@ -176,8 +198,17 @@ dash_app_script                        = "plot_embeddings_dash.py"
 # Base Output directories
 data_output_path                       = os.path.join(output_path, "data")
 plot_output_path                       = os.path.join(output_path, "plots")
-LAI_path                                = os.path.join(output_path, "LAI")
-ancestry_STT_path                       = os.path.join(output_path, "ancestry_STT")
+# Both are namespaced by LAI_method (LAI/RFmix, LAI/GNN, LAI/True and the
+# matching ancestry_STT subdirectory) so runs using different local ancestry
+# methods can share one output_path without overwriting each other.
+LAI_root_path                           = os.path.join(output_path, "LAI")
+LAI_path                                = os.path.join(LAI_root_path, LAI_method)
+ancestry_STT_path                       = os.path.join(output_path, "ancestry_STT", LAI_method)
+# Genome-wide ancestry proportions: the hand-off between the (expensive,
+# threshold-independent) LAI rule and the (cheap, threshold-dependent)
+# select_ancestry_samples checkpoint. Name matches
+# TOTAL_ANCESTRY_PROPORTIONS_FILE in infer_local_ancestry.py.
+ancestry_proportions                    = os.path.join(LAI_path, "total_ancestry_proportions.parquet")
 
 # Target file names
 pca_plot_file_name                                      = "pca.png"
@@ -337,7 +368,7 @@ if not is_SS_demography: # Relative divergence plot is not applicable to steppin
     STT_targets = STT_targets + [relative_div_plot, relative_div_plot_summary]
 
 if admix_mode:
-    STT_targets = STT_targets + [os.path.join(output_path, "ancestry_STT_done.flag")]
+    STT_targets = STT_targets + [os.path.join(output_path, f"ancestry_STT_done.{LAI_method}.flag")]
 
 if scan_p_mode:
     STT_targets = STT_targets + [scan_p_output]
@@ -673,7 +704,11 @@ rule simulate_trees:
         sim_params = sim_finished_file_name,
         mu = mutation_rate,
         r = recombination_rate,
-        num_threads = num_threads
+        num_threads = num_threads,
+        # Ground-truth local ancestry always lands in LAI/True/, independent of
+        # the active LAI_method, so it stays available as a reference for runs
+        # that infer ancestry with RFmix or GNN.
+        true_LAI_path = os.path.join(LAI_root_path, "True")
     shell:
         """
         mkdir -p {params.outdir}
@@ -686,7 +721,8 @@ rule simulate_trees:
             --sim_params {params.sim_params} \
             --mu {params.mu} \
             --r {params.r} \
-            --num_threads {params.num_threads}
+            --num_threads {params.num_threads} \
+            --true_LAI_path {params.true_LAI_path}
 
         """
 # # ______________________infer Rules_____________________
@@ -726,49 +762,90 @@ rule infer_trees:
         """
 # ______________________admixture Rules____________________
 if admix_mode:
-    checkpoint infer_local_ancestry:
+    # Local ancestry inference proper. Deliberately knows nothing about
+    # significant_ancestry_threshold — that only affects which samples enter
+    # each ancestry-specific STT, and lives in select_ancestry_samples below,
+    # so re-thresholding never re-runs this (expensive) step.
+    rule infer_local_ancestry:
         input:
-            input_path  = trees_dir,
             trees_ready = trees_ready,
             pop_labels  = pop_labels,
-            pop_colors  = pop_colors,
             script      = infer_local_ancestry_script,
         output:
-            LAI_dir          = directory(LAI_path),
-            ancestry_STT_dir = directory(ancestry_STT_path),
+            # LAI_dir is only an output of this rule when ancestry is actually
+            # inferred here. Under LAI_method='True' the directory is filled by
+            # simulate_trees.py, and declaring it as an output would make
+            # Snakemake delete those ground-truth files before this rule runs.
+            # The proportions parquet is written in every method branch, so it
+            # is the tracked output that always anchors this rule in the DAG.
+            **({} if LAI_method == "True" else {"LAI_dir": directory(LAI_path)}),
+            ancestry_proportions = ancestry_proportions,
         params:
+            # trees_dir is passed as a param, not an input: it is only produced
+            # as a side effect of simulate_trees/infer_trees (whose tracked
+            # output is the trees_ready sentinel inside it), so requiring it as
+            # an input directory would fail on a fresh run.
+            input_path         = trees_dir,
+            LAI_dir            = LAI_path,
             r                  = recombination_rate,
             mu                 = mutation_rate,
             admix_pops         = " ".join(admixed_pops_list),
             reference_pops_arg = ("--reference_pops " + " ".join(reference_pops_list)) if reference_pops_list is not None else "",
             pops_arg           = ("--pops " + " ".join(pops_list)) if pops_list is not None else "",
-            threshold          = significant_ancestry_threshold,
-            num_threads        = 1,  # parallelizing this step has been observed to be slower, not faster
+            LAI_method         = LAI_method,
+            # RFmix: parallelizing this step has been observed to be slower, not
+            # faster. GNN/True are per-contig and do benefit from parallelism.
+            num_threads        = 1 if LAI_method == "RFmix" else num_threads,
         shell:
             """
-            mkdir -p {output.LAI_dir} {output.ancestry_STT_dir}
+            mkdir -p {params.LAI_dir}
             python {input.script} \
-                --input_path {input.input_path} \
-                --LAI_path {output.LAI_dir} \
-                --ancestry_STT_path {output.ancestry_STT_dir} \
+                --input_path {params.input_path} \
+                --LAI_path {params.LAI_dir} \
                 --pop_labels {input.pop_labels} \
-                --pop_colors {input.pop_colors} \
                 --r {params.r} \
                 --mu {params.mu} \
                 --admix_pops {params.admix_pops} \
                 {params.reference_pops_arg} \
                 {params.pops_arg} \
-                --significant_ancestry_threshold {params.threshold} \
+                --LAI_method {params.LAI_method} \
                 --num_threads {params.num_threads}
+            """
+
+    # Threshold-dependent sample selection: reads the genome-wide ancestry
+    # proportions and writes one filtered pop_labels.csv per reference
+    # population. Cheap, so re-running it on a threshold change costs nothing.
+    checkpoint select_ancestry_samples:
+        input:
+            ancestry_proportions = ancestry_proportions,
+            pop_labels           = pop_labels,
+            pop_colors           = pop_colors,
+            script               = select_ancestry_samples_script,
+        output:
+            ancestry_STT_dir = directory(ancestry_STT_path),
+        params:
+            LAI_dir    = LAI_path,
+            admix_pops = " ".join(admixed_pops_list),
+            threshold  = significant_ancestry_threshold,
+        shell:
+            """
+            mkdir -p {output.ancestry_STT_dir}
+            python {input.script} \
+                --LAI_path {params.LAI_dir} \
+                --ancestry_STT_path {output.ancestry_STT_dir} \
+                --pop_labels {input.pop_labels} \
+                --pop_colors {input.pop_colors} \
+                --admix_pops {params.admix_pops} \
+                --significant_ancestry_threshold {params.threshold}
             """
 
     # Re-globs the checkpoint's output directory to discover the realized
     # ancestry labels (unknown at parse time whenever reference_pops is None).
     def ancestry_labels_from_checkpoint(wildcards):
-        ck_dir = checkpoints.infer_local_ancestry.get(**wildcards).output.ancestry_STT_dir
+        ck_dir = checkpoints.select_ancestry_samples.get(**wildcards).output.ancestry_STT_dir
         return sorted(set(glob_wildcards(os.path.join(ck_dir, "{label}", "data", "pop_labels.csv")).label))
 
-    compute_pdf_ancestry_flag = os.path.join(output_path, "compute_pdf_ancestry_done.flag")
+    compute_pdf_ancestry_flag = os.path.join(output_path, f"compute_pdf_ancestry_done.{LAI_method}.flag")
 
 # # ______________________rates Rules_____________________
 rule compute_pdf:
@@ -777,7 +854,13 @@ rule compute_pdf:
         script = compute_pdf_wrapper_script,
         pop_labels = pop_labels,
         trees_ready = trees_ready,
-        **({"LAI_dir": LAI_path, "ancestry_STT_dir": ancestry_STT_path} if admix_mode else {})
+        # ancestry_STT_dir orders this rule after the select_ancestry_samples
+        # checkpoint. LAI_dir is only listed when infer_local_ancestry produces it
+        # — under LAI_method='True' it comes from simulate_trees.py and is no
+        # rule's declared output, so requiring it here would fail the DAG on a
+        # fresh run.
+        **({"ancestry_STT_dir": ancestry_STT_path} if admix_mode else {}),
+        **({"LAI_dir": LAI_path} if admix_mode and LAI_method != "True" else {})
     params:
         trees_dir = trees_dir,
         outdir = data_output_path,
@@ -792,7 +875,7 @@ rule compute_pdf:
         pdf_data = pdf_data,
         # compute_pdf.py (admix mode) writes one pdf parquet per ancestry label
         # as a side effect of this same shell invocation, into subdirectories
-        # whose names aren't known until the infer_local_ancestry checkpoint
+        # whose names aren't known until the select_ancestry_samples checkpoint
         # has run. Snakemake 9.x doesn't support function-valued outputs, so
         # those per-label files can't be declared individually; this flag is
         # the real tracked output that downstream per-ancestry rules depend on
@@ -1118,7 +1201,7 @@ DASHEOF
 # Repeats the STT rules above once per reference/ancestry population label,
 # rooted at {ancestry_STT_path}/{ancestry}/data and .../plots instead of
 # data_output_path/plot_output_path. Ancestry labels are only known once the
-# infer_local_ancestry checkpoint has run (reference_pops may be None in
+# select_ancestry_samples checkpoint has run (reference_pops may be None in
 # config, defaulted internally by infer_local_ancestry.py), so these are
 # plain wildcard rules driven by the aggregator function/sentinel rule below.
 if admix_mode:
@@ -1520,7 +1603,7 @@ DASHEOF
         input:
             ancestry_targets
         output:
-            touch(os.path.join(output_path, "ancestry_STT_done.flag"))
+            touch(os.path.join(output_path, f"ancestry_STT_done.{LAI_method}.flag"))
 
 # Not in STT_targets yet — run explicitly with: snakemake plot_embeddings_pyvista
 rule plot_embeddings_pyvista:
@@ -1786,6 +1869,8 @@ if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding
             N_max = N_max,
             p = p,
             link = link,
+            l1_penalties = l1_penalties,
+            l2_penalties = l2_penalties,
             n_timepoints_emb = n_timepoints_emb,
             outdir = scan_d_outdir,
             true_rates_arg = f"--true_rates {rates_true}" if demes_file_path and not is_SS_demography else "",
@@ -1804,6 +1889,8 @@ if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding
                 --N_max {params.N_max} \
                 --p {params.p} \
                 --link {params.link} \
+                --l1_penalties {params.l1_penalties} \
+                --l2_penalties {params.l2_penalties} \
                 --n_timepoints_emb {params.n_timepoints_emb} \
                 {params.true_rates_arg} \
                 {params.per_haplotype}
