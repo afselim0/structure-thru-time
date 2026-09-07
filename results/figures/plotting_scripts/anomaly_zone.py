@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import os
 filename = os.path.basename(__file__).split(".")[0]
 
+# Relative paths below are anchored at this script's directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 def complex_4_pops(Ne, Ne_bottleneck, Ne_A_recent, Ne_B_recent, Ne_C_recent, C_recent_growth_stop_time, A_B_split_time, AB_C_split_time, ABC_D_split_time):
     # b = lambda x: np.log(2/3 + (5*np.exp(2*x)-2)/(6*(3*np.exp(2*x)-2*np.exp(x))))
     # recent_split_branch_length = (b(distant_split_branch_length/Ne) / 2)*Ne
@@ -139,5 +142,5 @@ for tick_label, color in zip(ax.get_xticklabels(), bar_colors):
 ax.set_ylabel("Probability")
 ax.set_xlabel("Topology")
 fig.tight_layout()
-fig.savefig(f"../outputs/{filename}.pdf", dpi=500)
+fig.savefig(f"../sim_figs/{filename}.pdf", dpi=500)
 # %%
