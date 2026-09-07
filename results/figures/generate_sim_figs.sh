@@ -5,6 +5,11 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+# Every figure script does `from results.figures.plotting_style import *`, which
+# resolves as a namespace package only with the repo root on the import path.
+REPO_ROOT="$(cd ../.. && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 SCRIPT_DIR="./plotting_scripts"
 APP_SCRIPTS="mean_coal_rates.py"   # empirical figures — see generate_app_figs.sh
 
