@@ -39,7 +39,7 @@ pop_colors = pd.DataFrame({
 })
 
 # Labels are per-example: they map each individual to its source population
-pop_labels = {ex: pd.read_csv(f"{sim_path}/{ex}/data/pop_labels.csv") for ex in examples}
+pop_labels = {ex: pd.read_csv(f"{sim_path}/{ex}/sim/data/pop_labels.csv") for ex in examples}
 
 # recent_bottleneck's structure is recent enough to need a shorter time axis
 min_time = {"three_way_admixture": 50, "ghost_admixture": 50, "recent_bottleneck": 10}
@@ -57,7 +57,7 @@ def load_ancestry_embeddings(method: str) -> dict:
     embeddings = {}
     for ex in examples:
         for anc in ancestries:
-            path = f"{sim_path}/{ex}/ancestry_STT/{method}/{anc}/data/{embeddings_suffix[ex]}"
+            path = f"{sim_path}/{ex}/sim/ancestry_STT/{method}/{anc}/data/{embeddings_suffix[ex]}"
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Missing {method} embeddings for {ex}/{anc}: {path}")
             embeddings[(ex, anc)] = pd.read_parquet(path)
