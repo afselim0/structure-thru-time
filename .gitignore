@@ -13,9 +13,16 @@ job_logs/
 *.txt
 *.log
 *.mp4
-results/empirical
-results/simulations
-results/figures/misc_figs
+results/outputs/
+results/figures/sim_figs_png/
+results/figures/app_figs_png/
+
+# Manuscript figures are tracked despite the blanket *.pdf rule above.
+# The directory must be re-included before the files within it can be.
+!results/figures/sim_figs/
+!results/figures/sim_figs/*.pdf
+!results/figures/app_figs/
+!results/figures/app_figs/*.pdf
 
 pop_colors.csv
 pop_labels.csv
@@ -26,6 +33,8 @@ tests/
 .misc/
 results/.tests
 local_data/
+data/configs/sim_test_configs/
+data/configs/app_test_configs/
 
 ## Tree inference
 *.hap
@@ -41,7 +50,6 @@ local_data/
 finished_sim.txt
 finished_infer.txt
 
-results/simulations/outputs/
 *(jnovembre@uchicago.edu)*
 /sandbox
 /docs/plans
