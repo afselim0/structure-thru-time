@@ -9,7 +9,7 @@ num_threads: 12
 admixed_pops: [Admix_1, Admix_2]
 # Local ancestry method: RFmix (default), GNN, or True (ground-truth calls from
 # the simulation; simulated data only)
-LAI_method: RFmix
+LAI_method: "True"
 
 # Simulation Parameters
 num_contigs: 500
