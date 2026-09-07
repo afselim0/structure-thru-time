@@ -1,6 +1,6 @@
 demography: SS_1d_N100_m05
 demes_file_path: ../data/demes/SS_1d_N100_m05.yaml
-output_path: ../results/outputs/simulations/SS/SS_1d_N100_m05
+output_path: ../results/outputs/simulations/SS/SS_1d_N100_m05/sim
 version: 1
 num_threads: 8
 

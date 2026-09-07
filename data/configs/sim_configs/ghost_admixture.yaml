@@ -1,6 +1,6 @@
 demography: ghost_admixture
 demes_file_path: ../data/demes/ghost_admixture.yaml
-output_path: ../results/outputs/simulations/ghost_admixture
+output_path: ../results/outputs/simulations/ghost_admixture/sim
 version: 1
 num_threads: 12
 

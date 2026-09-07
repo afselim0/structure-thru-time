@@ -1,6 +1,6 @@
 demography: split
 demes_file_path: ../data/demes/split.yaml
-output_path: ../results/outputs/simulations/split
+output_path: ../results/outputs/simulations/split/sim
 version: 1
 num_threads: 12
 
@@ -14,11 +14,11 @@ recombination_rate: 1.2e-8
 # coal time pdf estimation
 max_time: 10000
 n_timepoints: 2000
-# fraction_samples: 1.0
 
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
+compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 100

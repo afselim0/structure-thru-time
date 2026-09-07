@@ -1,6 +1,6 @@
 demography: two_admix
 demes_file_path: ../data/demes/two_admix.yaml
-output_path: ../results/outputs/simulations/two_admix
+output_path: ../results/outputs/simulations/two_admix/sim
 version: 1
 num_threads: 12
 

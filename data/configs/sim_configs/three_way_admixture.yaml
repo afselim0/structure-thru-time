@@ -1,6 +1,6 @@
 demography: three_way_admixture
 demes_file_path: ../data/demes/three_way_admixture.yaml
-output_path: ../results/outputs/simulations/three_way_admixture
+output_path: ../results/outputs/simulations/three_way_admixture/sim
 version: 1
 num_threads: 12
 

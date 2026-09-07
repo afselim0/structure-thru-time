@@ -1,6 +1,6 @@
 demography: recent_bottleneck
 demes_file_path: ../data/demes/recent_bottleneck.yaml
-output_path: ../results/outputs/simulations/recent_bottleneck
+output_path: ../results/outputs/simulations/recent_bottleneck/sim
 version: 1
 num_threads: 12
 

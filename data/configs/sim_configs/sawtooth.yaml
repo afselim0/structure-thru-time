@@ -1,6 +1,6 @@
 demography: split_sawtooth
 demes_file_path: ../data/demes/split_sawtooth.yaml
-output_path: ../results/outputs/simulations/sawtooth
+output_path: ../results/outputs/simulations/sawtooth/sim
 version: 1
 num_threads: 12
 
@@ -18,7 +18,7 @@ n_timepoints: 5000
 # rate estimation parameters
 min_window_size: 80
 max_window_size: 1500
-poly: 1
+compute_variance: True
 
 # Embeddings estimation parameters
 p: 1

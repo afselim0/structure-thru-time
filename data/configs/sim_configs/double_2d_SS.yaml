@@ -1,6 +1,6 @@
 demography: double_2d_SS
 demes_file_path: ../data/demes/double_2d_SS.yaml
-output_path: ../results/outputs/simulations/double_2d_SS
+output_path: ../results/outputs/simulations/double_2d_SS/sim
 version: 1
 num_threads: 12
 
