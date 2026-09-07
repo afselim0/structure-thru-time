@@ -1,6 +1,6 @@
 demography: two_admix
 demes_file_path: ../data/demes/two_admix.yaml
-output_path: ../results/outputs/simulations/two_admix/sim
+output_path: ../results/outputs/simulations/admix/two_admix/sim
 version: 1
 num_threads: 12
 
@@ -26,7 +26,7 @@ n_timepoints: 2500
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
-compute_variance: false
+compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 100

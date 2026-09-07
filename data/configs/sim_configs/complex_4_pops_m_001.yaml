@@ -1,6 +1,6 @@
 demography: complex_4_pops_m_001
 demes_file_path: ../data/demes/complex_4_pops_m_001.yaml
-output_path: ../results/outputs/simulations/complex_4_pops_m_001/sim
+output_path: ../results/outputs/simulations/complex_4_pops/complex_4_pops_m_001/sim
 version: 1
 num_threads: 12
 

@@ -1,11 +1,9 @@
 demography: ghost_admixture
 demes_file_path: ../data/demes/ghost_admixture.yaml
-output_path: ../results/outputs/simulations/ghost_admixture/sim
+output_path: ../results/outputs/simulations/admix/ghost_admixture/sim
 version: 1
 num_threads: 12
 
-# Admixture parameters (reference_pops left unset to test the None-defaulting
-# path in infer_local_ancestry.py, which should resolve it to [A, B, C, D])
 admixed_pops: [A]
 # Local ancestry method: RFmix (default), GNN, or True (ground-truth calls from
 # the simulation; simulated data only)
@@ -26,7 +24,7 @@ n_timepoints: 2500
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
-compute_variance: false
+compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 100
