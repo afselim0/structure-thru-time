@@ -10,9 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.linalg import svd
 
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 
 def main():

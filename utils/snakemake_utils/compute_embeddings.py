@@ -2,10 +2,8 @@
 import argparse
 import pandas as pd
 import sys
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
 import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 from OptimizationFunctions import compute_distance_df, reconstruct_rates

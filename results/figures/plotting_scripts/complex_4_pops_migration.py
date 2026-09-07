@@ -12,19 +12,20 @@ import msprime
 filename = os.path.basename(__file__).split(".")[0]
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 from OptimizationFunctions import procrustes_align_trajectories_df
 
-m0_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/main_1/complex_4_pops.yaml"))
-m01_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/main_1/complex_4_pops_m_01.yaml"))
-m001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/main_1/complex_4_pops_m_001.yaml"))
-m0001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/main_1/complex_4_pops_m_0001.yaml"))
+m0_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops.yaml"))
+m01_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_01.yaml"))
+m001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_001.yaml"))
+m0001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_0001.yaml"))
 
-m0_embeddings = pd.read_parquet("../../../results/simulations/outputs/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m01_embeddings = pd.read_parquet("../../../results/simulations/outputs/complex_4_pops_m_01/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m001_embeddings = pd.read_parquet("../../../results/simulations/outputs/complex_4_pops_m_001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m0001_embeddings = pd.read_parquet("../../../results/simulations/outputs/complex_4_pops_m_0001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m0_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m01_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_01/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m0001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_0001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
 
 m01_embeddings = procrustes_align_trajectories_df(m0_embeddings, m01_embeddings, allow_reflections=True)
 m001_embeddings = procrustes_align_trajectories_df(m0_embeddings, m001_embeddings, allow_reflections=True)
@@ -33,8 +34,8 @@ m0001_embeddings = procrustes_align_trajectories_df(m0_embeddings, m0001_embeddi
 
 times = m0001_embeddings.time.unique().astype(int)
 
-pop_labels = pd.read_csv("../../../results/simulations/outputs/complex_4_pops/sim/data/pop_labels.csv")
-pop_colors = pd.read_csv("../../../results/simulations/outputs/complex_4_pops/sim/data/pop_colors.csv")
+pop_labels = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_labels.csv")
+pop_colors = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_colors.csv")
 A_color = pop_colors.loc[pop_colors.population=="A","color"].values[0]
 B_color = pop_colors.loc[pop_colors.population=="B","color"].values[0]
 
@@ -177,7 +178,7 @@ TITLE_SIZE = 10
 
 for letter, (title, _), plotter, ax in zip("ABC", panel_embeddings, plotters, embeddings_axes):
     img, _ = plotter.save_static(**RENDER_KW)
-    img.save(f"../misc_figs/{filename}_{letter}.png")
+    img.save(f"../sim_figs_png/{filename}_{letter}.png")
     ax.set_axis_off()
     ax.imshow(img, aspect="equal")
 
@@ -193,5 +194,5 @@ for letter, (title, _), ax in zip("ABC", panel_embeddings, embeddings_axes):
 fig.text(cell_pos.x0, label_baseline + 0.01, "D", ha="left", va="bottom",
          fontsize=SUBFIG_LABEL_SIZE, fontweight="bold")
 
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../sim_figs/{filename}.pdf")
 # %%

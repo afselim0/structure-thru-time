@@ -15,15 +15,16 @@ import os
 filename = os.path.basename(__file__).split(".")[0]
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-config_file = "../../../data/demes/main_1_config/double_2d_SS.yaml"
+config_file = "../../../data/configs/sim_configs/double_2d_SS.yaml"
 N_max = 1e6
-embeddings_df = pd.read_parquet("../../../results/simulations/outputs/double_2d_SS/data/smooth_embeddings.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].L2[1e-3,1e-4].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet")
-estimated_rates = pd.read_parquet("../../../results/simulations/outputs/double_2d_SS/data/rates.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
-reconstructed_rates = pd.read_parquet("../../../results/simulations/outputs/double_2d_SS/data/smooth_reconstructed_rates.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].L2[1e-3,1e-4].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
-pop_labels = pd.read_csv("../../../results/simulations/outputs/double_2d_SS/data/pop_labels.csv")
-pop_colors = pd.read_csv("../../../results/simulations/outputs/double_2d_SS/data/pop_colors.csv")
+embeddings_df = pd.read_parquet("../../outputs/simulations/double_2d_SS/data/smooth_embeddings.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].L2[1e-3,1e-4].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet")
+estimated_rates = pd.read_parquet("../../outputs/simulations/double_2d_SS/data/rates.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
+reconstructed_rates = pd.read_parquet("../../outputs/simulations/double_2d_SS/data/smooth_reconstructed_rates.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].L2[1e-3,1e-4].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
+pop_labels = pd.read_csv("../../outputs/simulations/double_2d_SS/data/pop_labels.csv")
+pop_colors = pd.read_csv("../../outputs/simulations/double_2d_SS/data/pop_colors.csv")
 times = estimated_rates.columns.astype(float)
 min_time = 50
 # recolor demes by their "g<N>_" group: each group gets its own sequential colormap, so the
@@ -468,10 +469,10 @@ add_subfig_label("A", schematic_ax)
 add_subfig_label("C", bottom_axes[0][0], dy=0.022)
 
 img, _ = plotter.save_static(**RENDER_KW)
-img.save("../misc_figs/double_2d.png")
+img.save("../sim_figs_png/double_2d.png")
 embeddings_ax.set_axis_off()
 embeddings_ax.imshow(img, aspect="equal")
 # B shares A's baseline so the two labels line up across the top row
 add_subfig_label("B", embeddings_ax, y=schematic_ax.get_position().y1)
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../sim_figs/{filename}.pdf")
 # %%

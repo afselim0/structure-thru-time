@@ -10,7 +10,7 @@ Two ways to use it (run from the `utils/` directory):
 
 1. From a run's snakemake config (recommended — one-liner, derives everything):
 
-    python bundle_dash.py --config ../data/empirical_runs/wohns_ragsdale_chr21.yaml
+    python snakemake_utils/bundle_dash.py --config ../data/configs/sim_configs/complex_4_pops.yaml
 
 2. From explicit paths (for embeddings produced outside the pipeline):
 

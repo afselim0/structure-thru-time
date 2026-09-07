@@ -9,9 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from OptimizationFunctions import compute_distance_df, reconstruct_rates
 

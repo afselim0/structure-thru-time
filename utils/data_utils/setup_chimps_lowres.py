@@ -4,10 +4,10 @@ complete SINGER posterior samples (indices 0–19, 389 segments each).
 
 Creates:
   data/trees/chimps_lowres_{k}/              — 389 symlinks to all_chopped/*_{k}.trees
-  data/empirical_runs/chimps_lowres/PS{k}.yaml  — config for each k
-  data/empirical_runs/chimps_lowres/README.md   — explains the setup
+  data/configs/app_configs/chimps_lowres/PS{k}.yaml  — config for each k
+  data/configs/app_configs/chimps_lowres/README.md   — explains the setup
 
-Template: data/empirical_runs/chimps_PS0_lowres.yaml
+Template: data/configs/app_configs/chimps_PS0_lowres.yaml
 Output results go to: results/empirical/DeManuel/chimps_lowres/PS{k}/
 """
 import glob
@@ -17,8 +17,8 @@ import re
 SRC_DIR     = "/project/jnovembre/afselim/structure-thru-time/data/trees/DeManuel/all_chopped"
 BASE        = "/project2/jnovembre/mianniravn/stt-0526/structure-thru-time"
 TREES_BASE  = os.path.join(BASE, "data", "trees")
-CONFIGS_DIR = os.path.join(BASE, "data", "empirical_runs", "chimps_lowres")
-TEMPLATE    = os.path.join(BASE, "data", "empirical_runs", "chimps_PS0_lowres.yaml")
+CONFIGS_DIR = os.path.join(BASE, "data", "configs", "app_configs", "chimps_lowres")
+TEMPLATE    = os.path.join(BASE, "data", "configs", "app_configs", "chimps_PS0_lowres.yaml")
 
 COMPLETE_INDICES = list(range(100))  # 0–99; coverage decreases with index (389→281 segments)
 

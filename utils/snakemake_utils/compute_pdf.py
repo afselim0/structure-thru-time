@@ -2,8 +2,7 @@
 import argparse
 import sys
 import os
-sys.path.append("../src")
-sys.path.append("../../src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from CountCoalEvents import CountCoalEvents, CountCoalEvents_admix
 import pandas as pd
 

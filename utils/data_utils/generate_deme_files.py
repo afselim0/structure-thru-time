@@ -1,14 +1,18 @@
 #%%
+import os
 import msprime
 import demes
 import stdpopsim
 import demesdraw
 import numpy as np
 
-main_demes_dir_1 = "../demes/main_1/"
-main_demes_dir_2 = "../demes/main_2/"
-supp_demes_dir = "../demes/supp/"
-stdpopsim_demes_dir = "../demes/stdpopsim/"
+# data/demes/ is flat and is generated entirely by this script. Paths are resolved
+# relative to this file so it can be run from any working directory.
+demes_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "demes") + os.sep
+main_demes_dir_1 = demes_dir
+main_demes_dir_2 = demes_dir
+supp_demes_dir = demes_dir
+stdpopsim_demes_dir = demes_dir
 #%%
 ##--------------------------------------------------------
 ## Demogaphy functions
@@ -380,7 +384,7 @@ demes.dump(graph, main_demes_dir_1 + "double_2d_SS.yaml", simplified=False)
 # %%
 # SS demes
 import os
-SS_demes_dir_1 = "../demes/SS_demes/"
+SS_demes_dir_1 = demes_dir
 os.makedirs(SS_demes_dir_1, exist_ok=True)
 Ne = 100
 K1 = 100

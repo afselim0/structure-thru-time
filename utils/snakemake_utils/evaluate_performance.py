@@ -11,12 +11,11 @@ from matplotlib.lines import Line2D
 from scipy.stats import spearmanr
 from plot_rates import compute_median_rates
 
-sys.path.append("../../src")
-sys.path.append("../src")
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from plotting_style import *
 import argparse
 import matplotlib.pyplot as plt
-import os
 
 
 def reconstructed_vs_input_all_times(input_rates, reconstructed_rates, pop_labels, pop_colors, N_max, id_label="sample_id", ax=None):

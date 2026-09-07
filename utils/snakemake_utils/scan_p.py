@@ -8,7 +8,7 @@ import pandas as pd
 from pathos.multiprocessing import ProcessingPool
 from scipy.stats import spearmanr
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 from OptimizationFunctions import compute_distance_df, reconstruct_rates, compute_total_unpenalized_loss
 from evaluate_performance import align_time_columns

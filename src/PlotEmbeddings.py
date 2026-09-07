@@ -12,12 +12,12 @@ PlotEmbeddings is responsible for:
     - population medians
     - legends
 - Delegating support-geometry construction (e.g. support tubes, rings)
-  to src/support_tube.py
+  to utils/misc_utils/support_tube.py
 
 Design principles
 -----------------
 - PlotEmbeddings contains no geometry logic.
-- All computational geometry is implemented in src/support_tube.py.
+- All computational geometry is implemented in utils/misc_utils/support_tube.py.
 - This module focuses strictly on plotting, layering, and orchestration.
 - Heavy dependencies (e.g. marching cubes) are imported lazily.
 
@@ -39,6 +39,25 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from PIL import Image
+
+# ----------------------- support tube module loading -----------------------
+def _import_support_tube():
+    """Import the support_tube geometry module from utils/misc_utils/.
+
+    Resolved relative to this file so it works regardless of the working
+    directory or how PlotEmbeddings was imported.
+    """
+    import importlib
+    import os
+    import sys
+
+    misc_utils = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "utils", "misc_utils"
+    )
+    if misc_utils not in sys.path:
+        sys.path.append(misc_utils)
+    return importlib.import_module("support_tube")
+
 
 # ----------------------- tunables ------------------------------------------
 sample_line_width = 2
@@ -589,7 +608,7 @@ class PlotEmbeddings:
         """
         Add a 3D support tube (Mesh3d) for each population.
 
-        Thin wrapper: geometry lives in src/support_tube.py.
+        Thin wrapper: geometry lives in utils/misc_utils/support_tube.py.
         """
         if self.fig is None:
             raise RuntimeError("Call init_plot() before adding layers.")
@@ -605,11 +624,11 @@ class PlotEmbeddings:
             return
 
         try:
-            # from utils import support_tube  # type: ignore
-            import support_tube
+            support_tube = _import_support_tube()
         except Exception as e:
             raise ImportError(
-                "add_support_tube() requires utils/support_tube.py to exist and be importable."
+                "add_support_tube() requires utils/misc_utils/support_tube.py to exist "
+                "and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"
@@ -739,7 +758,7 @@ class PlotEmbeddings:
         """
         Add mask-derived ring outlines for each population.
 
-        Delegates geometry to src/support_tube.py.
+        Delegates geometry to utils/misc_utils/support_tube.py.
         """
         if self.fig is None:
             raise RuntimeError("Call init_plot() before adding layers.")
@@ -755,10 +774,11 @@ class PlotEmbeddings:
             return
 
         try:
-            from utils import support_tube  # type: ignore
+            support_tube = _import_support_tube()
         except Exception as e:
             raise ImportError(
-                "add_support_rings() requires utils/support_tube.py to exist and be importable."
+                "add_support_rings() requires utils/misc_utils/support_tube.py to exist "
+                "and be importable."
             ) from e
 
         vis_flag = True if visible == "on" else "legendonly"

@@ -20,7 +20,8 @@ from matplotlib.transforms import ScaledTranslation, Bbox
 from matplotlib.patches import FancyArrowPatch
 
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../misc_scripts")
 file_name = os.path.basename(__file__).split(".")[0]
@@ -56,7 +57,7 @@ distances_color = "magenta"
 #----------------------------------------------------------
 
 # Example parameters for the sawtooth model
-deme_file = "../../../data/demes/main/zigzag.yaml"
+deme_file = "../../../data/demes/zigzag.yaml"
 max_time = 40000
 delta_t = 10
 n_timepoints = max_time//delta_t + 1
@@ -280,5 +281,5 @@ fig.legend(legend_handles, legend_labels, ncol=3, loc="upper center",
 
 # %%
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf", bbox_inches="tight", dpi=500)
+fig.savefig(f"../sim_figs/{filename}.pdf", bbox_inches="tight", dpi=500)
 # %%

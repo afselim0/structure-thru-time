@@ -85,7 +85,7 @@ ax.tick_params(labelsize=7)
 ax.view_init(elev=22, azim=-65)
 ax.dist = 5  # zoom in (default ~10)
 
-out = "../results/simulations/outputs/stepping_stones_1d/sim/plots/stepping_stones_1d_schematic.pdf"
+out = "../../results/figures/sim_figs/stepping_stones_1d_schematic.pdf"
 import os
 os.makedirs(os.path.dirname(out), exist_ok=True)
 fig.savefig(out, bbox_inches="tight", dpi=300)

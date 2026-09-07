@@ -12,9 +12,7 @@ import matplotlib.patches as mpatches
 from PIL import Image
 from scipy.linalg import svd
 
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from PlotEmbeddings import PlotEmbeddings
 

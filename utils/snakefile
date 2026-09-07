@@ -160,6 +160,10 @@ STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L
 # Whether smoothing (joint optimization) is requested — gates the parallel smoothed rules/targets
 smoothing_on                      = (l1_penalties != "None") or (l2_penalties != "None")
 
+# Directory holding the wrapper scripts this workflow invokes. All paths in this file are
+# resolved against the working directory, which is always utils/.
+UTILS_DIR                         = "snakemake_utils"
+
 # Main scripts
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
 COMPUTE_RATES_SCRIPT              = "../src/ComputeCoalescentRates.py"
@@ -169,28 +173,27 @@ PLOT_EMBEDDINGS_SCRIPT            = "../src/PlotEmbeddings.py"
 PLOT_EMBEDDINGS_PYVISTA_SCRIPT    = "../src/PlotEmbeddingsPyVista.py"
 
 # Util Scripts
-preprocess_demography_script           = "preprocess_demography.py"
-preprocess_samples_script              = "preprocess_samples.py"
-plot_demography_script                 = "plot_demography.py"
-pca_script                             = "run_pca.py"
-compute_rates_true_script              = "compute_rates_true.py"
-simulate_trees_script                  = "simulate_trees.py"
-infer_trees_script                     = "infer_trees.py"
-compute_pdf_wrapper_script             = "compute_pdf.py"
-infer_local_ancestry_script            = "infer_local_ancestry.py"
-select_ancestry_samples_script         = "select_ancestry_samples.py"
-compute_rates_wrapper_script           = "compute_rates.py"
-plot_rates_script                      = "plot_rates.py"
-plot_relative_div_script               = "plot_relative_div.py"
-compute_embeddings_wrapper_script      = "compute_embeddings.py"
-plot_embeddings_wrapper_script         = "plot_embeddings.py"
-plot_embeddings_pyvista_wrapper_script = "plot_embeddings_pyvista.py"
-evaluate_performance_script            = "evaluate_performance.py"
-scan_p_script                          = "scan_p.py"
-scan_d_script                          = "scan_d.py"
-run_population_combs_script            = "run_pop_combs.py"
-bundle_dash_script                     = "bundle_dash.py"
-dash_app_script                        = "plot_embeddings_dash.py"
+preprocess_demography_script           = os.path.join(UTILS_DIR, "preprocess_demography.py")
+preprocess_samples_script              = os.path.join(UTILS_DIR, "preprocess_samples.py")
+plot_demography_script                 = os.path.join(UTILS_DIR, "plot_demography.py")
+pca_script                             = os.path.join(UTILS_DIR, "run_pca.py")
+compute_rates_true_script              = os.path.join(UTILS_DIR, "compute_rates_true.py")
+simulate_trees_script                  = os.path.join(UTILS_DIR, "simulate_trees.py")
+infer_trees_script                     = os.path.join(UTILS_DIR, "infer_trees.py")
+compute_pdf_wrapper_script             = os.path.join(UTILS_DIR, "compute_pdf.py")
+infer_local_ancestry_script            = os.path.join(UTILS_DIR, "infer_local_ancestry.py")
+select_ancestry_samples_script         = os.path.join(UTILS_DIR, "select_ancestry_samples.py")
+compute_rates_wrapper_script           = os.path.join(UTILS_DIR, "compute_rates.py")
+plot_rates_script                      = os.path.join(UTILS_DIR, "plot_rates.py")
+plot_relative_div_script               = os.path.join(UTILS_DIR, "plot_relative_div.py")
+compute_embeddings_wrapper_script      = os.path.join(UTILS_DIR, "compute_embeddings.py")
+plot_embeddings_wrapper_script         = os.path.join(UTILS_DIR, "plot_embeddings.py")
+plot_embeddings_pyvista_wrapper_script = os.path.join(UTILS_DIR, "plot_embeddings_pyvista.py")
+evaluate_performance_script            = os.path.join(UTILS_DIR, "evaluate_performance.py")
+scan_p_script                          = os.path.join(UTILS_DIR, "scan_p.py")
+scan_d_script                          = os.path.join(UTILS_DIR, "scan_d.py")
+bundle_dash_script                     = os.path.join(UTILS_DIR, "bundle_dash.py")
+dash_app_script                        = os.path.join(UTILS_DIR, "plot_embeddings_dash.py")
 
 # =====================================================
 # File Names
@@ -645,8 +648,8 @@ rule plot_embeddings_true:
             {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory
-python plot_embeddings_dash.py \\
+# Run from the utils/ directory (script lives in utils/snakemake_utils/)
+python snakemake_utils/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1071,8 +1074,8 @@ rule plot_embeddings:
             {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory
-python plot_embeddings_dash.py \\
+# Run from the utils/ directory (script lives in utils/snakemake_utils/)
+python snakemake_utils/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1090,7 +1093,7 @@ rule plot_2d_slice:
         embeddings = embeddings_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script     = "plot_2d_slice.py"
+        script     = os.path.join(UTILS_DIR, "plot_2d_slice.py")
     output:
         slice_2d
     params:
@@ -1154,8 +1157,8 @@ if smoothing_on:
                 {params.per_haplotype}
             cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory
-python plot_embeddings_dash.py \\
+# Run from the utils/ directory (script lives in utils/snakemake_utils/)
+python snakemake_utils/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1174,7 +1177,7 @@ DASHEOF
             embeddings = smooth_embeddings_data,
             pop_colors = pop_colors,
             pop_labels = pop_labels,
-            script     = "plot_2d_slice.py"
+            script     = os.path.join(UTILS_DIR, "plot_2d_slice.py")
         output:
             smooth_slice_2d
         params:
@@ -1384,8 +1387,8 @@ if admix_mode:
                 {params.per_haplotype}
             cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory
-python plot_embeddings_dash.py \\
+# Run from the utils/ directory (script lives in utils/snakemake_utils/)
+python snakemake_utils/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1404,7 +1407,7 @@ DASHEOF
             embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", embeddings_data_file_name),
             pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
             pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
-            script     = "plot_2d_slice.py"
+            script     = os.path.join(UTILS_DIR, "plot_2d_slice.py")
         output:
             os.path.join(ancestry_STT_path, "{ancestry}", "plots", slice_2d_file_name)
         params:
@@ -1498,8 +1501,8 @@ DASHEOF
                     {params.per_haplotype}
                 cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory
-python plot_embeddings_dash.py \\
+# Run from the utils/ directory (script lives in utils/snakemake_utils/)
+python snakemake_utils/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1518,7 +1521,7 @@ DASHEOF
                 embeddings = os.path.join(ancestry_STT_path, "{ancestry}", "data", smooth_embeddings_data_file_name),
                 pop_colors = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_colors.csv"),
                 pop_labels = os.path.join(ancestry_STT_path, "{ancestry}", "data", "pop_labels.csv"),
-                script     = "plot_2d_slice.py"
+                script     = os.path.join(UTILS_DIR, "plot_2d_slice.py")
             output:
                 os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_slice_2d_file_name)
             params:
@@ -1942,7 +1945,7 @@ rule plot_embeddings_replicates:
         embeddings = embeddings_replicate_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script = "plot_embeddings_replicates.py"
+        script = os.path.join(UTILS_DIR, "plot_embeddings_replicates.py")
     output:
         replicates_panel
     params:
@@ -1977,7 +1980,7 @@ rule plot_replicate_rates_comparison:
         emb_b  = os.path.join(data_output_path, "embeddings_seed{seed_b}" + STT_TAG + ".parquet"),
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script = "plot_replicate_rates_comparison.py"
+        script = os.path.join(UTILS_DIR, "plot_replicate_rates_comparison.py")
     output:
         png  = os.path.join(plot_output_path, "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".png"),
         html = os.path.join(plot_output_path, "rates_comparison_seed{seed_a}_vs_seed{seed_b}" + PLOT_TAG + ".html"),
@@ -2013,7 +2016,7 @@ rule plot_replicate_rates_ggpairs:
         embeddings = embeddings_replicate_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script     = "plot_replicate_rates_ggpairs.py"
+        script     = os.path.join(UTILS_DIR, "plot_replicate_rates_ggpairs.py")
     output:
         replicates_ggpairs
     params:
@@ -2045,7 +2048,7 @@ rule plot_2d_slice_replicates:
         embeddings = embeddings_replicate_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script     = "plot_2d_slice_replicates.py"
+        script     = os.path.join(UTILS_DIR, "plot_2d_slice_replicates.py")
     output:
         replicates_2d_slice
     params:
@@ -2078,7 +2081,7 @@ rule plot_performance_replicates:
         rates      = rates_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        script     = "plot_performance_replicates.py"
+        script     = os.path.join(UTILS_DIR, "plot_performance_replicates.py")
     output:
         replicates_performance_panel
     params:

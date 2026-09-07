@@ -10,31 +10,32 @@ import demes
 import demesdraw
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 from OptimizationFunctions import procrustes_align_trajectories_df
 from evaluate_performance import reconstructed_vs_input_hist2d
 plt.rcParams['savefig.bbox'] = None
 
-misc_plot_path = "../misc_figs/misc.png"
-graph = demes.load("../../../data/demes/main_1/two_admix.yaml")
-pop_colors = pd.read_csv("../../simulations/outputs/two_admix/data/pop_colors.csv")
+misc_plot_path = "../sim_figs_png/misc.png"
+graph = demes.load("../../../data/demes/two_admix.yaml")
+pop_colors = pd.read_csv("../../outputs/simulations/two_admix/data/pop_colors.csv")
 pop_colors.iloc[-1,-1] = "#505011"
-pop_labels = pd.read_csv("../../simulations/outputs/two_admix/data/pop_labels.csv")
+pop_labels = pd.read_csv("../../outputs/simulations/two_admix/data/pop_labels.csv")
 pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
 min_time = 50
 max_time = 5000
 xy_lims = 1e6
 N_max = 1000000
 
-embeddings_WG = pd.read_parquet("../../simulations/outputs/two_admix/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-input_rates_WG = pd.read_parquet("../../simulations/outputs/two_admix/data/rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-reconstructed_rates_WG = pd.read_parquet("../../simulations/outputs/two_admix/data/reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+embeddings_WG = pd.read_parquet("../../outputs/simulations/two_admix/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+input_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/data/rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+reconstructed_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/data/reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
 
-true_embeddings_A = pd.read_parquet("../../simulations/outputs/two_admix/ancestry_STT/True/A/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_B = pd.read_parquet("../../simulations/outputs/two_admix/ancestry_STT/True/B/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_C = pd.read_parquet("../../simulations/outputs/two_admix/ancestry_STT/True/C/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_D = pd.read_parquet("../../simulations/outputs/two_admix/ancestry_STT/True/D/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_A = pd.read_parquet("../../outputs/simulations/two_admix/ancestry_STT/True/A/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_B = pd.read_parquet("../../outputs/simulations/two_admix/ancestry_STT/True/B/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_C = pd.read_parquet("../../outputs/simulations/two_admix/ancestry_STT/True/C/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_D = pd.read_parquet("../../outputs/simulations/two_admix/ancestry_STT/True/D/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
 
 ref_embeddings_AB = true_embeddings_A
 ref_embeddings_CD = true_embeddings_D
@@ -173,5 +174,5 @@ ancestry_axes[0][2].set_title("C Ancestry", fontsize=10)
 ancestry_axes[0][3].set_title("D Ancestry", fontsize=10)
 
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf", dpi=500, bbox_inches="tight", pad_inches=0.01)
+fig.savefig(f"../sim_figs/{filename}.pdf", dpi=500, bbox_inches="tight", pad_inches=0.01)
 # %%

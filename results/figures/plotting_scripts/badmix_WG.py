@@ -10,18 +10,19 @@ import demes
 import demesdraw
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 from OptimizationFunctions import procrustes_align_trajectories_df
 
-misc_plot_path = "../misc_figs/misc"
-three_way_graph = demes.load("../../../data/demes/main_1/three_way_admixture.yaml")
-ghost_graph = demes.load("../../../data/demes/main_1/ghost_admixture.yaml")
-bottleneck_graph = demes.load("../../../data/demes/main_1/recent_bottleneck.yaml")
+misc_plot_path = "../sim_figs_png/misc"
+three_way_graph = demes.load("../../../data/demes/three_way_admixture.yaml")
+ghost_graph = demes.load("../../../data/demes/ghost_admixture.yaml")
+bottleneck_graph = demes.load("../../../data/demes/recent_bottleneck.yaml")
 
-three_way_pop_labels = pd.read_csv("../../simulations/outputs/three_way_admixture/data/pop_labels.csv")
-ghost_pop_labels = pd.read_csv("../../simulations/outputs/ghost_admixture/data/pop_labels.csv")
-bottleneck_pop_labels = pd.read_csv("../../simulations/outputs/recent_bottleneck/data/pop_labels.csv")
+three_way_pop_labels = pd.read_csv("../../outputs/simulations/three_way_admixture/data/pop_labels.csv")
+ghost_pop_labels = pd.read_csv("../../outputs/simulations/ghost_admixture/data/pop_labels.csv")
+bottleneck_pop_labels = pd.read_csv("../../outputs/simulations/recent_bottleneck/data/pop_labels.csv")
 
 # Each simulation's own pop_colors.csv assigns the palette in a different
 # population order (e.g. A is purple in three_way/ghost but green in
@@ -36,9 +37,9 @@ min_time = 5
 max_time = 5000
 xy_lims = 1e6
 
-three_way_embeddings_WG = pd.read_parquet("../../simulations/outputs/three_way_admixture/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-ghost_embeddings_WG = pd.read_parquet("../../simulations/outputs/ghost_admixture/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-bottleneck_embeddings_WG = pd.read_parquet("../../simulations/outputs/recent_bottleneck/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet")
+three_way_embeddings_WG = pd.read_parquet("../../outputs/simulations/three_way_admixture/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+ghost_embeddings_WG = pd.read_parquet("../../outputs/simulations/ghost_admixture/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+bottleneck_embeddings_WG = pd.read_parquet("../../outputs/simulations/recent_bottleneck/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet")
 
 three_way_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, three_way_embeddings_WG)
 ghost_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, ghost_embeddings_WG)
@@ -128,5 +129,5 @@ fig.text(0.01, 1, "A", fontsize = 12, fontweight = "bold", va = "top")
 fig.text(0.01, 0.5, "B", fontsize = 12, fontweight = "bold", va = "top")
 
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../sim_figs/{filename}.pdf")
 # %%

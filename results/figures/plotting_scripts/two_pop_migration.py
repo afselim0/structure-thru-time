@@ -10,12 +10,13 @@ import msprime
 import demes
 from tqdm import tqdm
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from compute_rates_true import compute_true_rates, expand_true_rates
 from preprocess_demography import preprocess_demography
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 from PlotEmbeddings import PlotEmbeddings
-from optimization_functions import procrustes_align_trajectories_df
+from OptimizationFunctions import procrustes_align_trajectories_df
 
 def pop_split(N0,N1,N2,t_split,t_mig_start=0,t_mig_end=0,m=0):
     demography = msprime.Demography()
@@ -34,7 +35,7 @@ def pop_split(N0,N1,N2,t_split,t_mig_start=0,t_mig_end=0,m=0):
     
     return demography
 #%%
-output_path = "../misc_outputs/"
+output_path = "../sim_figs_png/"
 os.makedirs(output_path, exist_ok=True)
 max_time = 3000
 delta_t = 1
@@ -84,9 +85,9 @@ for m in m_list:
     fig_3d_early.update_layout(showlegend=False)
     fig_3d_deep.update_layout(showlegend=False)
     img_early, _ = plotter_early.save_static(width = 800, height = 800)
-    img_early.save(f"../misc_figs/early_mig_{m}.png")
+    img_early.save(f"../sim_figs_png/early_mig_{m}.png")
     img_deep, _ = plotter_deep.save_static(width = 800, height = 800)
-    img_deep.save(f"../misc_figs/deep_mig_{m}.png")
+    img_deep.save(f"../sim_figs_png/deep_mig_{m}.png")
 #%%
 target_embeddings = pd.read_parquet(f"{output_path}embeddings_early_mig_{m_list[0]}.parquet")
 fig,axs = plt.subplots(2,4,figsize=(6, 3))
@@ -109,11 +110,11 @@ for i, m in enumerate(m_list):
     # fig_3d_deep = plotter_deep.fig
     # fig_3d_early.update_layout(showlegend=False)
     # fig_3d_deep.update_layout(showlegend=False)
-    # plotter_early.save_static(f"../misc_figs/early_mig_{m}", format = "png", width = 800, height = 800)
-    # plotter_deep.save_static(f"../misc_figs/deep_mig_{m}", format = "png", width = 800, height = 800)
+    # plotter_early.save_static(f"../sim_figs_png/early_mig_{m}", format = "png", width = 800, height = 800)
+    # plotter_deep.save_static(f"../sim_figs_png/deep_mig_{m}", format = "png", width = 800, height = 800)
     
-    img_early = plt.imread(f"../misc_figs/early_mig_{m}.png")
-    img_deep = plt.imread(f"../misc_figs/deep_mig_{m}.png")
+    img_early = plt.imread(f"../sim_figs_png/early_mig_{m}.png")
+    img_deep = plt.imread(f"../sim_figs_png/deep_mig_{m}.png")
     axs[0, i].spines['left'].set_visible(False)
     axs[0, i].spines['bottom'].set_visible(False)
     axs[0, i].tick_params(left=False, bottom=False)
@@ -134,5 +135,5 @@ fig.text(axs[0,0].yaxis.label.get_position()[0]-0.01, 1.01, "A) Recent migration
 fig.text(axs[0,1].yaxis.label.get_position()[0]-0.01, 0.5, "B) Soft split", fontweight="bold", fontsize = 11)
 
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../sim_figs/{filename}.pdf")
 # %%

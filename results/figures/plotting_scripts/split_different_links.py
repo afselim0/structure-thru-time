@@ -7,7 +7,7 @@ from results.figures.plotting_style import *
 import sys
 from tqdm import tqdm
 sys.path.append("../../../src")
-from optimization_functions import optimize_timepoint
+from OptimizationFunctions import optimize_timepoint
 
 def construct_R(Ne_list, n=20):
     K = len(Ne_list)
@@ -99,6 +99,6 @@ row0_right_all = axs[0,3].get_position().x1
 fig.legend(handles=legend_handles, title=r"$N_e$", loc='center left', bbox_to_anchor=(row0_right_all + 0.02, 0.5), fontsize=9, title_fontsize=10, frameon=False)
 
 file_name = os.path.splitext(os.path.basename(__file__))[0]
-fig.savefig(f"../outputs/{file_name}.pdf", dpi=500)
+fig.savefig(f"../sim_figs/{file_name}.pdf", dpi=500)
 
 # %%

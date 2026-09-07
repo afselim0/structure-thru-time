@@ -5,8 +5,7 @@ import os
 import shutil
 import sys
 
-sys.path.append("../src")
-sys.path.append("../../src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from ComputeCoalescentRates import compute_coal_rates, compute_coal_rates_variance
 import pandas as pd
 

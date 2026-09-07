@@ -39,7 +39,7 @@ for i, Nm in enumerate(Nm_list):
 fig.supxlabel('Time (generations ago)', fontsize=10)
 axs[0].set_ylabel('Coalescence rate', fontsize=10)
 axs[-1].legend(fontsize=8)
-fig.savefig("../outputs/mig_coal_rate.pdf", bbox_inches='tight', dpi=500)
+fig.savefig("../sim_figs/mig_coal_rate.pdf", bbox_inches='tight', dpi=500)
 #%%
 # Saturation limit and rate of convergence for different Nm values
 m_list = np.linspace(1e-7, 1e-4, 100)
@@ -72,5 +72,5 @@ axs[0].set_title('A', loc='left', fontweight='bold', fontsize=8)
 axs[1].set_title('B', loc='left', fontweight='bold', fontsize=8)
 axs[0].tick_params(axis='both', which='major', labelsize=8)
 axs[1].tick_params(axis='both', which='major', labelsize=8)
-fig.savefig("../outputs/mig_coal_rate_2.pdf", bbox_inches='tight', dpi=500)
+fig.savefig("../sim_figs/mig_coal_rate_2.pdf", bbox_inches='tight', dpi=500)
 # %%

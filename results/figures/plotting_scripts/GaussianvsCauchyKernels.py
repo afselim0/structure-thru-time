@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+# Relative paths below are anchored at this script's directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 def gaussian_inv(y):
     return np.sqrt(-2 * np.log(y))
 
@@ -67,5 +70,5 @@ ax.grid(alpha=0.25)
 
 fig.tight_layout()
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../sim_figs/{filename}.pdf")
 # %%

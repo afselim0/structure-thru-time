@@ -12,23 +12,24 @@ import yaml
 from PIL import Image
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 import matplotlib.ticker as ticker
 from evaluate_performance import reconstructed_vs_input_hist2d
     
 
-demes_file_path = "../../../data/demes/main_1/complex_4_pops.yaml"
-pop_colors = pd.read_csv("../../../results/simulations/outputs/complex_4_pops/sim/data/pop_colors.csv")
-pop_labels = pd.read_csv("../../../results/simulations/outputs/complex_4_pops/sim/data/pop_labels.csv")
-config_file = "../../../data/demes/main_1_config/complex_4_pops.yaml"
+demes_file_path = "../../../data/demes/complex_4_pops.yaml"
+pop_colors = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_colors.csv")
+pop_labels = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_labels.csv")
+config_file = "../../../data/configs/sim_configs/complex_4_pops.yaml"
 with open(config_file, 'r') as f:
     config_data = yaml.safe_load(f)
-embeddings = pd.read_parquet("../../simulations/outputs/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-true_rates = pd.read_parquet("../..//simulations/outputs/complex_4_pops/sim//data/rates_true.parquet")
-estimated_rates = pd.read_parquet("../../simulations/outputs/complex_4_pops/sim/data/rates.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-reconstructed_rates = pd.read_parquet("../../simulations/outputs/complex_4_pops/sim/data/reconstructed_rates.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-scan_p = pd.read_csv("../../simulations/outputs/complex_4_pops/sim/data/scan_p.d2.Nmin1000.Nmax1000000.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.csv")
+embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+true_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim//data/rates_true.parquet")
+estimated_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/rates.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+reconstructed_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/reconstructed_rates.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+scan_p = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/scan_p.d2.Nmin1000.Nmax1000000.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.csv")
 scan_p_input = scan_p[scan_p["vs"] == "input"]
 scan_p_true = scan_p[scan_p["vs"] == "true"]
 N_max = 1000000
@@ -110,7 +111,7 @@ plotter = PlotEmbeddings(
 plotter.init_plot(min_time = config_data['min_time'], max_time = config_data['max_time'], time_scale = config_data['time_scale'])
 plotter.add_sample_trajectories()
 img, _ = plotter.save_static(**RENDER_KW)
-img.save("../misc_figs/complex_4_pops_embeddings.png")
+img.save("../sim_figs_png/complex_4_pops_embeddings.png")
 embeddings_ax.set_axis_off()
 embeddings_ax.imshow(img, aspect="equal")
 embeddings_ax.text(0, 1, "B", transform=embeddings_ax.transAxes,
@@ -156,5 +157,5 @@ varying_p_ax_twin.set_ylim(0,1)
 
 varying_p_ax_twin.legend(handles, labels, loc="lower left", bbox_to_anchor=(0.16, 0), fontsize=8, frameon=False)
 # %%
-fig.savefig(f"../outputs/{filename}.pdf", bbox_inches="tight")
+fig.savefig(f"../sim_figs/{filename}.pdf", bbox_inches="tight")
 # %%

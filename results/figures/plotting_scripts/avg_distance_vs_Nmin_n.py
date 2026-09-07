@@ -7,8 +7,11 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os
 from results.figures.plotting_style import *
-from optimization_functions import optimize_timepoint, compute_f_inverse
+from OptimizationFunctions import optimize_timepoint, compute_f_inverse
 from tqdm import tqdm
+
+# Relative paths below are anchored at this script's directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 def compute_embeddings_panmictic(Ne, link, p, n=50, N_min = 1, N_max = 1e8, init_seed=42):
     np.random.seed(init_seed)
@@ -57,5 +60,5 @@ ax[0].set_title("A", loc='left', fontweight='bold')
 ax[1].set_title("B", loc='left', fontweight='bold')
 fig.suptitle(r"$f(x) = (N_{\mathrm{min}} + x)^{-1}$")
 file_name = os.path.splitext(os.path.basename(__file__))[0]
-fig.savefig(f"../outputs/{file_name}.pdf", dpi=500)
+fig.savefig(f"../sim_figs/{file_name}.pdf", dpi=500)
 # %%

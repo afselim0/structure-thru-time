@@ -128,7 +128,7 @@ ax3.tick_params(labelsize=6)
 ax3.view_init(elev=22, azim=-55)
 
 # ── Save ──────────────────────────────────────────────────────────────────
-out = "../results/simulations/outputs/stepping_stones_2d/sim/plots/stepping_stones_2d_schematic.pdf"
+out = "../../results/figures/sim_figs/stepping_stones_2d_schematic.pdf"
 fig.savefig(out, bbox_inches="tight", dpi=300)
 fig.savefig(out.replace(".pdf", ".png"), bbox_inches="tight", dpi=300)
 print(f"Saved to {out}")

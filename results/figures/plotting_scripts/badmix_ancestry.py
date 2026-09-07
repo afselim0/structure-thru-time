@@ -9,12 +9,13 @@ import sys
 import os
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 from OptimizationFunctions import procrustes_align_trajectories_df
 
-misc_plot_path = "../misc_figs/misc_ancestry"
-sim_path = "../../simulations/outputs"
+misc_plot_path = "../sim_figs_png/misc_ancestry"
+sim_path = "../../outputs/simulations"
 
 # Columns are examples, rows are the ancestries carried by admixed individuals.
 # Each example ran the embedding with its own window-size settings, so the
@@ -147,9 +148,9 @@ def build_ancestry_figure(method: str) -> plt.Figure:
 
 # %%
 gnn_fig = build_ancestry_figure("GNN")
-gnn_fig.savefig("../outputs/badmix_GNN.pdf")
+gnn_fig.savefig("../sim_figs/badmix_GNN.pdf")
 
 # %%
 rfmix_fig = build_ancestry_figure("RFmix")
-rfmix_fig.savefig("../outputs/badmix_RFmix.pdf")
+rfmix_fig.savefig("../sim_figs/badmix_RFmix.pdf")
 # %%

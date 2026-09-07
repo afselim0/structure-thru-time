@@ -7,8 +7,11 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os
 from results.figures.plotting_style import *
-from optimization_functions import optimize_timepoint, compute_f_inverse
+from OptimizationFunctions import optimize_timepoint, compute_f_inverse
 from tqdm import tqdm
+
+# Relative paths below are anchored at this script's directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 def hull_circle_radius(points):
     points = np.asarray(points, dtype=float)
@@ -106,5 +109,5 @@ axs[0].legend()
 axs[1].legend()
 fig.tight_layout()
 file_name = os.path.splitext(os.path.basename(__file__))[0]
-fig.savefig(f"../outputs/{file_name}.pdf", dpi=500)
+fig.savefig(f"../sim_figs/{file_name}.pdf", dpi=500)
 # %%

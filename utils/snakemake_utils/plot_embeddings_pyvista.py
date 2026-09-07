@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+import os
 import pandas as pd
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from PlotEmbeddingsPyVista import PlotEmbeddingsPyVista
 

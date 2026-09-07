@@ -1,0 +1,42 @@
+demography: three_way_admixture
+demes_file_path: ../data/demes/three_way_admixture.yaml
+output_path: ../results/outputs/simulations/three_way_admixture
+version: 1
+num_threads: 12
+
+# Admixture parameters (reference_pops left unset to test the None-defaulting
+# path in infer_local_ancestry.py, which should resolve it to [A, B, C, D])
+admixed_pops: [A]
+# Local ancestry method: RFmix (default), GNN, or True (ground-truth calls from
+# the simulation; simulated data only)
+LAI_method: RFmix
+
+# Simulation Parameters
+num_contigs: 500
+contig_length: 5000000
+n_sim_per_pop: 5
+mutation_rate: 1.2e-8
+recombination_rate: 1.2e-8
+
+# coal time pdf estimation
+max_time: 5000
+n_timepoints: 2500
+# fraction_samples: 1.0
+
+# rate estimation parameters
+min_window_size: 100
+max_window_size: 200
+compute_variance: false
+
+# Embeddings estimation parameters
+N_min: 100
+N_max: 1000000
+p: 1
+# l1: [0,0.05]
+# l2: [0,0.005]
+
+# Plotting parameters
+min_time: 50
+max_rate_plot: 0.0002
+embeddings_plot_lims: 1000000
+time_scale: log

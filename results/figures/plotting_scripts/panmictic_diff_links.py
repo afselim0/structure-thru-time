@@ -5,7 +5,10 @@ import sys
 sys.path.append("../../../src")
 import os
 from results.figures.plotting_style import *
-from optimization_functions import optimize_timepoint
+from OptimizationFunctions import optimize_timepoint
+
+# Relative paths below are anchored at this script's directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 def compute_embeddings_panmictic(Ne, link, p, n=50, N_min = 1, N_max = 1e8, init_seed=42):
     np.random.seed(init_seed)
     X_init = np.random.rand(n, 2)
@@ -39,5 +42,5 @@ fig.text(-0.01, 0.78, r"$f(x) = (1 + x^p)^{-1}$", ha='center', va='center', font
 fig.text(-0.01, 0.28, r"$f(x) = e^{-x^p}$", ha='center', va='center', fontsize=12, rotation=90)
 
 file_name = os.path.splitext(os.path.basename(__file__))[0]
-fig.savefig(f"../outputs/{file_name}.pdf", dpi=500)
+fig.savefig(f"../sim_figs/{file_name}.pdf", dpi=500)
 # %%

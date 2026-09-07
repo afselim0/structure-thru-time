@@ -8,7 +8,8 @@ import sys
 import os
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from plot_rates import compute_mean_rates
 #%%
 rates_df = pd.read_parquet("../data/rates.minWS70.maxWS4000.V1.FS1.0.maxT20000.nT5000.parquet")
@@ -66,5 +67,5 @@ axs[1].set_title("B", loc="left", fontweight="bold")
 axs[2].set_title("C", loc="left", fontweight="bold")
 
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../outputs/{filename}.pdf")
+fig.savefig(f"../app_figs/{filename}.pdf")
 # %%

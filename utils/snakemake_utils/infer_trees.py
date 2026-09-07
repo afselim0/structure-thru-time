@@ -16,10 +16,14 @@ from tqdm import tqdm
 import msprime
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(script_dir)
+# The pipeline's relative paths (configs, data, results) are all anchored at utils/,
+# which is one level above this script since the move into snakemake_utils/.
+utils_dir = os.path.dirname(script_dir)
+os.chdir(utils_dir)
 
-singer_path = os.path.join(script_dir, "singer_linux")
-relate_path = os.path.join(script_dir, "relate_mac")
+# ARG inference binaries live alongside the other inference tooling
+singer_path = os.path.join(utils_dir, "arg_infer_utils", "singer_linux")
+relate_path = os.path.join(utils_dir, "arg_infer_utils", "relate_mac")
 
 def find_Ne(sim_ts_dir):
     ts_files = glob.glob(os.path.join(sim_ts_dir, "*.trees"))
@@ -97,13 +101,13 @@ def infer_relate(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, r=1.2e-
     relative_relate_path = os.path.relpath(relate_path, start=os.getcwd())
     relate_infer_command = f"{relative_relate_path}/Relate --mode All -m {mu} --effectiveN {int(2*Ne)} --haps {contig_id}.haps --sample {contig_id}.sample --map {contig_id}.map --output {contig_id}"
     convert_to_tskit_command = f"{relative_relate_path}/RelateFileFormats --mode ConvertToTreeSequence --input {contig_id} --output {contig_id}"
-    os.chdir(script_dir)
+    os.chdir(utils_dir)
     with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
         subprocess.run(vcf_to_haps_command, shell=True, stdout = f, stderr = f)
         os.chdir(output_path)
         subprocess.run(relate_infer_command, shell=True, stdout = f, stderr = f)
         subprocess.run(convert_to_tskit_command, shell=True, stdout = f, stderr = f)
-        os.chdir(script_dir)
+        os.chdir(utils_dir)
     
     if os.path.exists(f"{output_prefix}.trees"):
         os.remove(f"{output_prefix}.map")

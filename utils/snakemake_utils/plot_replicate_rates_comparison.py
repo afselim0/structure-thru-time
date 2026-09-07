@@ -12,9 +12,7 @@ from matplotlib.lines import Line2D
 from scipy.stats import spearmanr
 import plotly.graph_objects as go
 
-sys.path.append("../src")
-sys.path.append("../../src")
-sys.path.append("src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from OptimizationFunctions import compute_distance_df, reconstruct_rates
 

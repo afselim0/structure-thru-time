@@ -10,13 +10,14 @@ import sys
 import os
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils")
+sys.path.append("../../../utils/snakemake_utils")
+sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 from OptimizationFunctions import procrustes_align_trajectories_df
 from evaluate_performance import reconstructed_vs_input_hist2d
 plt.rcParams['savefig.bbox'] = None
 
-sim_path = "../../simulations/outputs/two_admix"
+sim_path = "../../outputs/simulations/two_admix"
 EMB_SUFFIX = "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
 RATES_SUFFIX = "rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
 RECON_SUFFIX = "reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
@@ -24,7 +25,7 @@ RECON_SUFFIX = "reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distan
 ancestries = ["A", "B", "C", "D"]
 methods = ["GNN", "RFmix"]
 
-# Ancestries A,B admix into Admix_1 and C,D into Admix_2 (see data/demes/main_1/two_admix.yaml),
+# Ancestries A,B admix into Admix_1 and C,D into Admix_2 (see data/demes/two_admix.yaml),
 # so each column's rate panel only shows that column's admixed population against everyone else
 col_admix_pop = {"A": "Admix_1", "B": "Admix_1", "C": "Admix_2", "D": "Admix_2"}
 
@@ -234,6 +235,6 @@ def build_figure(method: str) -> plt.Figure:
 #%%
 for method in methods:
     fig = build_figure(method)
-    fig.savefig(f"../outputs/double_admix_{method}.pdf", dpi=500, bbox_inches="tight", pad_inches=0.01)
-    print(f"Saved ../outputs/double_admix_{method}.pdf")
+    fig.savefig(f"../sim_figs/double_admix_{method}.pdf", dpi=500, bbox_inches="tight", pad_inches=0.01)
+    print(f"Saved ../sim_figs/double_admix_{method}.pdf")
 # %%

@@ -9,7 +9,7 @@ from tqdm import tqdm
 from time import time
 from pathos.multiprocessing import Pool
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from LocalAncestryRFmix import *
 from LocalAncestryGNN import LocalAncestryInference
 
