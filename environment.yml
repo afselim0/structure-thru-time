@@ -1,4 +1,4 @@
-name: STT
+name: CoaSTT
 channels:
   - conda-forge
   - defaults
