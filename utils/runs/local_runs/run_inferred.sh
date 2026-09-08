@@ -1,7 +1,10 @@
 #!/bin/bash
 # Shared body for the app_runs scripts: run CoaSTT on inferred trees.
 #
-# Usage (sourced, not executed, from a per-run script):
+# Sourced (never executed) by the per-run scripts in app_runs/. It lives here in
+# local_runs/ rather than app_runs/ so that app_runs/ holds only runnable scripts.
+#
+# Usage:
 #   run_inferred <config_basename> <infer_method> [extra --config KEY=VALUE ...]
 #
 # Each demography's config writes its simulated trees to an output_path ending
@@ -38,6 +41,6 @@ run_inferred() {
 
     snakemake STT_infer \
         --configfile "$configfile" \
-        --config output_path="$output_dir" infer_method="$infer_method" "$@" \
-        --cores all --rerun-incomplete "${SNAKEMAKE_ARGS[@]}"
+        --config output_path="$output_dir" infer_method="$infer_method" ${@+"$@"} \
+        --cores all --rerun-incomplete ${SNAKEMAKE_ARGS[@]+"${SNAKEMAKE_ARGS[@]}"}
 }

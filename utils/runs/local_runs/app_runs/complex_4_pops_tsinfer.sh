@@ -20,6 +20,6 @@ cd "$script_dir/../../.."
 
 # Extra flags given to this script are forwarded to snakemake (e.g. -n).
 SNAKEMAKE_ARGS=("$@")
-source "$script_dir/run_inferred.sh"
+source "$script_dir/../run_inferred.sh"
 
 run_inferred complex_4_pops tsinfer

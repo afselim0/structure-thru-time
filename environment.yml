@@ -12,7 +12,7 @@ dependencies:
   - matplotlib
   - seaborn
   - plotly
-  - tskit=0.6.4
+  - tskit=1.0.3
   - msprime
   - stdpopsim
   - demes
@@ -33,7 +33,7 @@ dependencies:
     - kaleido
     - snakemake==9.14.5
     - tsinfer==0.5.1
-    - tsdate==0.2.6
+    - tsdate==0.2.7
     - pulp==3.3.0
     - tszip
     - bio2zarr[vcf]

@@ -130,7 +130,17 @@ def infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, con
     return
 
 def infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, burnin=None, num_threads = 1):
-    vcf_files = glob.glob(os.path.join(vcf_dir, "*.vcf"))
+    # simulate_trees.py writes .trees only (its VCF output is disabled), while
+    # SINGER and Relate read the .vcf text directly. Fall back to enumerating
+    # the tree sequences so the tsinfer path, which loads contig_N.trees via
+    # from_TreeSequence, works without VCFs on disk. The .vcf suffix is kept on
+    # the paths because infer_single derives the contig id by stripping it.
+    vcf_files = sorted(glob.glob(os.path.join(vcf_dir, "*.vcf")))
+    if not vcf_files:
+        vcf_files = [f.removesuffix(".trees") + ".vcf"
+                     for f in sorted(glob.glob(os.path.join(vcf_dir, "*.trees")))]
+    if not vcf_files:
+        raise ValueError(f"No .vcf or .trees files found in directory: {vcf_dir}")
     os.makedirs(output_path, exist_ok=True)
     def infer_single_wrapper(vcf_file_path):
         return infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin)
