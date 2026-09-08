@@ -979,7 +979,7 @@ def coordinate_descent_over_time(
                     f"Only {int(shared_mask.sum())} samples are present at both "
                     f"timepoint indices {prev_t_idx} and {t_idx}; at least "
                     f"{n_components + 1} are needed for a non-degenerate Procrustes "
-                    f"rotation in {n_components} dimensions."
+                    "rotation in {n_components} dimensions."
                 )
             shared_in_extant = np.isin(extant_idx, np.where(shared_mask)[0])
             X_t, rot = procrustes_align_subset(
@@ -1394,8 +1394,8 @@ def reconstruct_rates(
 ) -> pd.DataFrame:
     """Apply the link function to a pairwise distance dataframe to recover rates.
 
-    The link evaluates on the underlying array; the pair index and time columns are
-    restored so the result lines up with the input rates dataframe.
+    The link evaluates on the underlying array, so the pair index and time columns are
+    restored here to keep the result aligned with the input rates dataframe.
     """
     link = _as_link(link, N_min=N_min, p=p)
     return pd.DataFrame(link.f(D_df.values), index=D_df.index, columns=D_df.columns)
