@@ -10,7 +10,8 @@ from scipy.stats import spearmanr
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
-from OptimizationFunctions import compute_distance_df, reconstruct_rates, compute_total_unpenalized_loss
+from OptimizationFunctions import (compute_distance_df, reconstruct_rates,
+                                   compute_unpenalized_loss, LinkFunction)
 from evaluate_performance import align_time_columns
 
 
@@ -55,8 +56,9 @@ def _compute_for_p(p, LSE, output_path, link, id_label, input_rates_df, true_rat
         p=p, link=link, compute_uncertainty=False, exact_hessian=False
     )
     embeddings_df = LSE.get_embeddings_df(id_label=id_label)
-    loss = compute_total_unpenalized_loss(
-        X, LSE.R, W=LSE.W, N_min=LSE.N_min, N_max=LSE.N_max, p=p, link=link
+    loss = compute_unpenalized_loss(
+        X, LSE.R.astype(float) + 1.0 / LSE.N_max, W=LSE.W.astype(float),
+        link=LinkFunction(name=link, N_min=LSE.N_min, p=p)
     )
     embeddings_df.to_parquet(os.path.join(output_path, f"embeddings.p{p:.4g}.parquet"))
 

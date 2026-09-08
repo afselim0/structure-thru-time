@@ -10,7 +10,8 @@ from scipy.stats import spearmanr
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
-from OptimizationFunctions import compute_distance_df, reconstruct_rates, compute_total_unpenalized_loss
+from OptimizationFunctions import (compute_distance_df, reconstruct_rates,
+                                   compute_unpenalized_loss, LinkFunction)
 from evaluate_performance import align_time_columns
 
 
@@ -42,25 +43,26 @@ def _compute_metrics(rates_df, reconstructed_rates_df, N_max, label):
 
 # --- Compute embeddings for a single d value (one parallel task) ---
 def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_label,
-                    input_rates_df, true_rates_df, l1_penalties, l2_penalties):
+                    input_rates_df, true_rates_df, l1_penalties):
     """Build a fresh LatentSpaceEmbeddings at n_components=d, fit it, save it, and return
     loss + goodness-of-fit records.
 
     Unlike p (a call-time argument), n_components is fixed at construction, so each worker
     builds its own LatentSpaceEmbeddings object rather than sharing one built in the parent.
-    If l1_penalties/l2_penalties are set, a smoothed (joint-optimization) embedding is also
-    computed at this d, warm-started from the unsmoothed solution, mirroring compute_embeddings.py.
+    If l1_penalties are set, a smoothed (joint-optimization) embedding is also computed at
+    this d, warm-started from the unsmoothed solution, mirroring compute_embeddings.py.
     """
     print(f"Computing embeddings with d={d}...")
     LSE = LatentSpaceEmbeddings(rates_df, se_df=se_df, N_min=N_min, N_max=N_max, n_components=d,
-                                 l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+                                 l1_strengths=l1_penalties)
     # Exact-Hessian covariances are only implemented for p == 1, but since p can be != 1 here too, keep it off
     X, _ = LSE.compute_embeddings_through_time(
         p=p, link=link, compute_uncertainty=False, exact_hessian=False
     )
     embeddings_df = LSE.get_embeddings_df(id_label=id_label)
-    loss = compute_total_unpenalized_loss(
-        X, LSE.R, W=LSE.W, N_min=LSE.N_min, N_max=LSE.N_max, p=p, link=link
+    loss = compute_unpenalized_loss(
+        X, LSE.R.astype(float) + 1.0 / LSE.N_max, W=LSE.W.astype(float),
+        link=LinkFunction(name=link, N_min=LSE.N_min, p=p)
     )
     embeddings_df.to_parquet(os.path.join(output_path, f"embeddings.d{d}.parquet"))
 
@@ -75,8 +77,9 @@ def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_la
     if LSE.smoothing_params is not None:
         X_smooth, _ = LSE.compute_embeddings_jointly(X_init=X, p=p, link=link)
         smooth_embeddings_df = LSE.get_embeddings_df(id_label=id_label)
-        smooth_loss = compute_total_unpenalized_loss(
-            X_smooth, LSE.R, W=LSE.W, N_min=LSE.N_min, N_max=LSE.N_max, p=p, link=link
+        smooth_loss = compute_unpenalized_loss(
+            X_smooth, LSE.R.astype(float) + 1.0 / LSE.N_max, W=LSE.W.astype(float),
+            link=LinkFunction(name=link, N_min=LSE.N_min, p=p)
         )
         smooth_embeddings_df.to_parquet(os.path.join(output_path, f"smooth_embeddings.d{d}.parquet"))
 
@@ -105,11 +108,11 @@ def _metrics_records(d, loss, reconstructed_rates_df, input_rates_df, true_rates
 # --- Compute embeddings over a grid of d (n_components) values ---
 def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d=10, num_d=9,
            N_min=1, N_max=1e7, p=1, link="inverse_distance", n_timepoints_emb=400,
-           id_label="sample_id", n_jobs=None, l1_penalties=None, l2_penalties=None):
+           id_label="sample_id", n_jobs=None, l1_penalties=None):
     """Compute embeddings for a grid of n_components values (fixed p), saving each as a parquet
     plus a single dataframe of per-d diagnostics (loss, r2, r2_log, spearman_rho, smoothing).
 
-    If l1_penalties/l2_penalties are set, a smoothed (joint-optimization) embedding is computed
+    If l1_penalties are set, a smoothed (joint-optimization) embedding is computed
     at each d in addition to the unsmoothed one, distinguished by the "smoothing" column.
     """
     os.makedirs(output_path, exist_ok=True)
@@ -152,7 +155,6 @@ def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d
             [input_rates_df] * len(d_values),
             [true_rates_df] * len(d_values),
             [l1_penalties] * len(d_values),
-            [l2_penalties] * len(d_values),
         )
 
     # --- Collect and save the diagnostics across d ---
@@ -176,7 +178,7 @@ def main():
     parser.add_argument("--p", type=float, default=1, help="Exponent of the distance link function (held fixed while d is scanned).")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential).")
     parser.add_argument("--l1_penalties", type=str, default="None", help="Comma-separated per-order L1 smoothing strengths (e.g. compute_embeddings.py's --l1_penalties). 'None' disables smoothing.")
-    parser.add_argument("--l2_penalties", type=str, default="None", help="Comma-separated per-order L2 smoothing strengths. 'None' disables smoothing.")
+    parser.add_argument("--l2_penalties", type=str, default="None", help="REMOVED: the L2 smoothing term no longer exists. Only 'None' is accepted; use --l1_penalties.")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates).")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv file (unused directly, accepted for CLI symmetry with compute_embeddings.py).")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, rates are per-haplotype (sample_id). Otherwise per-individual (individual_id).")
@@ -192,14 +194,21 @@ def main():
 
     # Parsing l1 and l2 penalties (same "order,order,..." -> {1: v1, 2: v2, ...} convention as compute_embeddings.py)
     l1_penalties = None if args.l1_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l1_penalties.split(","))}
-    l2_penalties = None if args.l2_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l2_penalties.split(","))}
+    # The L2 smoothing term has been removed; reject a real value rather than
+    # silently ignoring a penalty the config still asks for
+    if args.l2_penalties != "None":
+        raise ValueError(
+            f"--l2_penalties={args.l2_penalties!r} was given, but the L2 smoothing term "
+            "has been removed. Remove the 'l2' key from the run config and express the "
+            "smoothing through 'l1' instead."
+        )
 
     metrics_df = scan_d(
         rates_df=rates_df, output_path=args.output_path, se_df=se_df, true_rates_df=true_rates_df,
         min_d=args.min_d, max_d=args.max_d, num_d=args.num_d,
         N_min=args.N_min, N_max=args.N_max, p=args.p, link=args.link,
         n_timepoints_emb=args.n_timepoints_emb, id_label=id_label, n_jobs=args.n_jobs,
-        l1_penalties=l1_penalties, l2_penalties=l2_penalties,
+        l1_penalties=l1_penalties,
     )
     metrics_df.to_csv(args.output, index=False)
     print(f"Saved {args.num_d} embeddings and diagnostics to {args.output_path} / {args.output}")

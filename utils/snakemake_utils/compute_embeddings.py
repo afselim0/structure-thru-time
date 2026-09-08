@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--p", type=int, default=1, help="Exponent of the distance in the link function")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential)")
     parser.add_argument("--l1_penalties", type = str, default="None", help="List of l1 penalties to compute embeddings for")
-    parser.add_argument("--l2_penalties", type = str, default="None", help="List of l2 penalties to compute embeddings for")
+    parser.add_argument("--l2_penalties", type = str, default="None", help="REMOVED: the L2 smoothing term no longer exists. Only 'None' is accepted; use --l1_penalties.")
     parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
@@ -51,10 +51,18 @@ def main():
     if l2_penalties == "None":
         l2_penalties = None
 
+    # The L2 smoothing term has been removed; reject a real value rather than
+    # silently ignoring a penalty the config still asks for
+    if l2_penalties is not None:
+        raise ValueError(
+            f"--l2_penalties={args.l2_penalties!r} was given, but the L2 smoothing term "
+            "has been removed. The penalty is now a group-fused lasso with pseudo-Huber "
+            "smoothing, which supplies its own curvature near zero. Remove the 'l2' key "
+            "from the run config and express the smoothing through 'l1' instead."
+        )
+
     if l1_penalties is not None:
         l1_penalties = {i+1: float(l1) for i, l1 in enumerate(l1_penalties.split(","))} 
-    if l2_penalties is not None:
-        l2_penalties = {i+1: float(l2) for i, l2 in enumerate(l2_penalties.split(","))} 
 
     # Load rates data
     rates_df = pd.read_parquet(input)
@@ -106,7 +114,7 @@ def main():
     if se_df is not None:
         print("standard errors dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, l2_strengths=l2_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties)
     X_init = None
 
     if args.seed is not None:

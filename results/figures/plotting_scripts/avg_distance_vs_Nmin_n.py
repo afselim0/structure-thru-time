@@ -7,7 +7,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os
 from results.figures.plotting_style import *
-from OptimizationFunctions import optimize_timepoint, compute_f_inverse
+from OptimizationFunctions import optimize_timepoint, LinkFunction
 from tqdm import tqdm
 
 # Relative paths below are anchored at this script's directory

@@ -7,7 +7,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os
 from results.figures.plotting_style import *
-from OptimizationFunctions import optimize_timepoint, compute_f_inverse
+from OptimizationFunctions import optimize_timepoint, LinkFunction
 from tqdm import tqdm
 
 # Relative paths below are anchored at this script's directory
@@ -71,7 +71,7 @@ for link_dict in link_functions:
         radius = hull_circle_radius(X)[0]
         link_average_pairwise_distances.append(np.mean(D[D!=0]))
         link_radii.append(radius)
-        link_f_inverse.append(compute_f_inverse(1/Ne, N_min=N_min, p=p, link=link))
+        link_f_inverse.append(LinkFunction(name=link, N_min=N_min, p=p).inverse(1/Ne))
     radii[f"{link}_{p}"] = link_radii
     average_pairwise_distances[f"{link}_{p}"] = link_average_pairwise_distances
     f_inverse[f"{link}_{p}"] = link_f_inverse
