@@ -18,14 +18,15 @@ class LatentSpaceEmbeddings:
                  default_weights:       int          = 1_000_000,
                  link_function:         str          = "inverse_distance"):
 
-        rates_df.columns = rates_df.columns.astype(float)
+        # Read the column labels as floats without mutating the caller's DataFrame
+        time_points = rates_df.columns.astype(float).values
 
         # --- Metadata ---
         self.samples         = np.unique([x for pair in rates_df.index for x in pair])
         self.num_samples     = len(self.samples)
         self.sample_idx_map  = {s: i for i, s in enumerate(self.samples)}
         self.idx_sample_map  = {i: s for i, s in enumerate(self.samples)}
-        self.time_points     = rates_df.columns.values
+        self.time_points     = time_points
         self.num_timepoints  = len(self.time_points)
         self.n_components    = n_components
         self.delta_t         = self.time_points[1] - self.time_points[0]
@@ -100,7 +101,6 @@ class LatentSpaceEmbeddings:
         self.l1_strengths = l1_strengths
         self.l2_strengths = l2_strengths
         self.covariances  = None
-        self.covariances  = None
 
     def _parse_smoothing_params(self, l1_strengths, l2_strengths):
         """Compute smoothing weights from transferable strengths and the current embeddings.
@@ -166,9 +166,6 @@ class LatentSpaceEmbeddings:
             compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
             exact_hessian (bool): if True (default), use exact analytical Hessian for
                 covariance estimation; if False, use L-BFGS approximation.
-            compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
-            exact_hessian (bool): if True (default), use exact analytical Hessian for
-                covariance estimation; if False, use L-BFGS approximation.
 
         Returns:
             np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
@@ -180,31 +177,17 @@ class LatentSpaceEmbeddings:
             self.covariances = covariances
         else:
             X, loss_df = result
-        # X = procrustes_alignment(X)
         self.embeddings = X
         self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
         print(self.smoothing_params)
         return X, loss_df
 
-    def compute_embeddings_sample_coordinate_descent(self, X_init = None, p = 1, link = "inverse_distance", n_epochs = 1):
-        X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        X, loss_df = coordinate_descent_over_samples(X_init, self.R, self.W, self.N_min, self.N_max, p, link, self.smoothing_params, self.sampled_by_time, n_epochs=n_epochs)
-        # X = procrustes_alignment(X)
-        self.embeddings = X
-        return X, loss_df
-    
     def compute_embeddings_jointly(self, X_init=None, p=1, link="inverse_distance"):
         X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
         X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, p, link, self.smoothing_params, self.sampled_by_time)
         self.embeddings = X
-        # X = procrustes_alignment(X)
         return X, loss_df
     
-    def smooth_embeddings_independently(self, X):
-        X_smooth = smooth_trajectories(X, self.smoothing_params, self.sampled_by_time)
-        self.embeddings = X_smooth
-        return X_smooth
-
     def get_embeddings_df(self, id_label: str = "sample_id"):
         """Return the embeddings as a long dataframe.
 
