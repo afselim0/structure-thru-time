@@ -1,24 +1,68 @@
 #%%
 #!/usr/bin/env python3
-"""
-This module contains functions for computing the loss and the gradient for the optimization of latent space embeddings based on pairwise rates between samples over time.
-Loss and gradient can be computed for:
-1. All samples at a given time slice
-2. A given sample over all time slices
-3. All samples over all time slices
-The module also contains functions for performing optimization using L-BFGS-B for a given sample, a given time slice, or all samples and time slices jointly.
+"""Loss, gradient and Hessian machinery for the CoaSTT latent-position model.
+
+Model
+-----
+Pairwise coalescent rates ``lambda_ijt`` inferred from ARGs are fitted by a latent
+position model.  Writing ``d_ij = ||X_i - X_j||`` for the latent distance and
+``f_ij = f(d_ij)`` for the link function, the per-slice (unpenalized) loss is
+
+    l(X_t) = 0.5 * sum_{i,j} w_ij [ f_ij - lambda_ij ln f_ij ]
+
+optimized with L-BFGS-B: first sequentially over time slices (unpenalized), then
+jointly over all slices with a temporal smoothing penalty.
+
+Laplacian formulation
+---------------------
+Per slice, with weights ``w_ij`` and rates ``lambda_ij``, define
+
+    g^-_ij = w_ij * f'_ij / d_ij                                   (repulsive,  <= 0)
+    g^+_ij = -(lambda_ij / f_ij) * g^-_ij                          (attractive, >= 0)
+    g_ij   = g^+_ij + g^-_ij = w_ij * (f'_ij/d_ij) * (1 - lambda_ij/f_ij)
+
+    kappa^-_ij = w_ij * f''_ij
+    kappa^+_ij = -w_ij * lambda_ij * [ f''_ij/f_ij - (f'_ij)^2/f_ij^2 ]
+    kappa_ij   = kappa^+_ij + kappa^-_ij
+
+SIGN / FACTOR CONVENTION.  The loss carries the ``0.5`` prefactor (each unordered
+pair is counted once across the full double sum), and therefore the gradient is
+
+    grad_X l = L X          with   L = diag(sum_j g_ij) - G,   G = (g_ij)
+
+with **no** factor of 2.  The manuscript appendix writes a loss without the 0.5 and
+so reports ``grad = 2 L X``; the code deliberately does not match the appendix here.
+
+Convergence tolerances
+----------------------
+SciPy's L-BFGS-B stops on a *relative* function criterion and an *absolute* gradient
+criterion:
+
+    (f_k - f_{k+1}) / max(|f_k|, |f_{k+1}|, 1) <= ftol
+    max_i |proj g_i|                           <= gtol
+
+Because the weights ``w_ij`` are of order 1e6, the objective and its gradient are of
+that order too, so an absolute ``gtol`` is meaningless unless set absurdly small --
+which is why the historical code carried ``GTOL_TIMEPOINT = 1e-16`` and relied on
+``ftol`` alone.  The objective is deliberately left unnormalized (normalizing would
+change the penalty's relative scale).  Instead ``ftol`` is the primary criterion,
+exposed as ``target_precision``, and ``gtol`` is made scale-aware by setting it to
+``gtol_factor * max|grad|`` evaluated at the initial point.
 """
 
-GTOL_TIMEPOINT     = 1e-16
-FTOL_TIMEPOINT     = 1e-12
+FTOL_TIMEPOINT     = 1e-9
 MAX_ITER_TIMEPOINT = 12000
+MAXCOR_TIMEPOINT   = 10
 
-GTOL_JOINT         = 1e-8
-FTOL_JOINT         = 1e-6
+FTOL_JOINT         = 1e-9
 MAX_ITER_JOINT     = 1000
+MAXCOR_JOINT       = 20
 
-DEFAULT_WEIGHTS = 1e6
-DEFAULT_W_PERCENTILE_CAP = 95
+GTOL_FACTOR        = 1e-8
+DEFAULT_WEIGHTS    = 1e6
+
+from dataclasses import dataclass
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -26,221 +70,1128 @@ from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
 
+
 ############################################################
-# General Functions
+# Link functions
 ############################################################
 
-def _compute_exact_hessian(X_t, R_t, W_t, N_min, p=1, link="inverse_distance"):
-    """Exact Hessian of the unpenalized timepoint loss w.r.t. flattened X_t.
+@dataclass(frozen=True)
+class LinkFunction:
+    """The link ``f`` mapping latent distances to coalescent rates.
 
-    The result is symmetric with exactly d zero eigenvalues (translation invariance).
-    link must match the link function used in compute_loss_gradient_timepoint.
+    ``f`` must be positive and monotonically decreasing.  A small ``eps`` is added to
+    every distance before evaluation, both to avoid division by zero at coincident
+    points and to keep ``log f`` finite.
 
-    The second-derivative (f'') formulas below are derived only for p=1.  A general-p
-    derivation has not been worked out, so p != 1 is rejected to avoid silently
-    returning incorrect covariances.
+    Attributes:
+        name: "inverse_distance" (f = 1/(N_min + x^p)) or "exponential"
+            (f = exp(-x^p)/N_min).
+        N_min: Minimum modellable rate scale; pairs with rate 1/N_min or higher sit
+            at zero distance.
+        p: Exponent of the distance in the link.
+        eps: Offset added to distances before evaluation.
     """
-    if p != 1:
-        raise NotImplementedError(
-            "_compute_exact_hessian only supports p=1; the f'' formulas have not "
-            "been derived for general p. Use exact_hessian=False (L-BFGS approximation) "
-            "or extend the f'' formulas for your p before requesting exact covariances."
+
+    name: str
+    N_min: float
+    p: float = 1.0
+    eps: float = 1e-10
+
+    def __post_init__(self) -> None:
+        # Validate once, at construction, rather than on every evaluation
+        if self.name not in ("inverse_distance", "exponential"):
+            raise ValueError(
+                f"Unsupported link function {self.name!r}; "
+                "expected 'inverse_distance' or 'exponential'."
+            )
+        if not self.p > 0:
+            raise ValueError(f"p must be positive, got {self.p}.")
+        if not self.N_min > 0:
+            raise ValueError(f"N_min must be positive, got {self.N_min}.")
+        if not self.eps > 0:
+            raise ValueError(f"eps must be positive, got {self.eps}.")
+
+    def evaluate(self, x: np.ndarray, derivatives: int = 1) -> tuple[np.ndarray, ...]:
+        """Evaluate f and, optionally, its first and second derivatives.
+
+        Args:
+            x: Distances.
+            derivatives: 0, 1 or 2 -- how many derivatives to return alongside f.
+
+        Returns:
+            (f,), (f, f') or (f, f', f'') according to ``derivatives``.
+        """
+        if derivatives not in (0, 1, 2):
+            raise ValueError(f"derivatives must be 0, 1 or 2, got {derivatives}.")
+
+        p, N_min = self.p, self.N_min
+        x = np.asarray(x, dtype=float) + self.eps
+
+        if self.name == "inverse_distance":                 # f = 1/(N_min + x^p)
+            f = (N_min + x ** p) ** -1
+            if derivatives == 0:
+                return (f,)
+            f_prime = -p * x ** (p - 1) * f ** 2
+            if derivatives == 1:
+                return f, f_prime
+            f_double_prime = p * x ** (p - 2) * f ** 3 * ((1 - p) * N_min + (1 + p) * x ** p)
+        else:                                               # f = exp(-x^p) / N_min
+            f = (1.0 / N_min) * np.exp(-x ** p)
+            if derivatives == 0:
+                return (f,)
+            f_prime = -p * x ** (p - 1) * f
+            if derivatives == 1:
+                return f, f_prime
+            f_double_prime = p * x ** (p - 2) * f * (1 - p + p * x ** p)
+
+        return f, f_prime, f_double_prime
+
+    def f(self, x: np.ndarray) -> np.ndarray:
+        """The link function itself."""
+        return self.evaluate(x, derivatives=0)[0]
+
+    def f_prime(self, x: np.ndarray) -> np.ndarray:
+        """First derivative of the link."""
+        return self.evaluate(x, derivatives=1)[1]
+
+    def f_double_prime(self, x: np.ndarray) -> np.ndarray:
+        """Second derivative of the link."""
+        return self.evaluate(x, derivatives=2)[2]
+
+    def inverse(self, f: np.ndarray) -> np.ndarray:
+        """Map rates back to distances.
+
+        The inner expression is clipped at zero to guard against negative bases
+        arising from floating-point error near the boundary.
+        """
+        if self.name == "inverse_distance":
+            # f = 1/(x^p + N_min)  =>  x = (1/f - N_min)^(1/p)
+            inner = (1.0 / f) - self.N_min
+        else:
+            # f = exp(-x^p)/N_min  =>  x = (-ln(N_min * f))^(1/p)
+            inner = -np.log(self.N_min * f + self.eps)
+        return np.clip(inner, 0, None) ** (1.0 / self.p)
+
+
+############################################################
+# Helper / matrix-construction functions
+############################################################
+
+def _as_link(link: Union[LinkFunction, str], N_min: float = 1.0, p: float = 1.0) -> LinkFunction:
+    """Coerce a link specification to a LinkFunction.
+
+    Accepting a bare string keeps the many ``link="inverse_distance"`` call sites in
+    the plotting scripts working without each of them constructing a LinkFunction.
+    """
+    if isinstance(link, LinkFunction):
+        return link
+    return LinkFunction(name=link, N_min=N_min, p=p)
+
+
+def compute_distances(X_t: np.ndarray) -> np.ndarray:
+    """Pairwise Euclidean distance matrix for one slice. (n, d) -> (n, n)"""
+    return squareform(pdist(X_t, "euclidean"))
+
+
+def default_valid_mask(R: np.ndarray) -> np.ndarray:
+    """The default validity mask: entries whose rate is not NaN.
+
+    This covers both the diagonal and the unsampled ancient-sample entries, since
+    LatentSpaceEmbeddings writes NaN into R at both.
+    """
+    return ~np.isnan(R)
+
+
+def compute_gradient_weights(
+    D_t: np.ndarray,
+    f_t: np.ndarray,
+    f_prime_t: np.ndarray,
+    R_t: np.ndarray,
+    W_t: np.ndarray,
+    valid_mask_t: np.ndarray,
+    eps: float,
+) -> np.ndarray:
+    """The Laplacian gradient weights g_ij = w_ij (f'_ij/d_ij) (1 - lambda_ij/f_ij).
+
+    Division by d_ij is guarded independently of the mask: ``0 * NaN`` is NaN, so an
+    unguarded 0/0 on the diagonal would propagate into the gradient even where the
+    weight is zero.
+    """
+    d_safe = np.maximum(D_t, eps)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = W_t * (f_prime_t / d_safe) * (1.0 - R_t / f_t)
+    return np.where(valid_mask_t, g, 0.0)
+
+
+def compute_curvature_weights(
+    f_t: np.ndarray,
+    f_prime_t: np.ndarray,
+    f_double_prime_t: np.ndarray,
+    R_t: np.ndarray,
+    W_t: np.ndarray,
+    valid_mask_t: np.ndarray,
+) -> np.ndarray:
+    """The radial curvature weights kappa_ij = kappa^+_ij + kappa^-_ij.
+
+    kappa^-_ij = w_ij f''_ij  and  kappa^+_ij = -w_ij lambda_ij [f''_ij/f_ij - (f'_ij/f_ij)^2].
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kappa = W_t * (
+            f_double_prime_t
+            - R_t * (f_double_prime_t / f_t - (f_prime_t / f_t) ** 2)
         )
-    n, d = X_t.shape
-    D = squareform(pdist(X_t, 'euclidean'))
-    f, f_prime = compute_f(D, N_min, p=p, link=link)
-    if link == "inverse_distance":       # f = 1/(D+N_min)
-        f_pp = 2.0 * f**3
-    elif link == "inverse_sq_distance":  # f = 1/(D^2+N_min)
-        f_pp = (6*D**2 - 2*N_min) * f**3
-    elif link == "exponential":          # f = (1/N_min)*exp(-D)
-        f_pp = f
-    else:
-        raise ValueError(f"Unsupported link for Hessian: {link}")
-
-    valid = ~np.isnan(R_t) & (D > 0)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        one_minus_rf = np.where(valid, 1.0 - R_t / f, 0.0)
-        M = np.where(valid, f_prime / D * one_minus_rf, 0.0)
-        A = np.where(valid, f_pp * one_minus_rf + R_t * f_prime**2 / f**2, 0.0)
-
-    WM    = W_t * M
-    alpha = W_t * (A - M)
-
-    D_safe = np.where(D > 0, D, 1.0)
-    diff   = X_t[:, None, :] - X_t[None, :, :]
-    U      = np.where(D[:, :, None] > 0, diff / D_safe[:, :, None], 0.0)
-
-    H, I_d = np.zeros((n * d, n * d)), np.eye(d)
-    for i in range(n):
-        for j in range(i + 1, n):
-            if not valid[i, j]:
-                continue
-            block = alpha[i, j] * np.outer(U[i, j], U[i, j]) + WM[i, j] * I_d
-            si, sj = slice(i*d, (i+1)*d), slice(j*d, (j+1)*d)
-            H[si, si] += block
-            H[sj, sj] += block
-            H[si, sj] -= block
-            H[sj, si] -= block
-    return H
+    return np.where(valid_mask_t, kappa, 0.0)
 
 
-def extract_sample_covariances(X_t, R_t, W_t, N_min, p=1, link="inverse_distance", hess_inv=None, exact=True):
-    """Extract per-sample d×d Laplace covariance blocks.
+def compute_difference_operators(
+    n_timepoints: int, max_order: int, delta_t: float
+) -> dict[int, np.ndarray]:
+    """Rectangular finite-difference operators D_k of shape (T - k, T).
+
+    D_1 is the (T-1, T) forward-difference matrix divided by delta_t; D_k is the
+    composition of k such matrices of decreasing height, so D_k has shape (T-k, T)
+    and carries an overall 1/delta_t**k.  No square zero-padding is applied: the
+    padded row of the previous implementation propagated artificial zero rows
+    through the composition.
 
     Args:
-        X_t (np.ndarray): (n, d) coordinates at the optimum.
-        R_t (np.ndarray): (n, n) rate matrix used in optimization.
-        W_t (np.ndarray): (n, n) weight matrix.
-        N_min (float): link function parameter.
-        p (int): link function exponent. Must match the value used in optimization.
-        link (str): link function type. Must match the value used in optimization.
-        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct). Only used when exact=False.
-        exact (bool): If True (default), compute the exact Hessian analytically and
-            pseudoinvert it.  If False, materialise the L-BFGS approximation instead.
+        n_timepoints: Length T of the (uniform) time grid.
+        max_order: Highest difference order to build.
+        delta_t: Spacing of the time grid.
 
     Returns:
-        np.ndarray: shape (n, d, d)
+        {order: operator}, for orders 1..max_order with T - order >= 1.
     """
+    if delta_t <= 0:
+        raise ValueError(f"delta_t must be positive, got {delta_t}.")
+
+    def forward_difference(m: int) -> np.ndarray:
+        """(m-1, m) forward difference, scaled by 1/delta_t."""
+        D1 = np.zeros((m - 1, m))
+        np.fill_diagonal(D1, -1.0)
+        np.fill_diagonal(D1[:, 1:], 1.0)
+        return D1 / delta_t
+
+    operators: dict[int, np.ndarray] = {}
+    D = np.eye(n_timepoints)
+    for k in range(1, max_order + 1):
+        rows = n_timepoints - k
+        if rows < 1:
+            break                      # no room for a k-th difference on this grid
+        D = forward_difference(n_timepoints - k + 1) @ D
+        operators[k] = D
+    return operators
+
+
+def pack_coordinates(X: np.ndarray, sampled_by_time: np.ndarray) -> np.ndarray:
+    """Flatten only the present (sample, time) coordinates into a 1-D vector.
+
+    Ancient samples have undefined positions before they are sampled; packing keeps
+    those out of the optimizer's variable vector entirely.
+
+    Args:
+        X: (n, d, T) coordinates.
+        sampled_by_time: (n, T) boolean presence mask.
+
+    Returns:
+        1-D array of length ``d * sampled_by_time.sum()``.
+    """
+    _assert_contiguous_presence(sampled_by_time)
+    n, d, T = X.shape
+    if sampled_by_time.shape != (n, T):
+        raise ValueError(
+            f"sampled_by_time has shape {sampled_by_time.shape}, expected {(n, T)}."
+        )
+    # (n, d, T) -> select present (sample, time) columns -> flat
+    return X.transpose(0, 2, 1)[sampled_by_time].ravel()
+
+
+def unpack_coordinates(
+    x_flat: np.ndarray,
+    sampled_by_time: np.ndarray,
+    n: int,
+    d: int,
+    T: int,
+    fill: float = 0.0,
+) -> np.ndarray:
+    """Inverse of pack_coordinates, filling absent entries with a finite dummy.
+
+    Absent entries are excluded by the valid mask (their rates are NaN) so they
+    contribute nothing to loss or gradient, but the fill must be finite or the
+    distance computation would return NaN everywhere.
+    """
+    n_present = int(sampled_by_time.sum())
+    if x_flat.size != n_present * d:
+        raise ValueError(
+            f"x_flat has {x_flat.size} entries, expected {n_present * d} "
+            f"({n_present} present (sample, time) pairs x {d} dimensions)."
+        )
+    X_swapped = np.full((n, T, d), float(fill))
+    X_swapped[sampled_by_time] = x_flat.reshape(n_present, d)
+    return X_swapped.transpose(0, 2, 1)
+
+
+def _assert_contiguous_presence(sampled_by_time: np.ndarray) -> None:
+    """Presence must be a contiguous block of the time axis for every sample.
+
+    Because ``sampled_by_time[i, t] = sample_time_i <= time_points[t]``, presence can
+    never have interior gaps.  The ancient-sample difference operators rely on this,
+    so fail loudly if it ever stops holding.
+    """
+    changes = np.diff(sampled_by_time.astype(np.int8), axis=1)
+    # More than one transition (or an off->on after an on->off) means an interior gap
+    n_blocks = (changes == 1).sum(axis=1) + sampled_by_time[:, 0].astype(int)
+    bad = np.where((np.abs(changes).sum(axis=1) > 1) | (n_blocks > 1))[0]
+    if bad.size:
+        raise ValueError(
+            "sampled_by_time must be contiguous per sample (presence is defined by "
+            f"sample_time <= time_point, so it cannot have interior gaps). Samples "
+            f"with non-contiguous presence: {bad.tolist()}"
+        )
+
+
+def _assert_finite(value: float, grad: np.ndarray, slice_index: Optional[int] = None) -> None:
+    """Guard against NaN/inf leaking out of a loss/gradient evaluation."""
+    where = "" if slice_index is None else f" at time slice index {slice_index}"
+    if not np.isfinite(value):
+        raise FloatingPointError(f"Non-finite loss ({value}){where}.")
+    if not np.all(np.isfinite(grad)):
+        n_bad = int((~np.isfinite(grad)).sum())
+        raise FloatingPointError(
+            f"Non-finite gradient{where}: {n_bad} of {grad.size} entries are NaN or inf."
+        )
+
+
+def _iter_slices(
+    X: np.ndarray, R: np.ndarray, W: np.ndarray, valid_mask: Optional[np.ndarray]
+):
+    """Yield (t, X_t, R_t, W_t, mask_t) for 2-D (single slice) or 3-D input.
+
+    Time slices are handled one at a time with (n, n) working arrays; the full
+    (n, n, T) distance tensor is never materialised (at n=1000, T=700 it exceeds 5 GB).
+    """
+    if X.ndim == 2:
+        mask = default_valid_mask(R) if valid_mask is None else valid_mask
+        yield None, X, R, W, mask
+    elif X.ndim == 3:
+        T = X.shape[2]
+        for t in range(T):
+            R_t = R[:, :, t]
+            mask_t = default_valid_mask(R_t) if valid_mask is None else valid_mask[:, :, t]
+            yield t, X[:, :, t], R_t, W[:, :, t], mask_t
+    else:
+        raise ValueError(f"X must be (n, d) or (n, d, T), got shape {X.shape}.")
+
+
+def _default_weights_like(R: np.ndarray) -> np.ndarray:
+    """Uniform fallback weights, used when no standard errors are supplied."""
+    return np.ones_like(R, dtype=float) * DEFAULT_WEIGHTS
+
+
+############################################################
+# Unpenalized loss
+############################################################
+
+def compute_unpenalized_loss(
+    X: np.ndarray,
+    R: np.ndarray,
+    W: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    valid_mask: Optional[np.ndarray] = None,
+) -> float:
+    """Weighted unpenalized loss, for one slice or for a whole trajectory.
+
+    l = 0.5 * sum_{i,j} w_ij [ f_ij - lambda_ij ln f_ij ], summed over slices.
+
+    Args:
+        X: (n, d) for a single slice, or (n, d, T).
+        R: (n, n) or (n, n, T) rates, NaN where the pair is unobserved.
+        W: Matching weights; defaults to DEFAULT_WEIGHTS everywhere.
+        link: LinkFunction (or a link name, using default N_min/p).
+        valid_mask: Optional override; defaults to ~isnan(R) per slice.
+
+    Returns:
+        The scalar loss.
+    """
+    link = _as_link(link)
+    if W is None:
+        W = _default_weights_like(R)
+
+    # Accumulate in float64 even when R/W are stored as float32
+    total = 0.0
+    for t, X_t, R_t, W_t, mask_t in _iter_slices(X, R, W, valid_mask):
+        D_t = compute_distances(X_t)
+        (f_t,) = link.evaluate(D_t, derivatives=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            terms = W_t * (f_t - R_t * np.log(f_t))
+        total += 0.5 * float(np.sum(terms[mask_t], dtype=np.float64))
+    return total
+
+
+############################################################
+# Unpenalized gradient
+############################################################
+
+def compute_unpenalized_gradient(
+    X: np.ndarray,
+    R: np.ndarray,
+    W: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    valid_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Gradient of the unpenalized loss, for one slice or a whole trajectory.
+
+    Per slice this is the graph Laplacian applied to the coordinates,
+    ``L_t X_t`` with ``L_t = diag(sum_j g_ij) - G`` (no factor of 2; see the module
+    docstring on the sign/factor convention).
+
+    Args:
+        X: (n, d) or (n, d, T).
+        R: (n, n) or (n, n, T).
+        W: Matching weights; defaults to DEFAULT_WEIGHTS.
+        link: LinkFunction or link name.
+        valid_mask: Optional override; defaults to ~isnan(R) per slice.
+
+    Returns:
+        Gradient with the same shape as X.
+    """
+    link = _as_link(link)
+    if W is None:
+        W = _default_weights_like(R)
+
+    grad = np.zeros(X.shape, dtype=np.float64)
+    for t, X_t, R_t, W_t, mask_t in _iter_slices(X, R, W, valid_mask):
+        D_t = compute_distances(X_t)
+        f_t, f_prime_t = link.evaluate(D_t, derivatives=1)
+        G = compute_gradient_weights(D_t, f_t, f_prime_t, R_t, W_t, mask_t, link.eps)
+        grad_t = G.sum(axis=1)[:, None] * X_t - G @ X_t
+        if t is None:
+            grad = grad_t
+        else:
+            grad[:, :, t] = grad_t
+    return grad
+
+
+############################################################
+# Exact unpenalized Hessian (single slice only)
+############################################################
+
+def compute_exact_hessian(
+    X_t: np.ndarray,
+    R_t: np.ndarray,
+    W_t: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    valid_mask_t: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Exact Hessian of the unpenalized loss at one slice, w.r.t. flattened X_t.
+
+    The per-pair d x d block is
+
+        B_ij = g_ij I_d + (kappa_ij - g_ij) P_ij,   P_ij = u u^T,  u = (X_i - X_j)/d_ij
+
+    accumulated as H[i,i] += B, H[j,j] += B, H[i,j] -= B, H[j,i] -= B.  The result is
+    symmetric with exactly d zero eigenvalues (translation invariance).
+
+    This exists for the per-slice Laplace covariances.  It does **not** include the
+    smoothing penalty, which couples time slices and cannot be represented in a
+    per-slice block.
+
+    Args:
+        X_t: (n, d) coordinates at one slice.
+        R_t: (n, n) rates.
+        W_t: (n, n) weights; defaults to DEFAULT_WEIGHTS.
+        link: LinkFunction or link name.
+        valid_mask_t: Optional override; defaults to ~isnan(R_t).
+
+    Returns:
+        (n*d, n*d) Hessian.
+    """
+    if X_t.ndim != 2:
+        raise ValueError(
+            f"compute_exact_hessian takes a single slice of shape (n, d), got {X_t.shape}. "
+            "The joint Hessian is (n*d*T)^2 and is not computable at these sizes; it is "
+            "also not the right object, since the smoothing penalty couples time slices."
+        )
+
+    link = _as_link(link)
+    if W_t is None:
+        W_t = _default_weights_like(R_t)
+    if valid_mask_t is None:
+        valid_mask_t = default_valid_mask(R_t)
+
+    n, d = X_t.shape
+    D_t = compute_distances(X_t)
+    f_t, f_prime_t, f_double_prime_t = link.evaluate(D_t, derivatives=2)
+
+    # Radial (kappa) and tangential (g) curvature weights
+    G     = compute_gradient_weights(D_t, f_t, f_prime_t, R_t, W_t, valid_mask_t, link.eps)
+    kappa = compute_curvature_weights(f_t, f_prime_t, f_double_prime_t, R_t, W_t, valid_mask_t)
+
+    # Unit separation vectors and their outer products, vectorized over all pairs
+    d_safe = np.maximum(D_t, link.eps)
+    U = (X_t[:, None, :] - X_t[None, :, :]) / d_safe[:, :, None]     # (n, n, d)
+    U = np.where(valid_mask_t[:, :, None], U, 0.0)
+    P = U[:, :, :, None] * U[:, :, None, :]                          # (n, n, d, d)
+
+    # B_ij = g_ij I_d + (kappa_ij - g_ij) P_ij
+    I_d = np.eye(d)
+    B = G[:, :, None, None] * I_d + (kappa - G)[:, :, None, None] * P  # (n, n, d, d)
+
+    # Off-diagonal blocks are -B; each diagonal block is the row sum of B
+    H = -B.transpose(0, 2, 1, 3).copy()                              # (n, d, n, d)
+    diag = B.sum(axis=1)                                             # (n, d, d)
+    idx = np.arange(n)
+    H[idx, :, idx, :] = diag
+    return H.reshape(n * d, n * d)
+
+
+############################################################
+# Fused unpenalized loss + gradient
+############################################################
+
+def compute_loss_gradient(
+    X_flat: np.ndarray,
+    shape: tuple[int, ...],
+    problem: dict,
+) -> tuple[float, np.ndarray]:
+    """Fused unpenalized loss and gradient -- the callable passed to L-BFGS-B.
+
+    Distances, f and f' are computed once per slice and reused for both outputs.
+
+    Args:
+        X_flat: Flattened coordinates.
+        shape: Shape to restore, (n, d) or (n, d, T).
+        problem: {"R", "W", "link", optionally "valid_mask"}.
+
+    Returns:
+        (loss, flattened gradient).
+    """
+    X = X_flat.reshape(shape)
+    R, W = problem["R"], problem["W"]
+    link = _as_link(problem["link"])
+    valid_mask = problem.get("valid_mask")
+    if W is None:
+        W = _default_weights_like(R)
+
+    total_loss = 0.0
+    grad = np.zeros(X.shape, dtype=np.float64)
+
+    for t, X_t, R_t, W_t, mask_t in _iter_slices(X, R, W, valid_mask):
+        # Shared quantities: distances and the link's value and slope
+        D_t = compute_distances(X_t)
+        f_t, f_prime_t = link.evaluate(D_t, derivatives=1)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            terms = W_t * (f_t - R_t * np.log(f_t))
+        loss_t = 0.5 * float(np.sum(terms[mask_t], dtype=np.float64))
+
+        G = compute_gradient_weights(D_t, f_t, f_prime_t, R_t, W_t, mask_t, link.eps)
+        grad_t = G.sum(axis=1)[:, None] * X_t - G @ X_t
+
+        _assert_finite(loss_t, grad_t, t)
+        total_loss += loss_t
+        if t is None:
+            grad = grad_t
+        else:
+            grad[:, :, t] = grad_t
+
+    return total_loss, grad.ravel()
+
+
+############################################################
+# Penalty loss and gradient
+############################################################
+
+def compute_penalty_loss_gradient(
+    X: np.ndarray, smoothing_params: dict
+) -> tuple[float, np.ndarray]:
+    """Group-fused-lasso penalty with pseudo-Huber smoothing, and its gradient.
+
+    P(X) = sum_k alpha_1^(k) sum_{i,t} sqrt( ||(D_k X_i)_t||^2 + eps_k^2 )
+
+    with gradient, writing u = D_k X_i,
+
+        dP/dX_i = sum_k alpha_1^(k) * ( u / sqrt(||u||^2 + eps_k^2) ) @ D_k
+
+    where ||u|| is the norm over the latent-dimension axis.  The pseudo-Huber form
+    replaces the exact group norm, giving L-BFGS finite curvature near zero.
+
+    Note: the ``sum_k eps_k`` constant offset inflates the reported penalty value by
+    a known constant.  It does not affect the gradient or the minimizer.
+
+    Args:
+        X: (d, T) for one sample or (n, d, T) for all.
+        smoothing_params: Keys "l1" ({order: alpha}), "eps" ({order: eps}),
+            "diff_operators" ({order: matrix}).
+
+    Returns:
+        (loss, grad) with grad matching X's shape.
+    """
+    loss = 0.0
+    grad = np.zeros_like(X, dtype=np.float64)
+    eps_by_order = smoothing_params.get("eps", {})
+
+    for k, D in smoothing_params["diff_operators"].items():
+        l1 = smoothing_params["l1"].get(k, 0.0)
+        if not l1:
+            continue
+        eps_k = eps_by_order.get(k, 0.0)
+
+        DX = X @ D.T                                             # (..., d, T-k)
+        sq_norms = np.sum(DX ** 2, axis=-2, keepdims=True)       # (..., 1, T-k)
+        smoothed = np.sqrt(sq_norms + eps_k ** 2)                # (..., 1, T-k)
+
+        loss += l1 * float(np.sum(smoothed))
+        grad += l1 * (DX / smoothed) @ D
+
+    return loss, grad
+
+
+############################################################
+# Penalized loss + gradient assembly
+############################################################
+
+def compute_penalized_loss_gradient(
+    x_flat: np.ndarray,
+    problem: dict,
+) -> tuple[float, np.ndarray]:
+    """Penalized loss and gradient on the packed coordinate vector.
+
+    This is the callable passed to L-BFGS-B in the joint stage.  It unpacks the
+    present coordinates, evaluates the data term slice by slice and the smoothing
+    penalty per sample on that sample's present time window, then packs the gradient
+    back down so absent entries never enter the optimizer's variable vector.
+
+    Args:
+        x_flat: Packed coordinates (see pack_coordinates).
+        problem: {"R", "W", "link", "sampled_by_time", "shape" (n, d, T),
+            "smoothing_params" (may be None), optionally "valid_mask"}.
+
+    Returns:
+        (loss, packed gradient).
+    """
+    n, d, T = problem["shape"]
+    sampled_by_time = problem["sampled_by_time"]
+    X = unpack_coordinates(x_flat, sampled_by_time, n, d, T)
+
+    # Data term over all slices
+    loss, grad_flat = compute_loss_gradient(X.ravel(), (n, d, T), problem)
+    grad = grad_flat.reshape(n, d, T)
+
+    # Smoothing penalty, per sample, on that sample's present window
+    smoothing_params = problem.get("smoothing_params")
+    if smoothing_params is not None:
+        pen_loss, pen_grad = compute_penalty_over_samples(
+            X, sampled_by_time, smoothing_params
+        )
+        loss += pen_loss
+        grad += pen_grad
+
+    _assert_finite(loss, grad)
+    return loss, pack_coordinates(grad, sampled_by_time)
+
+
+def compute_penalty_over_samples(
+    X: np.ndarray,
+    sampled_by_time: np.ndarray,
+    smoothing_params: dict,
+) -> tuple[float, np.ndarray]:
+    """Apply the smoothing penalty to each sample over its present time window.
+
+    Samples present at every timepoint share the full-length operators and are
+    handled as one batch; ancient samples are grouped by the length of their present
+    block, so samples sharing a sampling time reuse the same cached operator.
+
+    Args:
+        X: (n, d, T) coordinates.
+        sampled_by_time: (n, T) presence mask.
+        smoothing_params: As for compute_penalty_loss_gradient, plus an
+            "operator_cache" entry used to memoize per-block-length operators.
+
+    Returns:
+        (penalty loss, (n, d, T) gradient).
+    """
+    n, d, T = X.shape
+    loss = 0.0
+    grad = np.zeros_like(X, dtype=np.float64)
+
+    # Group samples by the length of their contiguous present block
+    present_counts = sampled_by_time.sum(axis=1)
+    for block_length in np.unique(present_counts):
+        rows = np.where(present_counts == block_length)[0]
+        if block_length == 0:
+            continue
+        params = _operators_for_block(smoothing_params, int(block_length))
+        if not params["diff_operators"]:
+            continue                        # window too short for any requested order
+
+        if block_length == T:
+            X_block = X[rows]                                   # (m, d, T)
+        else:
+            # Contiguity (asserted in pack_coordinates) makes this a simple slice
+            starts = np.argmax(sampled_by_time[rows], axis=1)
+            X_block = np.stack(
+                [X[i, :, s:s + int(block_length)] for i, s in zip(rows, starts)]
+            )
+
+        block_loss, block_grad = compute_penalty_loss_gradient(X_block, params)
+        loss += block_loss
+        if block_length == T:
+            grad[rows] += block_grad
+        else:
+            for row_pos, (i, s) in enumerate(zip(rows, starts)):
+                grad[i, :, s:s + int(block_length)] += block_grad[row_pos]
+
+    return loss, grad
+
+
+def _operators_for_block(smoothing_params: dict, block_length: int) -> dict:
+    """Smoothing params restricted to a present window of a given length.
+
+    Operators are cached by (block_length, order) so that samples sharing a sampling
+    time reuse the same matrix.  Orders with block_length <= k contribute no penalty
+    and are dropped.
+    """
+    cache = smoothing_params.setdefault("operator_cache", {})
+    if block_length in cache:
+        operators = cache[block_length]
+    else:
+        max_order = max(smoothing_params["diff_operators"].keys())
+        operators = compute_difference_operators(
+            block_length, max_order, smoothing_params["delta_t"]
+        )
+        cache[block_length] = operators
+
+    return {
+        "l1": smoothing_params["l1"],
+        "eps": smoothing_params.get("eps", {}),
+        "diff_operators": operators,
+    }
+
+
+############################################################
+# Sequential (per-slice) optimization
+############################################################
+
+def _resolve_gtol(grad_init: np.ndarray, gtol_factor: float) -> float:
+    """Scale-aware gradient tolerance: a fraction of the initial gradient's size.
+
+    An absolute gtol is meaningless here because the weights (and hence the
+    gradients) are of order 1e6; see the module docstring.
+    """
+    scale = float(np.max(np.abs(grad_init)))
+    return gtol_factor * scale if scale > 0 else 0.0
+
+
+def optimize_timepoint(
+    X_t_init: np.ndarray,
+    R_t: np.ndarray,
+    W_t: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    N_min: float = 1.0,
+    N_max: float = np.inf,
+    p: float = 1.0,
+    max_iter: int = MAX_ITER_TIMEPOINT,
+    ftol: float = FTOL_TIMEPOINT,
+    gtol_factor: float = GTOL_FACTOR,
+    maxcor: int = MAXCOR_TIMEPOINT,
+    return_hess_inv: bool = False,
+) -> tuple:
+    """Single L-BFGS-B solve for one timepoint.
+
+    Args:
+        X_t_init: (n, d) initial coordinates.
+        R_t: (n, n) rates.
+        W_t: (n, n) weights; defaults to DEFAULT_WEIGHTS.
+        link: LinkFunction or link name (with N_min/p used to build one).
+        N_min, N_max, p: Link parameters, used when ``link`` is a bare name.
+            1/N_max is added to the rates, so a pair with zero rate still carries
+            weight.
+        max_iter: Maximum L-BFGS-B iterations.
+        ftol: Relative function tolerance (the primary criterion).
+        gtol_factor: gtol is set to gtol_factor * max|grad| at the initial point.
+        maxcor: L-BFGS memory (number of stored correction pairs).
+        return_hess_inv: If True, also return the L-BFGS inverse Hessian.
+
+    Returns:
+        (X_opt, loss, n_iterations, message), plus hess_inv when requested.
+    """
+    link = _as_link(link, N_min=N_min, p=p)
+    if W_t is None:
+        W_t = _default_weights_like(R_t)
+
+    # 1/N_max keeps zero-rate pairs from carrying zero weight
+    R_t = np.asarray(R_t, dtype=np.float64) + 1.0 / N_max
+    problem = {"R": R_t, "W": np.asarray(W_t, dtype=np.float64), "link": link}
+    shape = X_t_init.shape
+
+    _, grad_init = compute_loss_gradient(X_t_init.ravel(), shape, problem)
+    gtol = _resolve_gtol(grad_init, gtol_factor)
+
+    result = minimize(
+        compute_loss_gradient,
+        X_t_init.ravel(),
+        args=(shape, problem),
+        method="L-BFGS-B",
+        jac=True,
+        options={"maxiter": max_iter, "disp": False, "gtol": gtol,
+                 "ftol": ftol, "maxcor": maxcor},
+    )
+    X_opt = result.x.reshape(shape)
+    if return_hess_inv:
+        return X_opt, result.fun, result.nit, result.message, result.hess_inv
+    return X_opt, result.fun, result.nit, result.message
+
+
+def coordinate_descent_over_time(
+    R: np.ndarray,
+    W: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    N_min: float = 1.0,
+    N_max: float = np.inf,
+    p: float = 1.0,
+    n_components: int = 2,
+    X_init: Optional[np.ndarray] = None,
+    sampled_by_time: Optional[np.ndarray] = None,
+    direction: str = "backward",
+    max_iter: int = MAX_ITER_TIMEPOINT,
+    target_precision: float = FTOL_TIMEPOINT,
+    gtol_factor: float = GTOL_FACTOR,
+    maxcor: int = MAXCOR_TIMEPOINT,
+    return_covariances: bool = False,
+    exact_hessian: bool = True,
+) -> tuple:
+    """Single-pass coordinate descent over timepoints (default: backward).
+
+    Each slice is solved unpenalized with L-BFGS-B, warm-started from the previous
+    slice's solution, then Procrustes-aligned to it.  Alignment uses only the samples
+    present at *both* slices, so the growing set of ancient samples does not translate
+    the configuration for reasons unrelated to structure.
+
+    Args:
+        R: (n, n, T) rate tensor.
+        W: (n, n, T) weight tensor; defaults to DEFAULT_WEIGHTS.
+        link: LinkFunction or link name.
+        N_min, N_max, p: Link parameters used when ``link`` is a bare name.
+        n_components: Latent dimensionality d.
+        X_init: (n, d, T) initial coordinates; random if None.
+        sampled_by_time: (n, T) presence mask; all-present if None.
+        direction: "backward" (default) or "forward".
+        max_iter: Maximum L-BFGS-B iterations per slice.
+        target_precision: ftol; 1e-9 for exploratory sweeps, 1e-12 for final runs.
+        gtol_factor: Scale factor for the per-slice gtol.
+        maxcor: L-BFGS memory.
+        return_covariances: If True, also return per-sample Laplace covariances,
+            shape (n, d, d, T).
+        exact_hessian: If True (default), use the exact analytical Hessian for those
+            covariances; if False, materialise the L-BFGS approximation instead
+            (faster but significantly less accurate).
+
+    Returns:
+        (X, loss_df) or (X, loss_df, covariances).
+    """
+    if direction not in ("backward", "forward"):
+        raise ValueError(f"direction must be 'backward' or 'forward', got {direction!r}.")
+
+    link = _as_link(link, N_min=N_min, p=p)
+    n_samples, _, n_timepoints = R.shape
+
+    if W is None:
+        W = _default_weights_like(R)
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n_samples, n_timepoints), dtype=bool)
+    if X_init is None:
+        X_init = np.random.rand(n_samples, n_components, n_timepoints)
+
+    print(
+        f"Sequential (per-slice) stage: ftol={target_precision:g}, "
+        f"gtol=gtol_factor*max|grad_init| with gtol_factor={gtol_factor:g}, "
+        f"maxcor={maxcor}"
+    )
+
+    X = np.full((n_samples, n_components, n_timepoints), np.nan)
+    loss_before, loss_after, n_iters, messages = [], [], [], []
+    if return_covariances:
+        covariances = np.full(
+            (n_samples, n_components, n_components, n_timepoints), np.nan
+        )
+
+    time_order = (range(n_timepoints) if direction == "forward"
+                  else range(n_timepoints - 1, -1, -1))
+    prev_t_idx = None
+
+    for step, t_idx in enumerate(tqdm(time_order)):
+        extant_mask = sampled_by_time[:, t_idx]
+        extant_idx = np.where(extant_mask)[0]
+
+        # --- Initialize from the previous slice, seeding newly-entering samples ---
+        if step == 0:
+            X_global = X_init[:, :, t_idx].copy()
+        else:
+            X_global = X[:, :, prev_t_idx].copy()
+            new_mask = extant_mask & ~sampled_by_time[:, prev_t_idx]
+            if np.any(new_mask):
+                X_global[new_mask, :] = X_init[new_mask, :, t_idx]
+
+        # --- Restrict to extant samples ---
+        X_t = X_global[extant_idx, :]
+        R_t = np.asarray(R[:, :, t_idx][np.ix_(extant_idx, extant_idx)], dtype=np.float64)
+        W_t = np.asarray(W[:, :, t_idx][np.ix_(extant_idx, extant_idx)], dtype=np.float64)
+
+        # --- Loss before ---
+        problem_t = {"R": R_t + 1.0 / N_max, "W": W_t, "link": link}
+        loss_t_before, _ = compute_loss_gradient(X_t.ravel(), X_t.shape, problem_t)
+
+        # --- Optimize ---
+        need_hess_inv = return_covariances and not exact_hessian
+        X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
+            X_t_init=X_t, R_t=R_t, W_t=W_t, link=link, N_max=N_max,
+            max_iter=max_iter, ftol=target_precision, gtol_factor=gtol_factor,
+            maxcor=maxcor, return_hess_inv=need_hess_inv,
+        )
+        hess_inv = _hess[0] if _hess else None
+
+        covs = None
+        if return_covariances:
+            try:
+                covs = extract_sample_covariances(
+                    X_t, R_t + 1.0 / N_max, W_t, link=link,
+                    hess_inv=hess_inv, exact=exact_hessian,
+                )
+            except np.linalg.LinAlgError as err:
+                raise np.linalg.LinAlgError(
+                    f"Covariance extraction failed at timepoint index {t_idx} "
+                    f"({len(extant_idx)} extant samples): {err}"
+                ) from err
+
+        # --- Center (first step only) and Procrustes align to the previous slice ---
+        if step == 0:
+            X_t = X_t - np.mean(X_t, axis=0)
+            X_t, rot = procrustes_single_time(
+                X_global[extant_idx, :], X_t, allow_reflection=False
+            )
+        else:
+            # Align on samples present at both slices, so the centering set does not
+            # change as ancient samples enter and translate the whole configuration
+            shared_mask = extant_mask & sampled_by_time[:, prev_t_idx]
+            if shared_mask.sum() < n_components + 1:
+                raise ValueError(
+                    f"Only {int(shared_mask.sum())} samples are present at both "
+                    f"timepoint indices {prev_t_idx} and {t_idx}; at least "
+                    f"{n_components + 1} are needed for a non-degenerate Procrustes "
+                    f"rotation in {n_components} dimensions."
+                )
+            shared_in_extant = np.isin(extant_idx, np.where(shared_mask)[0])
+            X_t, rot = procrustes_align_subset(
+                X_reference=X_global[extant_idx, :],
+                Y=X_t,
+                subset=shared_in_extant,
+                allow_reflection=False,
+            )
+        X[extant_idx, :, t_idx] = X_t
+
+        if return_covariances and covs is not None:
+            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
+            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
+
+        loss_before.append(loss_t_before)
+        loss_after.append(loss_t_after)
+        n_iters.append(n_iter)
+        messages.append(message)
+        prev_t_idx = t_idx
+
+    loss_df = pd.DataFrame({
+        "step":           range(1, n_timepoints + 1),
+        "loss_reduction": np.array(loss_before) - np.array(loss_after),
+        "n_iterations":   n_iters,
+        "message":        messages,
+    })
+    if return_covariances:
+        return X, loss_df, covariances
+    return X, loss_df
+
+
+############################################################
+# Joint optimization
+############################################################
+
+def optimize_jointly(
+    X_init: np.ndarray,
+    R: np.ndarray,
+    W: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    N_min: float = 1.0,
+    N_max: float = np.inf,
+    p: float = 1.0,
+    smoothing_params: Optional[dict] = None,
+    sampled_by_time: Optional[np.ndarray] = None,
+    max_iter: int = MAX_ITER_JOINT,
+    target_precision: float = FTOL_JOINT,
+    gtol_factor: float = GTOL_FACTOR,
+    maxcor: int = MAXCOR_JOINT,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Joint L-BFGS-B optimization over all samples and timepoints, with smoothing.
+
+    The optimizer works on a packed vector of present coordinates only, so absent
+    ancient-sample entries never enter the variable vector.  The returned array keeps
+    the public (n, d, T) contract, with NaN at absent entries.
+
+    Args:
+        X_init: (n, d, T) initial coordinates (typically the stage-1 solution).
+        R: (n, n, T) rate tensor.
+        W: (n, n, T) weight tensor; defaults to DEFAULT_WEIGHTS.
+        link: LinkFunction or link name.
+        N_min, N_max, p: Link parameters used when ``link`` is a bare name.
+        smoothing_params: Smoothing configuration; None for no penalty.
+        sampled_by_time: (n, T) presence mask; all-present if None.
+        max_iter: Maximum iterations.
+        target_precision: ftol; 1e-9 for exploratory sweeps, 1e-12 for final runs.
+        gtol_factor: gtol is gtol_factor * max|grad| at the initial point.
+        maxcor: L-BFGS memory.  Memory cost is O(maxcor * n * d * T) -- at n=1000,
+            d=2, T=700 with maxcor=20 that is roughly 450 MB.
+
+    Returns:
+        (X_opt, progress_df) with progress columns
+        ["iteration", "loss", "proj_grad_max", "rel_change"].
+    """
+    link = _as_link(link, N_min=N_min, p=p)
+    n, d, T = X_init.shape
+    if W is None:
+        W = _default_weights_like(R)
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n, T), dtype=bool)
+
+    problem = {
+        "R": np.asarray(R, dtype=np.float64) + 1.0 / N_max,
+        "W": np.asarray(W, dtype=np.float64),
+        "link": link,
+        "sampled_by_time": sampled_by_time,
+        "shape": (n, d, T),
+        "smoothing_params": smoothing_params,
+    }
+    if smoothing_params is not None and "delta_t" not in smoothing_params:
+        raise ValueError(
+            "smoothing_params must carry 'delta_t' so that difference operators can "
+            "be rebuilt on each ancient sample's present time window."
+        )
+
+    # Absent entries hold NaN in the public array; pack drops them
+    x0 = pack_coordinates(np.nan_to_num(X_init, nan=0.0), sampled_by_time)
+
+    # Cache the last evaluation so the progress callback need not recompute it
+    state: dict = {"loss": None, "grad_max": None}
+
+    def objective(x: np.ndarray) -> tuple[float, np.ndarray]:
+        loss, grad = compute_penalized_loss_gradient(x, problem)
+        state["loss"] = loss
+        state["grad_max"] = float(np.max(np.abs(grad)))
+        return loss, grad
+
+    _, grad_init = compute_penalized_loss_gradient(x0, problem)
+    gtol = _resolve_gtol(grad_init, gtol_factor)
+    print(
+        f"Joint stage: ftol={target_precision:g}, gtol={gtol:g} "
+        f"(gtol_factor={gtol_factor:g}), maxcor={maxcor}"
+    )
+
+    progress: list[dict] = []
+
+    def callback(xk: np.ndarray) -> None:
+        # Read the cached values; recomputing here would double the cost of the
+        # most expensive stage
+        loss, grad_max = state["loss"], state["grad_max"]
+        prev_loss = progress[-1]["loss"] if progress else None
+        rel_change = (
+            (prev_loss - loss) / max(abs(prev_loss), abs(loss), 1)
+            if prev_loss is not None else np.nan
+        )
+        progress.append({
+            "iteration":     len(progress) + 1,
+            "loss":          loss,
+            "proj_grad_max": grad_max,
+            "rel_change":    rel_change,
+        })
+        print(f"  iter {progress[-1]['iteration']:4d}  "
+              f"loss={loss:.10g}  "
+              f"rel_change={rel_change:.3g}  "
+              f"max|grad|={grad_max:.6g}")
+
+    result = minimize(
+        objective,
+        x0,
+        method="L-BFGS-B",
+        jac=True,
+        callback=callback,
+        options={"maxiter": max_iter, "disp": False, "gtol": gtol,
+                 "ftol": target_precision, "maxcor": maxcor},
+    )
+    print(f"Finished: {result.message}  "
+          f"(loss={result.fun:.10g}, iterations={result.nit})")
+
+    # Restore the public (n, d, T) contract: NaN at absent entries
+    X_opt = unpack_coordinates(result.x, sampled_by_time, n, d, T, fill=np.nan)
+    return X_opt, pd.DataFrame(progress)
+
+
+############################################################
+# Non-optimization utilities
+############################################################
+
+def extract_sample_covariances(
+    X_t: np.ndarray,
+    R_t: np.ndarray,
+    W_t: Optional[np.ndarray] = None,
+    link: Union[LinkFunction, str] = "inverse_distance",
+    N_min: float = 1.0,
+    p: float = 1.0,
+    hess_inv=None,
+    exact: bool = True,
+) -> np.ndarray:
+    """Extract per-sample d x d Laplace covariance blocks at one slice.
+
+    Args:
+        X_t: (n, d) coordinates at the optimum.
+        R_t: (n, n) rate matrix used in optimization.
+        W_t: (n, n) weight matrix.
+        link: LinkFunction or link name; must match the one used in optimization.
+        N_min, p: Link parameters used when ``link`` is a bare name.
+        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct); used when exact=False.
+        exact: If True (default), compute the exact Hessian analytically and
+            pseudoinvert it.  If False, materialise the L-BFGS approximation.
+
+    Returns:
+        (n, d, d) array of per-sample covariance blocks.
+    """
+    link = _as_link(link, N_min=N_min, p=p)
     n, d = X_t.shape
     if exact:
-        H = _compute_exact_hessian(X_t, R_t, W_t, N_min, p=p, link=link)
-        # Eigendecompose (symmetric) and invert only positive eigenvalues.
-        # This correctly handles both the d translation-invariance zeros and any
-        # small negative eigenvalues that arise from numerical imprecision.
+        H = compute_exact_hessian(X_t, R_t, W_t, link=link)
+        # Eigendecompose (symmetric) and invert only positive eigenvalues.  This
+        # handles both the d translation-invariance zeros and any small negative
+        # eigenvalues arising from numerical imprecision.
         eigvals, eigvecs = np.linalg.eigh(H)
         threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
         inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
         H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
     else:
+        if hess_inv is None:
+            raise ValueError("exact=False requires hess_inv from the L-BFGS result.")
         H_inv = hess_inv @ np.eye(n * d)
-    return np.array([H_inv[i*d:(i+1)*d, i*d:(i+1)*d] for i in range(n)])
+    return np.array([H_inv[i * d:(i + 1) * d, i * d:(i + 1) * d] for i in range(n)])
 
-def compute_f(x,
-              N_min,
-              p=1,
-              link="inverse_distance",
-              return_second_derivative=False,
-              eps=1e-10): 
-    """Compute the link function f and its derivative f_prime based on the distance matrix D and minimum value N_min. f(x) is the function that maps distances to rates.
+
+def procrustes_single_time(
+    X_reference: np.ndarray, Y: np.ndarray, allow_reflection: bool = True
+) -> tuple[np.ndarray, np.ndarray]:
+    """Align Y to X_reference via the optimal rotation (Procrustes).
 
     Args:
-        x (np.ndarray): distance between two samples
-        N_min (float): Minimum rate that could be modelled, where samples with rate = 1/N_min or higher will have zero distances between them.
-        p (float, optional): exponent of the distance link functions. Defaults to 1.
-        link (str, optional): Type of link function to compute. Defaults to "inverse_distance".
+        X_reference: (n, d) reference configuration.
+        Y: (n, d) configuration to rotate.
+        allow_reflection: If False, force a proper rotation (det = +1).
 
     Returns:
-        tuple: f and f_prime arrays.
-    """  
-    assert link in ["inverse_distance", "exponential"], "Unsupported link function"
-    assert p > 0, "p must be a positive integer"
-    assert N_min > 0
-
-    x = x + eps  # Avoid division by zero and log(0)
-    if link == "inverse_distance":                  # f = 1/(D + N_min)                         
-        f = (N_min+x**p)**-1
-        f_prime = -p * x**(p-1) * f**2
-        if return_second_derivative:
-            f_pp = p*x**(p-2)*f**3*((1-p)*N_min + (1+p)*x**p)
-    elif link == "exponential":                     # f = 1/N_min * exp(-D)
-        f = (1/N_min)*np.exp(-x**p)
-        f_prime = -p * x**(p-1) * f
-        if return_second_derivative:
-            f_pp = p*x**(p-2)*f*(1-p+p*x**p)
-    if return_second_derivative:
-        return f,f_prime,f_pp
-    else:
-        return f,f_prime
-
-
-def compute_f_inverse(f, N_min, p=1, link="inverse_distance", eps=1e-10):
-    """Compute the inverse link function, mapping rates back to distances.
-
-    Args:
-        f (np.ndarray): rate values to invert
-        N_min (float): Minimum rate that could be modelled, where samples with
-            rate = 1/N_min or higher will have zero distance between them.
-        p (int, optional): exponent of the distance link function. Defaults to 1.
-        link (str, optional): Type of link function to invert. Defaults to "inverse_distance".
-        eps (float, optional): small constant to avoid division by zero / log(0) /
-            negative bases from floating point error near the boundary.
-
-    Returns:
-        np.ndarray: x, the recovered distance(s).
-    """
-    assert link in ["inverse_distance", "exponential"], "Unsupported link function"
-    assert p > 0, "p must be a positive integer"
-    assert N_min > 0, "N_min must be positive"
-
-    if link == "inverse_distance":
-        # f = 1/(x^p + N_min)  =>  x = (1/f - N_min)^(1/p)
-        inner = (1.0 / f) - N_min
-        inner = np.clip(inner, 0, None) # guard against negative/zero base
-        x = inner ** (1.0 / p)
-
-    elif link == "exponential":
-        # f = (1/N_min) * exp(-x^p)  =>  x = (-ln(N_min * f))^(1/p)
-        inner = -np.log(N_min * f + eps)
-        inner = np.clip(inner, 0, None) # guard against negative/zero base
-        x = inner ** (1.0 / p)
-
-    return x
-
-def compute_distance_df(embeddings, id_label="sample_id"):
-    """Compute pairwise Euclidean distances between samples at each time point from a latent embeddings dataframe.
-
-    Args:
-        embeddings (pd.DataFrame): long-format embeddings with columns id_label, "time", and one column per latent dimension (named "X...").
-        id_label (str, optional): column identifying samples/individuals. Defaults to "sample_id".
-
-    Returns:
-        pd.DataFrame: distances indexed by (id_label_1, id_label_2) pairs, columns are time points.
-    """
-    x_cols = sorted(c for c in embeddings.columns if c.startswith("X"))
-
-    # Pivot each dimension to (n_individuals, n_times), then stack to
-    # (n_individuals, n_times, n_dims). Avoids the O(n²·T) cross-join.
-    pivots = [
-        embeddings.pivot_table(index=id_label, columns="time", values=c, aggfunc="first")
-        for c in x_cols
-    ]
-    individuals = pivots[0].index.values
-    times       = pivots[0].columns.values
-    X = np.stack([p.values for p in pivots], axis=-1)  # (n, n_times, n_dims)
-
-    ii, jj   = np.triu_indices(len(individuals), k=1)
-    distances = np.linalg.norm(X[ii] - X[jj], axis=-1)  # (n_pairs, n_times)
-
-    pair_index = pd.MultiIndex.from_arrays(
-        [individuals[ii], individuals[jj]],
-        names=[f"{id_label}_1", f"{id_label}_2"],
-    )
-    return pd.DataFrame(distances, index=pair_index, columns=times)
-
-def reconstruct_rates(D_df, N_min, p=1, link="inverse_distance"):
-    """Apply the link function f to a pairwise distance dataframe to reconstruct coalescence rates."""
-    reconstructed_rates, _ = compute_f(D_df, N_min, p=p, link=link)
-    return reconstructed_rates
-
-
-def procrustes_single_time(X_reference, Y, allow_reflection=True):
-    """
-    Align Y to X_reference via optimal rotation (Procrustes).
-
-    Parameters
-    ----------
-    X_reference : (n, d) array
-    Y : (n, d) array
-    allow_reflection : bool
-        If False, forces a proper rotation (det = +1), disallowing reflections.
-        If True (default), uses the unconstrained best-fit orthogonal matrix
-        (may include reflection).
-
-    Returns
-    -------
-    Y_rotated : (n, d) array
-    rotation_matrix : (d, d) array
+        (Y_rotated, rotation_matrix).
     """
     X_reference_centered = X_reference - np.mean(X_reference, axis=0)
     Y_centered = Y - np.mean(Y, axis=0)
@@ -259,25 +1210,59 @@ def procrustes_single_time(X_reference, Y, allow_reflection=True):
     return Y_rotated, rotation_matrix
 
 
-def procrustes_align_trajectories(X_reference, X, allow_reflections=True):
+def procrustes_align_subset(
+    X_reference: np.ndarray,
+    Y: np.ndarray,
+    subset: np.ndarray,
+    allow_reflection: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Procrustes alignment estimated on a subset of rows, applied to all rows.
+
+    Used when consecutive time slices share only some of their samples: the centroids
+    and rotation are estimated from the shared rows only, then the same rigid
+    transform is applied to every row of Y.
+
+    Args:
+        X_reference: (n, d) reference configuration.
+        Y: (n, d) configuration to align.
+        subset: (n,) boolean mask of rows to estimate the transform from.
+        allow_reflection: If False, force a proper rotation (det = +1).
+
+    Returns:
+        (Y_aligned, rotation_matrix).
     """
-    Align a trajectory X (n, d, T) to a reference X_reference (n, d, T'),
-    using the following chain:
-      1. Align X[:, :, 0] onto X_reference[:, :, 0] -> X0_aligned.
-      2. Align every other frame X[:, :, t] onto X0_aligned (not onto
-         X_reference directly).
+    ref_centroid = np.mean(X_reference[subset], axis=0)
+    y_centroid = np.mean(Y[subset], axis=0)
 
-    Parameters
-    ----------
-    X_reference : (n, d, T_ref) array
-        Only the first timepoint (index 0) is used.
-    X : (n, d, T) array
-    allow_reflections : bool
-        Passed to procrustes_single_time.
+    cov_matrix = np.dot((Y[subset] - y_centroid).T, X_reference[subset] - ref_centroid)
+    U, S, Vt = np.linalg.svd(cov_matrix)
 
-    Returns
-    -------
-    X_aligned : (n, d, T) array
+    if not allow_reflection:
+        sign = np.sign(np.linalg.det(np.dot(U, Vt)))
+        D = np.diag([1] * (U.shape[1] - 1) + [sign])
+        rotation_matrix = np.dot(U, np.dot(D, Vt))
+    else:
+        rotation_matrix = np.dot(U, Vt)
+
+    # Apply the shared-sample transform to every row
+    return np.dot(Y - y_centroid, rotation_matrix), rotation_matrix
+
+
+def procrustes_align_trajectories(
+    X_reference: np.ndarray, X: np.ndarray, allow_reflections: bool = True
+) -> np.ndarray:
+    """Align a trajectory X (n, d, T) to a reference, frame by frame.
+
+    Frame 0 of X is aligned onto frame 0 of X_reference; every other frame is then
+    aligned onto that aligned frame 0 (not onto the reference directly).
+
+    Args:
+        X_reference: (n, d, T_ref); only index 0 is used.
+        X: (n, d, T).
+        allow_reflections: Passed to procrustes_single_time.
+
+    Returns:
+        (n, d, T) aligned trajectory.
     """
     n_timepoints = X.shape[2]
     X_aligned = np.zeros_like(X)
@@ -290,37 +1275,34 @@ def procrustes_align_trajectories(X_reference, X, allow_reflections=True):
 
     # Step 2: align all remaining frames onto the now-aligned frame 0
     for t in range(1, n_timepoints):
-        Y = X[:, :, t]
         Y_aligned, _ = procrustes_single_time(
-            X0_aligned, Y, allow_reflection=allow_reflections
+            X0_aligned, X[:, :, t], allow_reflection=allow_reflections
         )
         X_aligned[:, :, t] = Y_aligned
 
     return X_aligned
 
 
-def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual_id", allow_reflections=True):
-    """
-    Dataframe wrapper around procrustes_align_trajectories.
+def procrustes_align_trajectories_df(
+    df_reference: pd.DataFrame,
+    df_X: pd.DataFrame,
+    id_column: str = "individual_id",
+    allow_reflections: bool = True,
+) -> pd.DataFrame:
+    """Dataframe wrapper around procrustes_align_trajectories.
 
-    df_reference is treated as time-varying, but only its first timepoint
-    (the row with the minimum "time" value) is used as the reference frame.
-    Matching between df_reference and df_X (at the first timepoint), and
-    across all timepoints of df_X, is done by "sample_id".
+    df_reference is treated as time-varying, but only its first timepoint (the row
+    with the minimum "time" value) is used as the reference frame.  Matching is done
+    by id_column, at the first timepoint and across all timepoints of df_X.
 
-    Parameters
-    ----------
-    df_reference : pd.DataFrame
-        Columns: ["sample_id", "time", "X_1", ..., "X_d"].
-    df_X : pd.DataFrame
-        Columns: ["sample_id", "time", "X_1", ..., "X_d"].
-    allow_reflections : bool
-        Passed to procrustes_align_trajectories.
+    Args:
+        df_reference: Columns [id_column, "time", "X_1", ..., "X_d"].
+        df_X: Same schema.
+        id_column: Identifier column.
+        allow_reflections: Passed through to the alignment.
 
-    Returns
-    -------
-    pd.DataFrame
-        Same schema as df_X, with coordinate columns replaced by aligned values.
+    Returns:
+        df_X's schema with coordinate columns replaced by aligned values.
     """
     coord_cols = [c for c in df_X.columns if c not in (id_column, "time")]
 
@@ -333,7 +1315,7 @@ def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual
     n = len(sample_ids)
     d = len(coord_cols)
 
-    # Build (n, d, T) array for df_X, enforcing consistent sample_id order per frame
+    # Build (n, d, T) array for df_X, enforcing consistent id order per frame
     X = np.zeros((n, d, n_timepoints))
     for i, t in enumerate(times):
         frame = df_X[df_X["time"] == t].set_index(id_column)
@@ -344,7 +1326,7 @@ def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual
                 f"df_X at time={t} is missing sample_id(s) present at time={times[0]}: {e}"
             )
 
-    # Build (n, d, 1) array for the reference's first timepoint, same sample_id order
+    # Build the reference's first timepoint in the same id order
     ref_first_time = df_reference["time"].min()
     ref_frame = df_reference[df_reference["time"] == ref_first_time].set_index(id_column)
     try:
@@ -356,7 +1338,6 @@ def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual
         )
     X_reference = X_ref0[:, :, np.newaxis]  # (n, d, 1)
 
-    # Run the array-level alignment
     X_aligned = procrustes_align_trajectories(
         X_reference, X, allow_reflections=allow_reflections
     )
@@ -372,484 +1353,49 @@ def procrustes_align_trajectories_df(df_reference, df_X, id_column = "individual
     return result[df_X.columns.tolist()]
 
 
-def compute_difference_operators(num_timepoints, max_order, delta_t):
-    D1 = np.zeros((num_timepoints-1,num_timepoints))
-    np.fill_diagonal(D1, -1)
-    for t in range(num_timepoints-1):
-        D1[t, t+1] = 1
-    D1 /= delta_t
-    D1 = np.vstack((D1, np.zeros((1,num_timepoints)))) # Pad to make square, where the derivative at last time is zero (or could be forward difference if you prefer)
-
-    D = np.eye(num_timepoints)
-    D_dict = {}
-    for k in range(1,max_order+1):
-        D = D1 @ D
-        D_dict[k] = D
-    return D_dict
-
-def compute_M(f,f_prime,D,R,valid_mask = None):
-    """Computes a useful matrix M that is used in gradient computation
+def compute_distance_df(embeddings: pd.DataFrame, id_label: str = "sample_id") -> pd.DataFrame:
+    """Pairwise Euclidean distances between samples at each timepoint.
 
     Args:
-        f (np.ndarray): Array of function values.
-        f_prime (np.ndarray): Array of function derivatives.
-        D (np.ndarray): Distance matrix between pairs of samples.
-        R (np.ndarray): Rate matrix between pairs of samples.
-        valid_mask (np.ndarray): Boolean mask indicating valid entries.
+        embeddings: Long-format embeddings with columns id_label, "time", and one
+            column per latent dimension (named "X...").
+        id_label: Column identifying samples/individuals.
 
     Returns:
-        np.ndarray: Matrix M used in gradient computation.
+        Distances indexed by (id_label_1, id_label_2), columns are time points.
     """
-    if valid_mask is None:
-        valid_mask = ~np.isnan(R)
+    x_cols = sorted(c for c in embeddings.columns if c.startswith("X"))
 
-    M = np.zeros_like(R)
-    M[valid_mask] = (f_prime[valid_mask]/D[valid_mask])*(1-R[valid_mask]/(f[valid_mask]))
-    return M
+    # Pivot each dimension to (n_individuals, n_times), then stack to
+    # (n_individuals, n_times, n_dims). Avoids the O(n^2*T) cross-join.
+    pivots = [
+        embeddings.pivot_table(index=id_label, columns="time", values=c, aggfunc="first")
+        for c in x_cols
+    ]
+    individuals = pivots[0].index.values
+    times = pivots[0].columns.values
+    X = np.stack([p.values for p in pivots], axis=-1)  # (n, n_times, n_dims)
 
-# Common loss functions
+    ii, jj = np.triu_indices(len(individuals), k=1)
+    distances = np.linalg.norm(X[ii] - X[jj], axis=-1)  # (n_pairs, n_times)
 
-def compute_unpenalized_loss(f,R,W=None,valid_mask=None):
-    """Computes the loss function without penalty.
-    Can be computed for:
-      1. a given time slice (nxn)
-      2. a given sample (nxT)
-      3. the whole dataset (nxnxT)
-
-    Args:
-        f (np.ndarray): Array of function values at a given time slice.
-        R (np.ndarray): Rate matrix between pairs of samples at a given time slice.
-        W (np.ndarray): Weight matrix for the time slice.
-        valid_mask (np.ndarray): Boolean mask indicating valid entries.
-
-    Returns:
-        float: Unpenalized loss value.
-    """
-    if valid_mask is None:
-        valid_mask = ~np.isnan(R)
-
-    if W is None:
-        W = np.ones_like(R)* DEFAULT_WEIGHTS
-    
-    loss_values = W[valid_mask] * (f[valid_mask] - R[valid_mask] * np.log(f[valid_mask]))
-    return 0.5 * np.sum(loss_values)
-
-def compute_total_unpenalized_loss(X,R,W=None,N_min=1,N_max=np.inf, p=1, link="inverse_distance"):
-    """Computes the total unpenalized loss function over all time points.
-
-    Args:
-        X (np.ndarray): Array of coordinates for all samples over all time points. (nxdxT)
-        R (np.ndarray): Rates matrix between pairs of samples over all time points. (nxn*T)
-        N_min (float): Minimum value for the function computation.
-        N_max (float): Maximum value for the function computation.
-        W (np.ndarray, optional): Weight tensor. (nxnxT) Defaults to all ones.
-        link (str): Link function type.
-
-    Returns:
-        float: Total unpenalized loss value.
-    """
-    if W is None:
-        W = np.ones_like(R)*DEFAULT_WEIGHTS
-
-    R = R.copy()
-    R += 1/N_max
-    n,_,T = R.shape
-    D = np.linalg.norm(X[:, None, :, :] - X[None, :, :, :], axis=2) # (nxn*T) Distance between pairs of samples over time
-    f,_ = compute_f(D,N_min = N_min, p = p, link = link)
-    valid_mask = ~np.isnan(R)
-    loss = compute_unpenalized_loss(f,R,W,valid_mask)
-
-    return loss
-
-############################################################
-# Coordinate descent over time slices
-## Coordinate descent over time slices, where at each time slice we optimize the coordinates for all samples using L-BFGS-B optimization, initializing with the solution from the previous time slice.
-## This can be done in both forward and backward directions, and takes into account ancient samples that are not present in all time points.
-############################################################
-
-def compute_unpenalized_gradient_timepoint(X_t, f_t, f_prime_t, D_t, R_t, W_t = None, valid_mask_t = None):
-    """Gradient of the weighted unpenalized loss at a single timepoint.
-
-    Args:
-        X_t (np.ndarray): Coordinates at time t. (n, d)
-        f_t, f_prime_t (np.ndarray): Link function values and derivatives. (n, n)
-        D_t (np.ndarray): Pairwise distance matrix. (n, n)
-        R_t (np.ndarray): Rate matrix. (n, n)
-        W_t (np.ndarray): Weight matrix. (n, n)
-        valid_mask_t (np.ndarray): Boolean mask for valid entries. (n, n)
-
-    Returns:
-        np.ndarray: Gradient. (n, d)
-    """
-    if valid_mask_t is None:
-        valid_mask_t = ~np.isnan(R_t)
-
-    if W_t is None:
-        W_t = np.ones_like(R_t) * DEFAULT_WEIGHTS
-
-    M  = compute_M(f_t, f_prime_t, D_t, R_t, valid_mask_t)
-    WM = np.zeros_like(M)
-    WM[valid_mask_t] = W_t[valid_mask_t] * M[valid_mask_t]
-    return (np.sum(WM, axis=1)[:, np.newaxis] * X_t - WM @ X_t)
-
-
-def compute_loss_gradient_timepoint(X_t_flat, R_t, W_t=None, N_min=1, N_max=np.inf, p=1, link="inverse_distance"):
-    """Loss and gradient for a single timepoint.
-
-    Args:
-        X_t_flat (np.ndarray): Flattened coordinates. (n*d,)
-        R_t (np.ndarray): Rate matrix. (n, n)
-        W_t (np.ndarray): Weight matrix. (n, n)
-        N_min (float): Link function parameter.
-        N_max (float): Link function parameter.
-        link (str): Link function type.
-
-    Returns:
-        tuple: (loss, gradient)
-    """
-    if W_t is None:
-        W_t = np.ones_like(R_t) * DEFAULT_WEIGHTS
-
-    R_t        = R_t.copy()
-    R_t       += 1 / N_max
-    n, _       = R_t.shape
-    X_t        = X_t_flat.reshape((n, -1))
-    valid_mask = ~np.isnan(R_t)
-    D_t        = squareform(pdist(X_t, 'euclidean'))
-    f_t, f_prime_t = compute_f(D_t, N_min = N_min, p = p, link = link)
-    loss = compute_unpenalized_loss(f_t, R_t, W_t, valid_mask)
-    grad = compute_unpenalized_gradient_timepoint(
-               X_t, f_t, f_prime_t, D_t, R_t, W_t, valid_mask)
-    return loss, grad.ravel()
-
-
-def optimize_timepoint(X_t_init, R_t, W_t=None, N_min=1, N_max=np.inf, p=1, link="inverse_distance",
-                       max_iter=MAX_ITER_TIMEPOINT, gtol=GTOL_TIMEPOINT, ftol=FTOL_TIMEPOINT,
-                       return_hess_inv=False):
-    """Single L-BFGS-B step for one timepoint.
-
-    Args:
-        X_t_init (np.ndarray): Initial coordinates. (n, d)
-        R_t (np.ndarray): Rate matrix. (n, n)
-        W_t (np.ndarray): Weight matrix. (n, n)
-        N_min, N_max (float): Link function parameters.
-        p (int): Link function parameter.
-        link (str): Link function type.
-        max_iter (int): Maximum L-BFGS-B iterations.
-        gtol, ftol (float): Convergence tolerances.
-        return_hess_inv (bool): If True, also return the L-BFGS inverse Hessian.
-
-    Returns:
-        tuple: (X_opt, loss, n_iterations, message) or
-               (X_opt, loss, n_iterations, message, hess_inv) when return_hess_inv=True
-    """
-    result = minimize(
-        compute_loss_gradient_timepoint,
-        X_t_init.ravel(),
-        args=(R_t, W_t, N_min, N_max, p, link),
-        method='L-BFGS-B',
-        jac=True,
-        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
+    pair_index = pd.MultiIndex.from_arrays(
+        [individuals[ii], individuals[jj]],
+        names=[f"{id_label}_1", f"{id_label}_2"],
     )
-    X_opt = result.x.reshape(X_t_init.shape)
-    if return_hess_inv:
-        return X_opt, result.fun, result.nit, result.message, result.hess_inv
-    return X_opt, result.fun, result.nit, result.message
+    return pd.DataFrame(distances, index=pair_index, columns=times)
 
 
-def coordinate_descent_over_time(
-    R,
-    W                  = None,
-    N_min              = 1,
-    N_max              = np.inf,
-    p                  = 1,
-    link               = "inverse_distance",
-    n_components       = 2,
-    X_init             = None,
-    sampled_by_time    = None,
-    direction          = "backward",
-    max_iter           = MAX_ITER_TIMEPOINT,
-    gtol               = GTOL_TIMEPOINT,
-    ftol               = FTOL_TIMEPOINT,
-    return_covariances = False,
-    exact_hessian      = True
-):
-    """Single-pass coordinate descent over timepoints (default: backward).
+def reconstruct_rates(
+    D_df: pd.DataFrame,
+    N_min: float = 1.0,
+    p: float = 1.0,
+    link: Union[LinkFunction, str] = "inverse_distance",
+) -> pd.DataFrame:
+    """Apply the link function to a pairwise distance dataframe to recover rates.
 
-    Args:
-        R (np.ndarray): Rate tensor. (n, n, T)
-        W (np.ndarray): Weight tensor. (n, n, T)
-        N_min, N_max (float): Link function parameters.
-        p (int): Link function exponent.
-        link (str): Link function type.
-        n_components (int): Latent space dimensionality.
-        max_iter (int): Maximum L-BFGS-B iterations per timepoint.
-        gtol, ftol (float): Convergence tolerances.
-        X_init (np.ndarray, optional): Initial coordinates. (n, d, T)
-        sampled_by_time (np.ndarray, optional): Boolean presence mask. (n, T)
-        direction (str): "backward" (default) or "forward".
-
-    Returns:
-        tuple: (X, loss_df) or (X, loss_df, covariances) when return_covariances=True.
-               covariances has shape (n, d, d, T).
-        exact_hessian (bool): If True (default), compute the exact analytical Hessian for
-               covariance estimation.  If False, use the L-BFGS inverse Hessian approximation
-               (faster but significantly less accurate — see extract_sample_covariances).
+    The link evaluates on the underlying array; the pair index and time columns are
+    restored so the result lines up with the input rates dataframe.
     """
-    print(f"coordintate descent over time with ftol = {ftol} and gtol = {gtol}")
-
-    # Exact covariances rely on _compute_exact_hessian, whose f'' formulas are only
-    # derived for p=1. Fail loudly up front rather than letting the per-timepoint
-    # try/except silently return all-NaN covariances.
-    if return_covariances and exact_hessian and p != 1:
-        raise NotImplementedError(
-            "exact_hessian=True covariances are only supported for p=1; "
-            "use exact_hessian=False (L-BFGS approximation) for p != 1."
-        )
-
-    n_samples, _, n_timepoints = R.shape
-
-    if W is None:
-        W = np.ones_like(R) * DEFAULT_WEIGHTS
-    if sampled_by_time is None:
-        sampled_by_time = np.ones((n_samples, n_timepoints), dtype=bool)
-
-    if X_init is None:
-        X_init = np.random.rand(n_samples, n_components, n_timepoints)
-
-    X = np.full((n_samples, n_components, n_timepoints), np.nan)
-    loss_before, loss_after, n_iters, messages = [], [], [], []
-    if return_covariances:
-        covariances = np.full((n_samples, n_components, n_components, n_timepoints), np.nan)
-
-    time_order = range(n_timepoints) if direction == "forward" \
-                 else range(n_timepoints - 1, -1, -1)
-    prev_t_idx = None
-
-    for step, t_idx in enumerate(tqdm(time_order)):
-        extant_mask = sampled_by_time[:, t_idx]
-        extant_idx  = np.where(extant_mask)[0]
-
-        # --- Initialize ---
-        if step == 0:
-            X_global = X_init[:, :, t_idx].copy()
-        else:
-            X_global = X[:, :, prev_t_idx].copy()
-            new_mask = extant_mask & ~sampled_by_time[:, prev_t_idx]
-            if np.any(new_mask):
-                X_global[new_mask, :] = X_init[new_mask, :, t_idx]
-
-        # --- Restrict to extant samples ---
-        X_t      = X_global[extant_idx, :]
-        R_t      = R[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
-        W_t      = W[:, :, t_idx][np.ix_(extant_idx, extant_idx)]
-        X_init_t = X_init[extant_idx, :, t_idx]
-
-        # --- Loss before ---
-        loss_t_before, _ = compute_loss_gradient_timepoint(
-            X_t_flat = X_t.ravel(),
-            R_t      = R_t,
-            W_t      = W_t,
-            N_min    = N_min,
-            N_max    = N_max,
-            p        = p,
-            link     = link
-        )
-
-        # --- Optimize ---
-        need_hess_inv = return_covariances and not exact_hessian
-        X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
-            X_t_init = X_t,
-            R_t = R_t,
-            W_t=W_t,
-            N_min=N_min,
-            N_max=N_max,
-            p=p,
-            link=link,
-            max_iter=max_iter, gtol=gtol, ftol=ftol,
-            return_hess_inv=need_hess_inv
-        )
-        hess_inv = _hess[0] if _hess else None
-
-        if return_covariances:
-            try:
-                covs = extract_sample_covariances(
-                    X_t, R_t, W_t, N_min, p=p, link=link,
-                    hess_inv=hess_inv,
-                    exact=exact_hessian,
-                )
-            except np.linalg.LinAlgError as err:
-                raise np.linalg.LinAlgError(
-                    f"Covariance extraction failed at timepoint index {t_idx} "
-                    f"({len(extant_idx)} extant samples): {err}"
-                ) from err
-
-        # --- Center (first step only) and Procrustes align ---
-        if step == 0:
-            X_t -= np.mean(X_t, axis=0)
-        X_t, rot = procrustes_single_time(X_global[extant_idx, :], X_t, allow_reflection=False)
-        X[extant_idx, :, t_idx] = X_t
-
-        if return_covariances and covs is not None:
-            # x_rotated = x @ rot  →  Cov(x_rotated) = rot.T @ Cov(x) @ rot
-            covariances[extant_idx, :, :, t_idx] = np.array([rot.T @ c @ rot for c in covs])
-
-        loss_before.append(loss_t_before)
-        loss_after.append(loss_t_after)
-        n_iters.append(n_iter)
-        messages.append(message)
-        prev_t_idx = t_idx
-
-    loss_change    = np.array(loss_before) - np.array(loss_after)
-    # loss_over_time = np.sum(loss_before) - np.cumsum(loss_change)
-    loss_df = pd.DataFrame({
-        "step":         range(1, n_timepoints + 1),
-        "loss_reduction":         loss_change,
-        "n_iterations": n_iters,
-        "message":      messages,
-    })
-    if return_covariances:
-        return X, loss_df, covariances
-    return X, loss_df
-
-    
-############################################################
-# Smoothing penalty
-############################################################
-
-def compute_penalty_loss_gradient(X, smoothing_params):
-    """Penalty loss and gradient for L1 (group norm) and L2 on finite differences.
-
-    L1 uses the exact group norm — no pseudo-Huber needed since L2 on the same
-    order provides the curvature near zero that L-BFGS requires.
-
-    Args:
-        X (np.ndarray): Coordinates, shape (d, T) for one sample or (n, d, T) for all.
-        smoothing_params (dict): Keys "l1", "l2" (dicts of {order: lambda}),
-                                 "diff_operators" ({order: matrix}).
-    Returns:
-        tuple: (loss, grad) with grad matching X's shape.
-    """
-    loss = 0.0
-    grad = np.zeros_like(X)
-
-    for k, D in smoothing_params["diff_operators"].items():
-        l1 = smoothing_params["l1"].get(k, 0)
-        l2 = smoothing_params["l2"].get(k, 0)
-        DX = X @ D.T                                              # (..., d, T)
-
-        if l2:
-            loss += l2 * np.sum(DX ** 2)
-            grad += 2 * l2 * DX @ D
-
-        if l1:
-            sq_norms  = np.sum(DX ** 2, axis=-2, keepdims=True)  # (..., 1, T)
-            norms     = np.sqrt(sq_norms)                          # (..., 1, T)
-            safe_norm = np.where(norms > 0, norms, 1.0)           # DX=0 → grad=0
-            loss += l1 * np.sum(norms)
-            grad += l1 * (DX / safe_norm) @ D
-
-    return loss, grad
-
-
-############################################################
-# Joint optimization over all samples and time points
-############################################################
-
-def compute_loss_gradient_all(X_flat, R, W=None, N_min=1, N_max=np.inf, p=1, link="inverse_distance",
-                               sampled_by_time=None, smoothing_params=None):
-    """Total weighted loss and gradient over all samples and timepoints.
-
-    Sums per-sample contributions; the 0.5 factor inside compute_loss_gradient_sample
-    ensures each pair is counted once, so no correction is needed here.
-
-    Args:
-        X_flat (np.ndarray): Flattened coordinates. (n*d*T,)
-        R (np.ndarray): Rate tensor. (n, n, T)
-        W (np.ndarray, optional): Weight tensor. (n, n, T) Defaults to all ones.
-        N_min, N_max (float): Link function parameters.
-        sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
-        smoothing_params (dict, optional): Smoothing configuration.
-        link (str): Link function type.
-
-    Returns:
-        tuple: (total_loss, gradient)
-    """
-    n, _, T = R.shape
-    if W is None:
-        W = np.ones_like(R)* DEFAULT_WEIGHTS
-
-    X = X_flat.reshape((n, -1, T))
-    total_loss = 0.0
-    total_grad = np.zeros_like(X)
-
-    for i in range(n):
-        time_mask = (sampled_by_time[i, :] if sampled_by_time is not None
-                    else np.ones(T, dtype=bool))
-        R_i   = R[:, i, :][:, time_mask].copy()
-        W_i   = W[:, i, :][:, time_mask].copy()
-        X_i   = X[i][:, time_mask]              
-        X_obs = X[:, :, time_mask]              
-
-        loss_i, grad_i = compute_loss_gradient_sample(
-            X_i.ravel(), X_obs, R_i, W_i, N_min, N_max, p, link, smoothing_params)
-
-        total_loss += loss_i
-        total_grad[i][:, time_mask] += grad_i.reshape(X_i.shape)   
-    return total_loss, total_grad.ravel()
-
-
-def optimize_jointly(X_init, R, W=None, N_min=1, N_max=np.inf, p=1, link="inverse_distance", smoothing_params=None,
-                     sampled_by_time=None, max_iter=MAX_ITER_JOINT,
-                     gtol=GTOL_JOINT, ftol=FTOL_JOINT):
-    """Joint L-BFGS-B optimization over all samples and timepoints.
-
-    Args:
-        X_init (np.ndarray): Initial coordinates. (n, d, T)
-        R (np.ndarray): Rate tensor. (n, n, T)
-        W (np.ndarray, optional): Weight tensor. (n, n, T) Defaults to all ones.
-        N_min, N_max (float): Link function parameters.
-        p (float): Link function parameter.
-        link (str): Link function name.
-        smoothing_params (dict, optional): Smoothing configuration.
-        sampled_by_time (np.ndarray, optional): Presence mask. (n, T)
-        max_iter (int): Maximum iterations.
-        gtol, ftol (float): Convergence tolerances.
-
-    Returns:
-        tuple: (X_opt, progress_df)
-    """
-    if W is None:
-        W = np.ones_like(R) * DEFAULT_WEIGHTS
-    progress = []
-    print(f"Joint optimization with ftol = {ftol} and gtol = {gtol}")
-    def callback(x):
-        loss, grad = compute_loss_gradient_all(
-            x, R, W, N_min, N_max, p, link, sampled_by_time, smoothing_params)
-        prev_loss = progress[-1]["loss"] if progress else None
-        rel_change = (prev_loss - loss) / max(abs(prev_loss), abs(loss), 1) if prev_loss is not None else np.nan
-        progress.append({
-            "iteration":    len(progress) + 1,
-            "loss":         loss,
-            "proj_grad_max": np.max(np.abs(grad)),
-            "rel_change":   rel_change,
-        })
-        print(f"  iter {progress[-1]['iteration']:4d}  "
-              f"loss={loss:.10g}  "
-              f"rel_change={rel_change:.3g}  "
-              f"max|grad|={progress[-1]['proj_grad_max']:.6g}")
-
-    result = minimize(
-        compute_loss_gradient_all,
-        X_init.ravel(),
-        args=(R, W, N_min, N_max, p, link, sampled_by_time, smoothing_params),
-        method='L-BFGS-B',
-        jac=True,
-        callback=callback,
-        options={'maxiter': max_iter, 'disp': False, 'gtol': gtol, 'ftol': ftol}
-    )
-    print(f"Finished: {result.message}  "
-          f"(loss={result.fun:.10g}, iterations={result.nit})")
-
-    return result.x.reshape(X_init.shape), pd.DataFrame(progress)
-
+    link = _as_link(link, N_min=N_min, p=p)
+    return pd.DataFrame(link.f(D_df.values), index=D_df.index, columns=D_df.columns)
