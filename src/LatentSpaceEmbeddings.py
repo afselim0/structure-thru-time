@@ -1,22 +1,79 @@
 #%%
 #!/usr/bin/env python3
+"""Latent-space embeddings of time-varying population structure.
+
+Wraps the two optimization stages in OptimizationFunctions: a sequential,
+unpenalized pass over time slices, followed by a joint pass over all slices with a
+group-fused-lasso temporal smoothing penalty.
+
+The public embeddings array is (n, d, T) with NaN at (sample, time) entries where the
+sample is not yet present.  Internally the joint optimizer works on a packed vector of
+present coordinates only.
+"""
+
+from typing import Optional
+
 import numpy as np
 import pandas as pd
-from OptimizationFunctions import *
+
+from OptimizationFunctions import (
+    LinkFunction,
+    compute_difference_operators,
+    compute_distance_df,
+    coordinate_descent_over_time,
+    optimize_jointly,
+    reconstruct_rates,
+    FTOL_JOINT,
+    FTOL_TIMEPOINT,
+    GTOL_FACTOR,
+    MAXCOR_JOINT,
+    MAXCOR_TIMEPOINT,
+)
+
 
 class LatentSpaceEmbeddings:
+    """Fit latent trajectories X_i(t) to pairwise coalescent rates over time."""
+
     def __init__(self,
-                 rates_df:              pd.DataFrame,
-                 se_df:                 pd.DataFrame = None,
-                 sample_times:          list         = None,
-                 N_min:                 float        = 1,
-                 N_max:                 float        = np.inf,
-                 n_components:          int          = 2,
-                 l1_strengths:         dict         = None,
-                 l2_strengths:         dict         = None,
-                 weight_cap_percentile: float        = 95,
-                 default_weights:       int          = 1_000_000,
-                 link_function:         str          = "inverse_distance"):
+                 rates_df:             pd.DataFrame,
+                 se_df:                Optional[pd.DataFrame] = None,
+                 sample_times:         Optional[list]         = None,
+                 N_min:                float                  = 1,
+                 N_max:                float                  = np.inf,
+                 n_components:         int                    = 2,
+                 l1_strengths:         Optional[dict]         = None,
+                 l2_strengths:         Optional[dict]         = None,
+                 se_floor_quantile:    float                  = 0.01,
+                 weight_cap_factor:    float                  = 100.0,
+                 pseudo_huber_factor:  float                  = 1e-3,
+                 default_weights:      int                    = 1_000_000,
+                 link_function:        str                    = "inverse_distance"):
+        """Build the rate and weight tensors from long-format rates.
+
+        Args:
+            rates_df: Pairwise rates, indexed by (sample_1, sample_2), columns time.
+            se_df: Matching standard errors of those rates; if None, uniform weights.
+            sample_times: Sampling time per sample; non-zero marks an ancient sample.
+            N_min, N_max: Link function parameters.
+            n_components: Latent dimensionality d.
+            l1_strengths: {order: gamma} dimensionless group-fused-lasso strengths.
+            l2_strengths: Removed; passing a non-None value raises.
+            se_floor_quantile: Quantile of the strictly-positive squared SEs used to
+                regularize the weight denominator, per time slice.
+            weight_cap_factor: Per-slice weights are capped at this multiple of the
+                slice's median weight.
+            pseudo_huber_factor: eps_k = pseudo_huber_factor * median group norm of
+                the stage-1 solution's k-th differences.
+            default_weights: Uniform weight used when se_df is None.
+            link_function: Link name.
+        """
+        # The L2 term has been removed from the penalty entirely
+        if l2_strengths is not None:
+            raise ValueError(
+                "l2_strengths has been removed: the penalty is now a group-fused "
+                "lasso with pseudo-Huber smoothing, which supplies its own curvature "
+                "near zero. Use l1_strengths={order: gamma} instead."
+            )
 
         # Read the column labels as floats without mutating the caller's DataFrame
         time_points = rates_df.columns.astype(float).values
@@ -33,8 +90,23 @@ class LatentSpaceEmbeddings:
         self.N_min           = N_min
         self.N_max           = N_max
         self.link_function   = link_function
+        self.se_floor_quantile   = se_floor_quantile
+        self.weight_cap_factor   = weight_cap_factor
+        self.pseudo_huber_factor = pseudo_huber_factor
+        self.embeddings      = None
+        self.smoothing_params = None
 
-        
+        # The difference operators are plain finite differences, which assume a
+        # uniform grid; a log-spaced grid would need divided differences
+        if not np.allclose(np.diff(self.time_points), self.delta_t):
+            raise ValueError(
+                "The time grid is not uniform. The finite-difference smoothing "
+                "operators assume uniform spacing; non-uniform grids require "
+                "divided-difference operators, which are not yet supported. "
+                f"delta_t={self.delta_t}, observed spacings range over "
+                f"[{np.min(np.diff(self.time_points))}, {np.max(np.diff(self.time_points))}]."
+            )
+
         # --- Sample times ---
         if sample_times is None:
             self.sample_times = np.zeros(self.num_samples, dtype=float)
@@ -47,7 +119,7 @@ class LatentSpaceEmbeddings:
         # --- Build R and W ---
         n, T = self.num_samples, self.num_timepoints
         R = np.full((n, n, T), np.nan)
-        W = np.full((n, n, T), np.nan)
+        SE = np.full((n, n, T), np.nan)
 
         for (s1, s2), row in rates_df.iterrows():
             i = self.sample_idx_map[s1]
@@ -57,16 +129,13 @@ class LatentSpaceEmbeddings:
             R[j, i, :] = r
             if se_df is not None:
                 se = se_df.loc[(s1, s2)].values
-                w = (r+(1/self.N_max)) / (se) ** 2 #Adding 1/N_max to avoid zero weights when r is zero
-                W[i, j, :] = w
-                W[j, i, :] = w
-            else:
-                W[i, j, :] = default_weights
-                W[j, i, :] = default_weights
-            
-        W[np.isinf(W)] = np.nanmax(W)*10 # Cap infinite weights to be an order of magnitude higher than the maximum finite weight (can happen when se is zero)
-        w_cap = np.nanpercentile(W, weight_cap_percentile) # Cap weights at a high percentile to avoid extreme outliers dominating the optimization
-        W = np.clip(W, 0, w_cap)
+                SE[i, j, :] = se
+                SE[j, i, :] = se
+
+        if se_df is not None:
+            W = self._weights_from_standard_errors(R, SE)
+        else:
+            W = np.where(np.isnan(R), np.nan, float(default_weights))
 
         # --- Mask ancient samples in both R and W ---
         sampled_by_time = self.sample_times[:, np.newaxis] <= self.time_points
@@ -78,123 +147,225 @@ class LatentSpaceEmbeddings:
             W[absent, :, t] = np.nan
             W[:, absent, t] = np.nan
 
-        self.R = R
-        self.W = W
+        # The cap is applied after masking, so absent entries do not enter the medians
+        W = self._cap_weights_per_slice(W)
 
-        # --- Precompute reference loss and total weight for scale-matching ---
-        ii, jj      = np.triu_indices(self.num_samples, k=1)
-        r_upper     = self.R[ii, jj, :]              # (n_pairs, T)
-        w_upper     = self.W[ii, jj, :]
-        valid       = np.isfinite(r_upper) & np.isfinite(w_upper) & (r_upper > 0)
-        r_v, w_v    = r_upper[valid], w_upper[valid]
-        
-        self.saturated_loss = np.sum(w_v * r_v * (1 - np.log(r_v)))
-        
-        # self.w_tot  = w_v.sum()
-        # # Per-timepoint: used for ftol in stage-1 per-slice optimization
-        # wl = np.where(valid, w_upper * r_upper * (1 - np.log(np.where(valid, r_upper, 1))), 0.0)
-        # w  = np.where(valid, w_upper, 0.0)
-        # w_tot_t       = w.sum(axis=0)                                         # (T,)
-        # self.saturated_loss_t = np.where(w_tot_t > 0, wl.sum(axis=0) / w_tot_t, np.nan)  # (T,)
-        # self.w_tot_t    = w_tot_t                   
-        #                           # (T,)
+        # Stored as float32 to halve the footprint of the two (n, n, T) tensors;
+        # all downstream accumulation promotes to float64
+        self.R = R.astype(np.float32)
+        self.W = W.astype(np.float32)
+
+        # --- Precompute the saturated loss, used to scale the smoothing penalty ---
+        ii, jj   = np.triu_indices(self.num_samples, k=1)
+        r_upper  = self.R[ii, jj, :].astype(np.float64)
+        w_upper  = self.W[ii, jj, :].astype(np.float64)
+        valid    = np.isfinite(r_upper) & np.isfinite(w_upper) & (r_upper > 0)
+        r_v, w_v = r_upper[valid], w_upper[valid]
+
+        self.saturated_loss = float(np.sum(w_v * r_v * (1 - np.log(r_v))))
+
         self.l1_strengths = l1_strengths
-        self.l2_strengths = l2_strengths
         self.covariances  = None
 
-    def _parse_smoothing_params(self, l1_strengths, l2_strengths):
-        """Compute smoothing weights from transferable strengths and the current embeddings.
+    def _weights_from_standard_errors(self, R: np.ndarray, SE: np.ndarray) -> np.ndarray:
+        """Build weights w = (r + 1/N_max) / (se^2 + se^2_floor_t) from rates and SEs.
 
-        Must be called after stage-1 embeddings are available (self.embeddings is not None),
-        since the weights are calibrated to the actual roughness of the stage-1 solution.
+        A zero SE is a legitimate outcome -- it means the rate is confidently zero --
+        so it must not produce NaN (r=0, se=0, N_max=inf) or inf (finite N_max).  The
+        denominator is regularized the way the numerator already is, using a per-slice
+        quantile of the strictly-positive squared SEs.  This keeps w finite, preserves
+        ordering, and gives confidently-zero-rate pairs a high but bounded weight.
+        """
+        T = R.shape[2]
+        W = np.full_like(R, np.nan)
+
+        for t in range(T):
+            se_t = SE[:, :, t]
+            positive = se_t[np.isfinite(se_t) & (se_t > 0)]
+            if positive.size == 0:
+                raise ValueError(
+                    f"Time slice {t} (time={self.time_points[t]}) has no strictly "
+                    "positive standard error, so the weight denominator cannot be "
+                    "regularized. This usually means the SE file is empty or all-zero "
+                    "at this slice."
+                )
+            se_sq_floor = np.quantile(positive ** 2, self.se_floor_quantile)
+            W[:, :, t] = (R[:, :, t] + 1.0 / self.N_max) / (se_t ** 2 + se_sq_floor)
+
+        # With the floored denominator infinities can no longer arise
+        if np.isinf(W).any():
+            raise FloatingPointError(
+                "Infinite weights after applying the standard-error floor; this "
+                "should be impossible and indicates a non-finite rate or SE in the input."
+            )
+        return W
+
+    def _cap_weights_per_slice(self, W: np.ndarray) -> np.ndarray:
+        """Cap each slice's weights at weight_cap_factor times that slice's median.
+
+        A single global percentile cap is set by whichever epoch has the largest
+        weights: it clips nearly everything in that epoch and never binds elsewhere,
+        and it always clips a fixed fraction whether or not outliers exist.  A
+        per-slice ratio cap binds only where a slice actually has outliers.
+        """
+        T = W.shape[2]
+        print(f"Capping weights per slice at {self.weight_cap_factor}x the slice median:")
+        for t in range(T):
+            W_t = W[:, :, t]
+            finite = np.isfinite(W_t)
+            if not finite.any():
+                continue                     # slice with no present samples
+            cap_t = self.weight_cap_factor * np.nanmedian(W_t)
+            clipped = finite & (W_t > cap_t)
+            total_before = np.nansum(W_t)
+            W[:, :, t] = np.minimum(W_t, cap_t)
+            total_after = np.nansum(W[:, :, t])
+            frac = clipped.sum() / finite.sum()
+            if t % max(1, T // 10) == 0 or frac > 0:
+                print(f"  slice {t:5d} (time={self.time_points[t]:10.2f}): "
+                      f"cap={cap_t:.6g}, clipped {frac:6.2%} of entries, "
+                      f"total weight {total_before:.6g} -> {total_after:.6g}")
+        return W
+
+    def _parse_smoothing_params(self, l1_strengths: Optional[dict]) -> None:
+        """Calibrate the smoothing weights against the stage-1 solution's roughness.
+
+        Must be called after stage-1 embeddings are available, since both alpha_1 and
+        the pseudo-Huber eps are set from the actual roughness of that solution.
 
         Args:
-            l1_strengths (dict or None): {order: alpha} dimensionless L1 strengths.
-            l2_strengths (dict or None): {order: alpha} dimensionless L2 strengths.
+            l1_strengths: {order: gamma} dimensionless strengths, or None.
         """
-
-        if l1_strengths is None and l2_strengths is None:
+        if not l1_strengths:
             self.smoothing_params = None
             return
 
         if self.embeddings is None:
             raise ValueError(
                 "Stage-1 embeddings must be set before computing smoothing weights. "
-                "Run optimize_timepoints_sequentially first"
+                "Run compute_embeddings_through_time first."
             )
+        if not isinstance(l1_strengths, dict):
+            raise TypeError(f"l1_strengths must be a dict, got {type(l1_strengths).__name__}.")
 
-        assert l1_strengths is None or isinstance(l1_strengths, dict), "l1_strengths must be a dict"
-        assert l2_strengths is None or isinstance(l2_strengths, dict), "l2_strengths must be a dict"
-
-        l1_strengths = l1_strengths if l1_strengths is not None else {}
-        l2_strengths = l2_strengths if l2_strengths is not None else {}
-
-        max_order = max(
-            max(l1_strengths.keys()) if l1_strengths else 0,
-            max(l2_strengths.keys()) if l2_strengths else 0,
-        )
-
+        max_order = max(l1_strengths.keys())
         diff_operators = compute_difference_operators(
             self.num_timepoints, max_order, self.delta_t
         )
 
-        l1_weights, l2_weights = compute_smoothing_weights(
-            X              = self.embeddings,
-            saturated_loss       = self.saturated_loss,
-            l1_strengths   = l1_strengths,
-            l2_strengths   = l2_strengths,
-            diff_operators = diff_operators,
+        l1_weights, eps_by_order = compute_smoothing_weights(
+            X                   = self.embeddings,
+            saturated_loss      = self.saturated_loss,
+            l1_strengths        = l1_strengths,
+            diff_operators      = diff_operators,
+            pseudo_huber_factor = self.pseudo_huber_factor,
+            sampled_by_time     = self.sampled_by_time,
+            delta_t             = self.delta_t,
         )
 
         self.smoothing_params = {
             "l1":             l1_weights,
-            "l2":             l2_weights,
+            "eps":            eps_by_order,
             "diff_operators": diff_operators,
+            "delta_t":        self.delta_t,
         }
 
     def compute_embeddings_through_time(self,
-                                        X_init = None,
-                                        p = 1,
-                                        link = "inverse_distance",
-                                        compute_uncertainty = False,
-                                        exact_hessian = True):
-        """Compute embeddings by coordinate descent over time points
+                                        X_init:              Optional[np.ndarray] = None,
+                                        p:                   float = 1,
+                                        link:                str   = "inverse_distance",
+                                        compute_uncertainty: bool  = False,
+                                        exact_hessian:       bool  = True,
+                                        target_precision:    float = FTOL_TIMEPOINT,
+                                        gtol_factor:         float = GTOL_FACTOR,
+                                        maxcor:              int   = MAXCOR_TIMEPOINT):
+        """Stage 1: sequential, unpenalized coordinate descent over time points.
 
         Args:
-            X_init (_type_, optional): initial solution over all time points. Defaults to None.
-            target_precision (float, optional): target precision for the optimization.
-            compute_uncertainty (bool): if True, compute per-sample Laplace covariances.
-            exact_hessian (bool): if True (default), use exact analytical Hessian for
-                covariance estimation; if False, use L-BFGS approximation.
+            X_init: (n, d, T) initial solution; random if None.
+            p: Link function exponent.
+            link: Link function name.
+            compute_uncertainty: If True, compute per-sample Laplace covariances.
+            exact_hessian: If True (default), use the exact analytical Hessian for
+                those covariances; if False, the L-BFGS approximation.
+            target_precision: ftol; 1e-9 for exploratory sweeps, 1e-12 for final runs.
+            gtol_factor: gtol is gtol_factor * max|grad| at each slice's start.
+            maxcor: L-BFGS memory.
 
         Returns:
-            np.ndarray, pd.DataFrame: (nxn_componentsxtimepoints) array of embeddings and loss dataframe with columns ["epoch","step","loss","n_iterations","message"]
+            (embeddings (n, d, T), loss dataframe).
         """
-        # ftol_t = target_precision * min(np.mean(self.saturated_loss_t), 1.0)
-        result = coordinate_descent_over_time(R = self.R, W = self.W, N_min = self.N_min, N_max = self.N_max, n_components = self.n_components, X_init = X_init, sampled_by_time = self.sampled_by_time,p = p, link = link, return_covariances = compute_uncertainty, exact_hessian = exact_hessian)#, ftol=ftol_t)
+        link_fn = LinkFunction(name=link, N_min=self.N_min, p=p)
+        result = coordinate_descent_over_time(
+            R                  = self.R,
+            W                  = self.W,
+            link               = link_fn,
+            N_max              = self.N_max,
+            n_components       = self.n_components,
+            X_init             = X_init,
+            sampled_by_time    = self.sampled_by_time,
+            target_precision   = target_precision,
+            gtol_factor        = gtol_factor,
+            maxcor             = maxcor,
+            return_covariances = compute_uncertainty,
+            exact_hessian      = exact_hessian,
+        )
         if compute_uncertainty:
             X, loss_df, covariances = result
             self.covariances = covariances
         else:
             X, loss_df = result
+
         self.embeddings = X
-        self._parse_smoothing_params(self.l1_strengths, self.l2_strengths)
-        print(self.smoothing_params)
+        self._parse_smoothing_params(self.l1_strengths)
         return X, loss_df
 
-    def compute_embeddings_jointly(self, X_init=None, p=1, link="inverse_distance"):
-        X_init = X_init if X_init is not None else np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
-        X, loss_df = optimize_jointly(X_init, self.R, self.W, self.N_min, self.N_max, p, link, self.smoothing_params, self.sampled_by_time)
+    def compute_embeddings_jointly(self,
+                                   X_init:           Optional[np.ndarray] = None,
+                                   p:                float = 1,
+                                   link:             str   = "inverse_distance",
+                                   target_precision: float = FTOL_JOINT,
+                                   gtol_factor:      float = GTOL_FACTOR,
+                                   maxcor:           int   = MAXCOR_JOINT):
+        """Stage 2: joint optimization over all samples and timepoints, with smoothing.
+
+        Args:
+            X_init: (n, d, T) initial solution; random if None, but is normally the
+                stage-1 solution.
+            p: Link function exponent.
+            link: Link function name.
+            target_precision: ftol; 1e-9 for exploratory sweeps, 1e-12 for final runs.
+            gtol_factor: gtol is gtol_factor * max|grad| at the initial point.
+            maxcor: L-BFGS memory; cost is O(maxcor * n * d * T).
+
+        Returns:
+            (embeddings (n, d, T), progress dataframe).
+        """
+        if X_init is None:
+            X_init = np.random.rand(self.num_samples, self.n_components, self.num_timepoints)
+        link_fn = LinkFunction(name=link, N_min=self.N_min, p=p)
+        X, loss_df = optimize_jointly(
+            X_init           = X_init,
+            R                = self.R,
+            W                = self.W,
+            link             = link_fn,
+            N_max            = self.N_max,
+            smoothing_params = self.smoothing_params,
+            sampled_by_time  = self.sampled_by_time,
+            target_precision = target_precision,
+            gtol_factor      = gtol_factor,
+            maxcor           = maxcor,
+        )
         self.embeddings = X
         return X, loss_df
-    
-    def get_embeddings_df(self, id_label: str = "sample_id"):
+
+    def get_embeddings_df(self, id_label: str = "sample_id") -> pd.DataFrame:
         """Return the embeddings as a long dataframe.
 
         Args:
-            id_label (str): Name of the identifier column.  Use "sample_id" for
-                per-haplotype data and "individual_id" for per-individual data,
-                so the column matches the entity that the rates_df index referred to.
+            id_label: Name of the identifier column.  Use "sample_id" for
+                per-haplotype data and "individual_id" for per-individual data, so the
+                column matches the entity that the rates_df index referred to.
         """
         assert self.embeddings is not None, (
             "Embeddings have not been computed yet. "
@@ -216,19 +387,19 @@ class LatentSpaceEmbeddings:
         for dim in range(d):
             df[f"X{dim+1}"] = self.embeddings[:, dim, :].flatten()
 
-        df.columns = df.columns.astype(str) # To ensure safe parquet saving with multi-index columns
+        df.columns = df.columns.astype(str)  # safe parquet saving with multi-index columns
         return df
 
-    def embeddings_df_to_array(self, df: pd.DataFrame, id_label: str = "sample_id"):
+    def embeddings_df_to_array(self, df: pd.DataFrame, id_label: str = "sample_id") -> np.ndarray:
         """Reconstruct the (n, d, T) embeddings array from a long dataframe.
 
         Inverse of get_embeddings_df(): reorders the rows onto this object's
-        (sample, time) grid and reshapes back to (n, d, T). Useful for loading
+        (sample, time) grid and reshapes back to (n, d, T).  Useful for loading
         previously saved embeddings without rerunning the optimization.
 
         Args:
-            df (pd.DataFrame): long dataframe with columns [id_label, "time", X1..Xd].
-            id_label (str): identifier column name used when the df was written.
+            df: Long dataframe with columns [id_label, "time", X1..Xd].
+            id_label: Identifier column name used when the df was written.
         """
         dim_cols = sorted(
             [c for c in df.columns if c.startswith("X") and c[1:].isdigit()],
@@ -245,7 +416,8 @@ class LatentSpaceEmbeddings:
 
         return ordered.reshape(n, T, d).transpose(0, 2, 1)
 
-    def get_covariances_df(self):
+    def get_covariances_df(self) -> pd.DataFrame:
+        """Return the per-sample Laplace covariance blocks as a long dataframe."""
         assert self.covariances is not None, (
             "Covariances have not been computed. "
             "Run compute_embeddings_through_time(compute_uncertainty=True) first."
@@ -262,43 +434,110 @@ class LatentSpaceEmbeddings:
         df.columns = df.columns.astype(str)
         return df
 
-def compute_smoothing_weights(X, saturated_loss, l1_strengths, l2_strengths, diff_operators):
-    n, d, T    = X.shape
-    l1_weights = {}
-    l2_weights = {}
 
-    for k in set(list(l1_strengths.keys()) + list(l2_strengths.keys())):
-        D    = diff_operators[k]
-        DkX  = X @ D.T          # (n, d, T)
+def compute_smoothing_weights(
+    X: np.ndarray,
+    saturated_loss: float,
+    l1_strengths: dict,
+    diff_operators: dict[int, np.ndarray],
+    pseudo_huber_factor: float = 1e-3,
+    sampled_by_time: Optional[np.ndarray] = None,
+    delta_t: Optional[float] = None,
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Calibrate alpha_1 and the pseudo-Huber eps against a stage-1 solution.
 
-        if l2_strengths.get(k, 0) > 0:
-            l2_weights[k] = l2_strengths[k] * saturated_loss / np.sum(DkX ** 2)
+    For each order k, with u = (D_k X_i)_t the k-th difference of sample i's
+    trajectory at time t:
 
-        if l1_strengths.get(k, 0) > 0:
-            l1_weights[k] = l1_strengths[k] * saturated_loss / np.sum(np.linalg.norm(DkX, axis=1))
+        eps_k       = pseudo_huber_factor * median_{i,t} ||u||
+        alpha_1^(k) = gamma_k * saturated_loss / sum_{i,t} sqrt(||u||^2 + eps_k^2)
 
-    return l1_weights, l2_weights
-# # %%
-# rates_path = "../results/simulations/outputs/split/sim/data/rates.minWS100.maxWS200.V1.FS1.0.maxT10000.nT2000.parquet"
-# se_path =  "../results/simulations/outputs/split/sim/data/se_rates.minWS100.maxWS200.V1.FS1.0.maxT10000.nT2000.parquet"
-# rates_df = pd.read_parquet(rates_path)
-# se_df = pd.read_parquet(se_path)
+    The alpha_1 denominator uses the same smoothed form as the penalty itself, for
+    consistency.  With ancient samples the stage-1 solution contains NaN, which would
+    otherwise make every alpha_1 come out NaN: each sample's differences are taken on
+    its own present time window, exactly as the penalty does, so the calibration set
+    is the same set of groups the penalty actually evaluates.
 
-# rates_df = rates_df[rates_df.columns[:700]]
-# se_df = se_df[se_df.columns[:700]]
+    Args:
+        X: (n, d, T) stage-1 solution, possibly containing NaN.
+        saturated_loss: Reference loss scale from the rates.
+        l1_strengths: {order: gamma}.
+        diff_operators: {order: (T-k, T) matrix} for full-length samples.
+        pseudo_huber_factor: Multiplier setting eps_k relative to the median norm.
+        sampled_by_time: (n, T) presence mask; all-present if None.
+        delta_t: Time-grid spacing, needed to build shorter-window operators.
 
-# LSE = LatentSpaceEmbeddings(rates_df, se_df, N_min=1, N_max=np.inf, n_components=2, individuals=True)
-# X, loss_df = LSE.compute_embeddings_through_time(target_precision=1e-7)
-# # %%
-# l1_strengths = {2: 1}
-# l2_strengths = None
+    Returns:
+        ({order: alpha_1}, {order: eps}).
+    """
+    n, _, T = X.shape
+    if sampled_by_time is None:
+        sampled_by_time = np.ones((n, T), dtype=bool)
+    operator_cache: dict[int, dict[int, np.ndarray]] = {T: diff_operators}
 
-# LSE._parse_smoothing_params(l1_strengths, l2_strengths)
-# smoothing_params = LSE.smoothing_params
-# # %%
-# smoothing_params["l1"]
-# # %%
-# penalty_loss, penalty_grad = compute_penalty_loss_gradient(LSE.embeddings, LSE.smoothing_params)
-# # %%
-# print(penalty_grad)
-# # %%
+    def group_norms(k: int) -> np.ndarray:
+        """||(D_k X_i)_t|| over every sample, on that sample's present window."""
+        collected = []
+        block_lengths = sampled_by_time.sum(axis=1)
+        for block_length in np.unique(block_lengths):
+            rows = np.where(block_lengths == block_length)[0]
+            block_length = int(block_length)
+            if block_length <= k:
+                print(f"  Order {k}: {len(rows)} sample(s) have a present window of "
+                      f"only {block_length} timepoint(s) and contribute no order-{k} "
+                      f"penalty: {rows.tolist()}")
+                continue
+            if block_length not in operator_cache:
+                if delta_t is None:
+                    raise ValueError(
+                        "delta_t is required to build difference operators for "
+                        "ancient samples' shorter time windows."
+                    )
+                operator_cache[block_length] = compute_difference_operators(
+                    block_length, max(l1_strengths.keys()), delta_t
+                )
+            ops = operator_cache[block_length]
+            if k not in ops:
+                continue
+            starts = np.argmax(sampled_by_time[rows], axis=1)
+            X_block = np.stack([X[i, :, s:s + block_length] for i, s in zip(rows, starts)])
+            collected.append(np.linalg.norm(X_block @ ops[k].T, axis=1).ravel())
+        return np.concatenate(collected) if collected else np.array([])
+    l1_weights: dict[int, float] = {}
+    eps_by_order: dict[int, float] = {}
+
+    for k, gamma in l1_strengths.items():
+        if not gamma:
+            continue
+        if k not in diff_operators:
+            raise ValueError(
+                f"No difference operator of order {k} was built; the time grid has "
+                f"only {X.shape[2]} points, which is too short for that order."
+            )
+        norms = group_norms(k)
+        finite_norms = norms[np.isfinite(norms)]
+        if finite_norms.size == 0:
+            raise ValueError(
+                f"No finite order-{k} differences in the stage-1 solution, so the "
+                "smoothing strength cannot be calibrated. Either every sample's "
+                "present window is shorter than the difference order, or the stage-1 "
+                "solution is all NaN."
+            )
+
+        eps_k = pseudo_huber_factor * float(np.median(finite_norms))
+        smoothed_total = float(np.sum(np.sqrt(finite_norms ** 2 + eps_k ** 2)))
+
+        l1_weights[k] = gamma * saturated_loss / smoothed_total
+        eps_by_order[k] = eps_k
+
+        # If most groups sit below eps the penalty is effectively quadratic
+        # everywhere and eps_k is too large to be a mere smoothing of the kink
+        frac_below = float(np.mean(finite_norms < eps_k))
+        print(f"Smoothing order {k}: alpha_1={l1_weights[k]:.6g}, eps={eps_k:.6g}, "
+              f"{frac_below:.2%} of groups below eps")
+        if frac_below > 0.05:
+            print(f"  WARNING: {frac_below:.2%} of order-{k} groups have ||u|| < eps. "
+                  "eps is large relative to the roughness of the stage-1 solution; "
+                  "consider reducing pseudo_huber_factor.")
+
+    return l1_weights, eps_by_order
