@@ -18,9 +18,9 @@ from evaluate_performance import reconstructed_vs_input_hist2d
 plt.rcParams['savefig.bbox'] = None
 
 sim_path = "../../outputs/simulations/two_admix/sim"
-EMB_SUFFIX = "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
+EMB_SUFFIX = "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
 RATES_SUFFIX = "rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
-RECON_SUFFIX = "reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
+RECON_SUFFIX = "reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
 
 ancestries = ["A", "B", "C", "D"]
 methods = ["GNN", "RFmix"]

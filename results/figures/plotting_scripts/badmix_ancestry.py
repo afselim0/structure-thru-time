@@ -24,9 +24,9 @@ examples = ["three_way_admixture", "ghost_admixture", "recent_bottleneck"]
 example_titles = ["Three-way admixture", "Ghost admixture", "Recent bottleneck"]
 ancestries = ["B", "C", "D"]
 embeddings_suffix = {
-    "three_way_admixture": "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
-    "ghost_admixture":     "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
-    "recent_bottleneck":   "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet",
+    "three_way_admixture": "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
+    "ghost_admixture":     "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
+    "recent_bottleneck":   "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet",
 }
 
 # Each simulation's own pop_colors.csv assigns the palette in a different

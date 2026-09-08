@@ -134,11 +134,8 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
     k = r("k", 1)
     link = r("link", "inverse_distance")
     l1 = r("l1", "None")
-    l2 = r("l2", "None")
     if isinstance(l1, list):
         l1 = ",".join(str(x) for x in l1)
-    if isinstance(l2, list):
-        l2 = ",".join(str(x) for x in l2)
     n_components = r("n_components", 2)
     n_timepoints_emb = r("n_timepoints_emb", 400)
     min_time = r("min_time", 1)
@@ -150,7 +147,7 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
 
     # --- filename tags (must match Snakefile exactly) -----------------------
     RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}.V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
-    STT_TAG = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.k{k}.link{link}.L1[{l1}].L2[{l2}].nTe{n_timepoints_emb}" + RATES_TAG
+    STT_TAG = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.k{k}.link{link}.L1[{l1}].nTe{n_timepoints_emb}" + RATES_TAG
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))

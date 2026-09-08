@@ -22,10 +22,10 @@ m01_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/c
 m001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_001.yaml"))
 m0001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_0001.yaml"))
 
-m0_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m01_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_01/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m0001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_0001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m0_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m01_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_01/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+m0001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_0001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
 
 m01_embeddings = procrustes_align_trajectories_df(m0_embeddings, m01_embeddings, allow_reflections=True)
 m001_embeddings = procrustes_align_trajectories_df(m0_embeddings, m001_embeddings, allow_reflections=True)

@@ -25,11 +25,11 @@ pop_labels = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_
 config_file = "../../../data/configs/sim_configs/complex_4_pops.yaml"
 with open(config_file, 'r') as f:
     config_data = yaml.safe_load(f)
-embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
 true_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim//data/rates_true.parquet")
 estimated_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/rates.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-reconstructed_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/reconstructed_rates.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-scan_p = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/scan_p.d2.Nmin1000.Nmax1000000.linkinverse_distance.L1[None].L2[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.csv")
+reconstructed_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/reconstructed_rates.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+scan_p = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/scan_p.d2.Nmin1000.Nmax1000000.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.csv")
 scan_p_input = scan_p[scan_p["vs"] == "input"]
 scan_p_true = scan_p[scan_p["vs"] == "true"]
 N_max = 1000000

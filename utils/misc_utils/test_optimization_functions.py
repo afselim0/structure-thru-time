@@ -430,16 +430,17 @@ def test_zero_standard_error_gives_finite_weight():
     assert np.all(np.isfinite(LSE.W[present])), "zero SE must yield a finite weight"
 
 
-def test_l2_strengths_is_rejected():
+def test_unknown_constructor_argument_is_rejected():
+    """l2_strengths is gone entirely, so it is now just an unexpected keyword."""
     from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
     rates_df, se_df = _rates_frame()
     try:
         LatentSpaceEmbeddings(rates_df, se_df, l2_strengths={2: 1e-3})
-    except ValueError as err:
-        assert "l1_strengths" in str(err)
+    except TypeError as err:
+        assert "l2_strengths" in str(err)
     else:
-        raise AssertionError("l2_strengths should be rejected")
+        raise AssertionError("l2_strengths is no longer a parameter and should raise")
 
 
 def test_non_uniform_time_grid_is_rejected():

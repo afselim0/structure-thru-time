@@ -28,14 +28,14 @@ max_time = 5000
 xy_lims = 1e6
 N_max = 1000000
 
-embeddings_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+embeddings_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
 input_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-reconstructed_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+reconstructed_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
 
-true_embeddings_A = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/A/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_B = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/B/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_C = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/C/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_D = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/D/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_A = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/A/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_B = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/B/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_C = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/C/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+true_embeddings_D = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/D/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
 
 ref_embeddings_AB = true_embeddings_A
 ref_embeddings_CD = true_embeddings_D

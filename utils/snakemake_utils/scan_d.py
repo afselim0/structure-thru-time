@@ -178,7 +178,6 @@ def main():
     parser.add_argument("--p", type=float, default=1, help="Exponent of the distance link function (held fixed while d is scanned).")
     parser.add_argument("--link", type=str, default="inverse_distance", help="Link function type (inverse_distance or exponential).")
     parser.add_argument("--l1_penalties", type=str, default="None", help="Comma-separated per-order L1 smoothing strengths (e.g. compute_embeddings.py's --l1_penalties). 'None' disables smoothing.")
-    parser.add_argument("--l2_penalties", type=str, default="None", help="REMOVED: the L2 smoothing term no longer exists. Only 'None' is accepted; use --l1_penalties.")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates).")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv file (unused directly, accepted for CLI symmetry with compute_embeddings.py).")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, rates are per-haplotype (sample_id). Otherwise per-individual (individual_id).")
@@ -192,16 +191,8 @@ def main():
     if true_rates_df is not None:
         true_rates_df.columns = true_rates_df.columns.astype(float)
 
-    # Parsing l1 and l2 penalties (same "order,order,..." -> {1: v1, 2: v2, ...} convention as compute_embeddings.py)
+    # Parsing l1 penalties (same "order,order,..." -> {1: v1, 2: v2, ...} convention as compute_embeddings.py)
     l1_penalties = None if args.l1_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l1_penalties.split(","))}
-    # The L2 smoothing term has been removed; reject a real value rather than
-    # silently ignoring a penalty the config still asks for
-    if args.l2_penalties != "None":
-        raise ValueError(
-            f"--l2_penalties={args.l2_penalties!r} was given, but the L2 smoothing term "
-            "has been removed. Remove the 'l2' key from the run config and express the "
-            "smoothing through 'l1' instead."
-        )
 
     metrics_df = scan_d(
         rates_df=rates_df, output_path=args.output_path, se_df=se_df, true_rates_df=true_rates_df,

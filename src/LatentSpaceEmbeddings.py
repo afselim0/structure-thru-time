@@ -42,7 +42,6 @@ class LatentSpaceEmbeddings:
                  N_max:                float                  = np.inf,
                  n_components:         int                    = 2,
                  l1_strengths:         Optional[dict]         = None,
-                 l2_strengths:         Optional[dict]         = None,
                  se_floor_quantile:    float                  = 0.01,
                  weight_cap_factor:    float                  = 100.0,
                  pseudo_huber_factor:  float                  = 1e-3,
@@ -57,7 +56,6 @@ class LatentSpaceEmbeddings:
             N_min, N_max: Link function parameters.
             n_components: Latent dimensionality d.
             l1_strengths: {order: gamma} dimensionless group-fused-lasso strengths.
-            l2_strengths: Removed; passing a non-None value raises.
             se_floor_quantile: Quantile of the strictly-positive squared SEs used to
                 regularize the weight denominator, per time slice.
             weight_cap_factor: Per-slice weights are capped at this multiple of the
@@ -67,14 +65,6 @@ class LatentSpaceEmbeddings:
             default_weights: Uniform weight used when se_df is None.
             link_function: Link name.
         """
-        # The L2 term has been removed from the penalty entirely
-        if l2_strengths is not None:
-            raise ValueError(
-                "l2_strengths has been removed: the penalty is now a group-fused "
-                "lasso with pseudo-Huber smoothing, which supplies its own curvature "
-                "near zero. Use l1_strengths={order: gamma} instead."
-            )
-
         # Read the column labels as floats without mutating the caller's DataFrame
         time_points = rates_df.columns.astype(float).values
 

@@ -37,9 +37,9 @@ min_time = 5
 max_time = 5000
 xy_lims = 1e6
 
-three_way_embeddings_WG = pd.read_parquet("../../outputs/simulations/three_way_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-ghost_embeddings_WG = pd.read_parquet("../../outputs/simulations/ghost_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-bottleneck_embeddings_WG = pd.read_parquet("../../outputs/simulations/recent_bottleneck/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].L2[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet")
+three_way_embeddings_WG = pd.read_parquet("../../outputs/simulations/three_way_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+ghost_embeddings_WG = pd.read_parquet("../../outputs/simulations/ghost_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+bottleneck_embeddings_WG = pd.read_parquet("../../outputs/simulations/recent_bottleneck/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet")
 
 three_way_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, three_way_embeddings_WG)
 ghost_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, ghost_embeddings_WG)

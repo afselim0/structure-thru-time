@@ -46,11 +46,9 @@ N_max                             = read_config("N_max", default = N_min + 10000
 p                                 = read_config("p", default = 1)
 link                              = read_config("link", default = "inverse_distance")
 l1_penalties                      = read_config("l1", default = "None")
-l2_penalties                      = read_config("l2", default = "None")
 n_components                      = read_config("n_components", default = 2) 
 rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
-if isinstance(l2_penalties, list): l2_penalties = ",".join(str(x) for x in l2_penalties)
 
 # Plotting parameters
 min_time                          = read_config("min_time", default = 1) # For plotting purposes only
@@ -132,13 +130,12 @@ scan_d_mode                       = min_d is not None and max_d is not None and 
 
 # Parameter label for plot titles (optional — pass to --param_label in plotting rules)
 _l1_str = f" | l1={l1_penalties}" if l1_penalties != "None" else ""
-_l2_str = f" | l2={l2_penalties}" if l2_penalties != "None" else ""
 param_label = (
     f"n={n_samples_per_pop}/pop | "
     f"N=[{N_min}, {N_max}] | "
     f"link={link} | "
     f"window size=[{min_window_size}, {max_window_size}]"
-    f"{_l1_str}{_l2_str}"
+    f"{_l1_str}"
 )
 
 # Filename Tags
@@ -147,18 +144,18 @@ PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_
 RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
 # STT_TAG (and everything built on it) is penalty-free: it tags the *unsmoothed* embeddings, which
 # are always computed regardless of whether smoothing is requested. Smoothed outputs use SMOOTH_TAG,
-# which is identical but carries the actual L1/L2 penalties.
-STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
-SMOOTH_TAG                        = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].L2[{l2_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
+# which is identical but carries the actual L1 penalties.
+STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
+SMOOTH_TAG                        = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
 PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
 SMOOTH_PLOT_TAG                   = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + SMOOTH_TAG
 TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
 # STT_TAG with the swept field omitted, for use by the scan_p/scan_d rules (the value varies within the rule, so it can't appear in a single output filename). Scans run unsmoothed, so these are penalty-free too.
-STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
-STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].L2[None].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
+STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
 
 # Whether smoothing (joint optimization) is requested — gates the parallel smoothed rules/targets
-smoothing_on                      = (l1_penalties != "None") or (l2_penalties != "None")
+smoothing_on                      = l1_penalties != "None"
 
 # Directory holding the wrapper scripts this workflow invokes. All paths in this file are
 # resolved against the working directory, which is always utils/.
@@ -254,7 +251,7 @@ dash_launch_file_name                                    = f"launch_dash{STT_TAG
 dash_launch_true_file_name                               = f"launch_dash_true.Nmin{N_min}.Nmax{N_max}.sh"
 dash_bundle_file_name                                    = f"dash_bundle{STT_TAG}.zip"
 
-# Smoothed (joint-optimization) counterparts, tagged with the actual L1/L2 penalties (SMOOTH_TAG).
+# Smoothed (joint-optimization) counterparts, tagged with the actual L1 penalties (SMOOTH_TAG).
 # Only produced when smoothing_on; mirror the unsmoothed names above.
 smooth_embeddings_data_file_name                                = f"smooth_embeddings{SMOOTH_TAG}.parquet"
 smooth_embeddings_plot_file_name                                = f"smooth_embeddings{SMOOTH_PLOT_TAG}.html"
@@ -1006,7 +1003,6 @@ rule compute_embeddings:
         p = p,
         link = link,
         l1_penalties = l1_penalties,
-        l2_penalties = l2_penalties,
         outdir = data_output_path,
         output_name = embeddings_data_file_name,
         reconstructed_rates_output_name = reconstructed_rates_file_name,
@@ -1030,7 +1026,6 @@ rule compute_embeddings:
             --p {params.p} \
             --link {params.link} \
             --l1_penalties {params.l1_penalties} \
-            --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
@@ -1318,7 +1313,6 @@ if admix_mode:
             p = p,
             link = link,
             l1_penalties = l1_penalties,
-            l2_penalties = l2_penalties,
             outdir = lambda wc: ancestry_data_dir(wc.ancestry),
             output_name = embeddings_data_file_name,
             reconstructed_rates_output_name = reconstructed_rates_file_name,
@@ -1342,7 +1336,6 @@ if admix_mode:
                 --p {params.p} \
                 --link {params.link} \
                 --l1_penalties {params.l1_penalties} \
-                --l2_penalties {params.l2_penalties} \
                 --n_components {params.n_components} \
                 --n_timepoints_emb {params.n_timepoints_emb} \
                 --pop_labels {params.pop_labels} \
@@ -1873,7 +1866,6 @@ if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding
             p = p,
             link = link,
             l1_penalties = l1_penalties,
-            l2_penalties = l2_penalties,
             n_timepoints_emb = n_timepoints_emb,
             outdir = scan_d_outdir,
             true_rates_arg = f"--true_rates {rates_true}" if demes_file_path and not is_SS_demography else "",
@@ -1893,7 +1885,6 @@ if scan_d_mode: # Scan the number of embedding dimensions d over a grid, holding
                 --p {params.p} \
                 --link {params.link} \
                 --l1_penalties {params.l1_penalties} \
-                --l2_penalties {params.l2_penalties} \
                 --n_timepoints_emb {params.n_timepoints_emb} \
                 {params.true_rates_arg} \
                 {params.per_haplotype}
@@ -1914,7 +1905,6 @@ rule compute_embeddings_replicate:
         p = p,
         link = link,
         l1_penalties = l1_penalties,
-        l2_penalties = l2_penalties,
         outdir = data_output_path,
         n_components = n_components,
         n_timepoints_emb = n_timepoints_emb,
@@ -1932,7 +1922,6 @@ rule compute_embeddings_replicate:
             --p {params.p} \
             --link {params.link} \
             --l1_penalties {params.l1_penalties} \
-            --l2_penalties {params.l2_penalties} \
             --n_components {params.n_components} \
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \

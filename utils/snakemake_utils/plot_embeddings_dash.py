@@ -29,11 +29,11 @@ CLI flags
 
 Example run: 
 python plot_embeddings_dash.py \
-  "../results/empirical/all.npp.2/data/embeddings.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  "../results/empirical/all.npp.2/data/embeddings.d2.Nmin1000.Nmax10000000.L1[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
   --labels "../data/metadata/wohns_pop_labels.csv" \
   --colors "../data/metadata/wohns_pop_colors.csv" \
   --rates "../results/empirical/all.npp.2/data/rates.minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
-  --reconstructed_rates "../results/empirical/all.npp.2/data/reconstructed_rates.d2.Nmin1000.Nmax10000000.L1[None].L2[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
+  --reconstructed_rates "../results/empirical/all.npp.2/data/reconstructed_rates.d2.Nmin1000.Nmax10000000.L1[None].minWS100.maxWS1500.V1.FS1.0.maxT4000.nT4000.parquet" \
   --N_max 10000000
 """
 
