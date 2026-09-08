@@ -7,7 +7,9 @@ num_threads: 12
 admixed_pops: [A]
 # Local ancestry method: RFmix (default), GNN, or True (ground-truth calls from
 # the simulation; simulated data only)
-LAI_method: "True"
+# No admixed deme in this demography (the ADMIXTURE-like signal comes from a
+# bottleneck, not admixture), so ground-truth local ancestry is undefined here.
+LAI_method: RFmix
 
 # Simulation Parameters
 num_contigs: 500

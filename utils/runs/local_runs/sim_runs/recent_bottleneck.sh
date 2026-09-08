@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../.."
 # under ancestry_STT/<method>/, so the runs accumulate in one output directory.
 # (YAML parses an unquoted True as a boolean, hence --config LAI_method=True is
 # passed on the command line rather than set in the config.)
-for method in True RFmix GNN; do
+for method in RFmix GNN; do
     echo "=== LAI_method=$method ==="
     snakemake STT_sim \
         --configfile ../data/configs/sim_configs/recent_bottleneck.yaml \
