@@ -3,33 +3,36 @@
 Compare Gaussian and Cauchy kernels, highlighting how a fixed band of
 "moderate similarity" on the y-axis corresponds to very different distance
 ranges on the x-axis -- the mechanism behind the t-SNE crowding problem.
+
+Data: results/figure_data/GaussianvsCauchyKernels/, written by
+utils/runs/prepare_figure_data/GaussianvsCauchyKernels.py
 """
-import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import os
 
 # Relative paths below are anchored at this script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-def gaussian_inv(y):
-    return np.sqrt(-2 * np.log(y))
+# This figure deliberately does not import plotting_style: it is drawn with
+# matplotlib's defaults (in particular an untrimmed savefig bbox).
+FIGURE = "GaussianvsCauchyKernels"
+DATA = os.path.join("..", "..", "figure_data", FIGURE)
+curves = pd.read_parquet(os.path.join(DATA, "kernels.parquet"))
+bands = pd.read_csv(os.path.join(DATA, "similarity_band.csv")).set_index("kernel")
+params = pd.read_csv(os.path.join(DATA, "params.csv")).set_index("parameter")["value"]
 
-def cauchy_inv(y):
-    return np.sqrt(1 / y - 1)
-x = np.linspace(0, 12, 2000)
-gaussian = np.exp(-x**2 / 2)
-cauchy = 1.0 / (1.0 + x**2)
+y_low, y_high = params["y_low"], params["y_high"]
+x_gauss_low, x_gauss_high = bands.loc["gaussian", ["x_low", "x_high"]]
+x_cauchy_low, x_cauchy_high = bands.loc["cauchy", ["x_low", "x_high"]]
 #%%
-# Define the "moderate similarity" band on the y-axis.
-y_low, y_high = 0.05, 0.1
-x_gauss_low, x_gauss_high = gaussian_inv(y_high), gaussian_inv(y_low)
-x_cauchy_low, x_cauchy_high = cauchy_inv(y_high), cauchy_inv(y_low)
-
 fig, ax = plt.subplots(figsize=(6, 4), dpi=500)
 
 # Plot the two kernels.
-ax.plot(x, gaussian, color="#1f77b4", linewidth=2.5, label="Gaussian: $\\exp(-x^2/2)$")
-ax.plot(x, cauchy, color="#d62728", linewidth=2.5, label="Cauchy: $1/(1+x^2)$")
+ax.plot(curves["x"], curves["gaussian"], color="#1f77b4", linewidth=2.5,
+        label="Gaussian: $\\exp(-x^2/2)$")
+ax.plot(curves["x"], curves["cauchy"], color="#d62728", linewidth=2.5,
+        label="Cauchy: $1/(1+x^2)$")
 
 # Shade the "moderate similarity" band on the y-axis.
 ax.axhspan(y_low, y_high, color="gray", alpha=0.15, zorder=0)

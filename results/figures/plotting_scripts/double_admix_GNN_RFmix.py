@@ -1,4 +1,14 @@
 #%%
+"""
+The two-admixture example under inferred local ancestry, one figure per method
+(double_admix_GNN.pdf, double_admix_RFmix.pdf). Columns are the four source
+ancestries; rows are the 3D embeddings (A), the admixed-vs-everyone-else
+coalescence rates (B), and the input-vs-reconstructed rate histograms (C).
+
+Data: results/figure_data/double_admix_GNN_RFmix/, written by
+utils/runs/prepare_figure_data/double_admix_GNN_RFmix.py -- the embeddings there
+are already Procrustes-aligned and the shared rate limits are precomputed.
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
@@ -11,73 +21,53 @@ import os
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
 sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
 from evaluate_performance import reconstructed_vs_input_hist2d
 plt.rcParams['savefig.bbox'] = None
 
-sim_path = "../../outputs/simulations/two_admix/sim"
-EMB_SUFFIX = "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
-RATES_SUFFIX = "rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
-RECON_SUFFIX = "reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet"
+FIGURE = "double_admix_GNN_RFmix"
 
 ancestries = ["A", "B", "C", "D"]
 methods = ["GNN", "RFmix"]
 
-# Ancestries A,B admix into Admix_1 and C,D into Admix_2 (see data/demes/two_admix.yaml),
-# so each column's rate panel only shows that column's admixed population against everyone else
-col_admix_pop = {"A": "Admix_1", "B": "Admix_1", "C": "Admix_2", "D": "Admix_2"}
-
-# Load embeddings, input rates and reconstructed rates for every method/ancestry combination
-embeddings = {m: {a: pd.read_parquet(f"{sim_path}/ancestry_STT/{m}/{a}/data/{EMB_SUFFIX}") for a in ancestries} for m in methods}
-input_rates = {m: {a: pd.read_parquet(f"{sim_path}/ancestry_STT/{m}/{a}/data/{RATES_SUFFIX}") for a in ancestries} for m in methods}
-reconstructed_rates = {m: {a: pd.read_parquet(f"{sim_path}/ancestry_STT/{m}/{a}/data/{RECON_SUFFIX}") for a in ancestries} for m in methods}
-
-pop_labels = pd.read_csv(f"{sim_path}/data/pop_labels.csv")
-pop_colors = pd.read_csv(f"{sim_path}/data/pop_colors.csv")
-pop_colors.iloc[-1, -1] = "#505011"
+pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
 pop_colors_dict = dict(zip(pop_colors["population"], pop_colors["color"]))
 
-min_time = 50
-max_time = 5000
-xy_lims = 1e6
-N_max = 1000000
-time_scale = "log"
+# Ancestries A,B admix into Admix_1 and C,D into Admix_2, so each column's rate panel
+# only shows that column's admixed population against everyone else
+col_admix_pop = (pd.read_csv(figure_data(FIGURE, "admix_populations.csv"))
+                 .set_index("ancestry")["admix_pop"].to_dict())
+rate_lims = (pd.read_csv(figure_data(FIGURE, "rate_limits.csv"))
+             .set_index("method")[["rate_lo", "rate_hi"]]
+             .apply(tuple, axis=1).to_dict())
+params = pd.read_csv(figure_data(FIGURE, "params.csv")).set_index("parameter")["value"]
+
+
+def load_by_ancestry(method, name):
+    """Split one method's stacked rate table back into a frame per ancestry."""
+    table = pd.read_parquet(figure_data(FIGURE, f"{method}_{name}.parquet"))
+    return {a: table.xs(a, level="ancestry") for a in ancestries}
+
+
+embeddings = {}
+for method in methods:
+    table = pd.read_parquet(figure_data(FIGURE, f"{method}_embeddings.parquet"))
+    embeddings[method] = {a: table[table["ancestry"] == a] for a in ancestries}
+input_rates = {m: load_by_ancestry(m, "input_rates") for m in methods}
+reconstructed_rates = {m: load_by_ancestry(m, "reconstructed_rates") for m in methods}
+
+min_time = float(params["min_time"])
+max_time = float(params["max_time"])
+xy_lims = float(params["xy_lims"])
+N_max = float(params["N_max"])
+time_scale = params["time_scale"]
 INDIVIDUAL_LINE_WIDTH = 0.2
 INDIVIDUAL_LINE_ALPHA = 0.4
 MEAN_LINE_WIDTH = 1.5
 MEAN_LINE_ALPHA = 0.9
 
-# Align each method's per-ancestry embeddings to a common reference frame so panels are visually comparable;
-# A/B share the Admix_1 frame and C/D share the Admix_2 frame
-for method in methods:
-    print(f"Aligning {method}-ancestry embeddings to reference...")
-    ref_AB = embeddings[method]["A"].copy()
-    ref_CD = embeddings[method]["D"].copy()
-    for ancestry in ancestries:
-        ref = ref_AB if ancestry in ("A", "B") else ref_CD
-        embeddings[method][ancestry] = procrustes_align_trajectories_df(ref, embeddings[method][ancestry], allow_reflections=True)
-
 #%%
-def method_rate_lims(method: str) -> tuple:
-    """
-    Common log-log axis limits for one method, spanning every ancestry's input
-    (shifted by 1/N_max) and reconstructed rates. Shared by the rate panels and
-    the histogram panels so both rows sit on exactly the same rate scale.
-    """
-    lo, hi = np.inf, -np.inf
-    for ancestry in ancestries:
-        x = (input_rates[method][ancestry] + 1 / N_max).values.ravel()
-        y = reconstructed_rates[method][ancestry].values.ravel()
-        valid = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
-        lo = min(lo, x[valid].min(), y[valid].min())
-        hi = max(hi, x[valid].max(), y[valid].max())
-    return lo, hi
-
-
-rate_lims = {m: method_rate_lims(m) for m in methods}
-
 # Render one embeddings panel first to get the aspect ratio that sets the figure geometry
 RENDER_KW = dict(width=600, height=600, scale=4)
 

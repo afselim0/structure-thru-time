@@ -1,25 +1,26 @@
 #%%
+"""
+Mean coalescence rates in the Wohns human dataset: within populations (A), between
+populations (B), and every individual pair (C).
+
+Data: results/figure_data/mean_coal_rates/, written by
+utils/runs/prepare_figure_data/mean_coal_rates.py -- times there are already in
+years.
+"""
 import matplotlib.pyplot as plt
-from matplotlib.ticker import AutoMinorLocator
-import numpy as np
 import pandas as pd
 from results.figures.plotting_style import *
-import sys
 import os
 os.chdir(os.path.dirname(__file__))
-sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
-from plot_rates import compute_mean_rates
-#%%
-rates_df = pd.read_parquet("../data/rates.minWS70.maxWS4000.V1.FS1.0.maxT20000.nT5000.parquet")
-pop_labels = pd.read_csv("../../../data/metadata/wohns_pop_labels.csv")
-active_pairs = rates_df.index.values
-active_samples = np.unique([item for sublist in active_pairs for item in sublist])
-pop_labels = pop_labels[pop_labels["individual_id"].isin(active_samples)]
-mean_rates, populations = compute_mean_rates(rates_df, pop_labels, phased=False)
-times = rates_df.columns.astype(float)
-times *= 28
+
+FIGURE = "mean_coal_rates"
+within_rates = pd.read_parquet(figure_data(FIGURE, "within_population_rates.parquet"))
+between_rates = pd.read_parquet(figure_data(FIGURE, "between_population_rates.parquet"))
+all_rates = pd.read_parquet(figure_data(FIGURE, "all_pair_rates.parquet"))
+
+times = within_rates["time"]
+all_times = all_rates.columns.astype(float)
+
 within_pop_colors_dict = {
     "YRI": '#0072B2',
     "CEU": '#D55E00',
@@ -36,21 +37,17 @@ all_rates_ax = axs[2]
 
 # A) mean within population rates
 for pop,color in within_pop_colors_dict.items():
-    pop_idx = np.where(populations == pop)[0][0]
-    within_pop_ax.plot(times, mean_rates[pop_idx,pop_idx,:], color=color, label=pop)
+    within_pop_ax.plot(times, within_rates[pop], color=color, label=pop)
 
 within_pop_ax.legend(loc="lower right", fontsize=8, frameon=False)
-# B) mean between lower rates
+# B) mean between population rates
 for pop_comb,color in between_pop_colors_dict.items():
-    pop1, pop2 = pop_comb.split("-")
-    pop1_idx = np.where(populations == pop1)[0][0]
-    pop2_idx = np.where(populations == pop2)[0][0]
-    between_pop_ax.plot(times, mean_rates[pop1_idx,pop2_idx,:], color=color, label=pop_comb, lw=2)
+    between_pop_ax.plot(times, between_rates[pop_comb], color=color, label=pop_comb, lw=2)
 
 between_pop_ax.legend(loc="lower right", fontsize=8, frameon=False)
 # C) All rates
-for _,row in rates_df.iterrows():
-    all_rates_ax.plot(times, row, c= "#AEABAC", lw = 0.1)
+for _,row in all_rates.iterrows():
+    all_rates_ax.plot(all_times, row, c= "#AEABAC", lw = 0.1)
 
 
 # use log scale with scientific notation for x-axis tick labels and add minor ticks on all subplots

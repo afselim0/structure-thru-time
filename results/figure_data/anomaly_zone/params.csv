@@ -1,0 +1,12 @@
+parameter,value
+Ne,30000.0
+Ne_bottleneck,3000.0
+Ne_A_recent,60000.0
+Ne_B_recent,120000.0
+Ne_C_recent,120000.0
+C_recent_growth_stop_time,30.0
+A_B_split_time,1000.0
+AB_C_split_time,1200.0
+ABC_D_split_time,1400.0
+num_replicates,10000.0
+seed,42.0

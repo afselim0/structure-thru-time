@@ -1,6 +1,18 @@
 #%%
+import os
 from matplotlib import rcParams
 from cycler import cycler
+
+# Tables the figures are drawn from, written by utils/runs/prepare_figure_data/.
+# Plotting scripts read only from here: data acquisition lives in the prep scripts.
+FIGURE_DATA = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "figure_data"))
+
+
+def figure_data(figure_name, *parts):
+    """Path to one of a figure's prepared tables, e.g. figure_data("complex_4_pops", "embeddings.parquet")."""
+    return os.path.join(FIGURE_DATA, figure_name, *parts)
+
 okabe_ito = [
     '#0072B2',  # blue
     '#D55E00',  # vermillion

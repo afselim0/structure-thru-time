@@ -1,0 +1,5 @@
+parameter,value
+min_time,50.0
+max_time,5000.0
+xy_lims,1000000.0
+N_max,1000000.0

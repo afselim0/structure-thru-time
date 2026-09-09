@@ -1,53 +1,40 @@
 #%%
+"""
+The 1D and 2D stepping-stone examples, one figure each (SS_1d.pdf, SS_2d.pdf).
+
+Each figure is two vertical sections (p=1 left, p=2 right); each section is a 3x2
+grid of (3D trajectories, 2D slice) with one migration rate per row.
+
+Data: results/figure_data/SS_examples/, written by
+utils/runs/prepare_figure_data/SS_examples.py -- the embeddings there are already
+Procrustes-aligned within each p, so the rows differ by the demography rather than
+by the optimizer's arbitrary rotation of the latent space.
+"""
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
-from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 from results.figures.plotting_style import *
 import sys
 import os
-import demes
-import msprime
 filename = os.path.basename(__file__).split(".")[0]
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
-import yaml
-def find_embeddings_file(SS, p, m):
-    m_mantissa = str(m).split(".")[1]
-    data_dir = f"../../outputs/simulations/SS/SS_{SS}d_N100_m{m_mantissa}/sim/data"
-    files = os.listdir(data_dir)
-    for file in files:
-        if f"p{p}" in file and file.startswith("embeddings"):
-            return os.path.join(data_dir, file)
-    return None
-#%%
-SS_1d_p1_m05_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=1, m=0.05))
-SS_1d_p1_m01_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=1, m=0.01))
-SS_1d_p1_m001_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=1, m=0.001))
 
-SS_1d_p2_m05_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=2, m=0.05))
-SS_1d_p2_m01_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=2, m=0.01))
-SS_1d_p2_m001_embeddings = pd.read_parquet(find_embeddings_file(SS=1, p=2, m=0.001))
+FIGURE = "SS_examples"
 
-SS_2d_p1_m05_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=1, m=0.05))
-SS_2d_p1_m01_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=1, m=0.01))
-SS_2d_p1_m001_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=1, m=0.001))
 
-SS_2d_p2_m05_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=2, m=0.05))
-SS_2d_p2_m01_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=2, m=0.01))
-SS_2d_p2_m001_embeddings = pd.read_parquet(find_embeddings_file(SS=2, p=2, m=0.001))
+def load_figure(name):
+    """The aligned embeddings, labels and colours for one stepping-stone figure."""
+    embeddings = pd.read_parquet(figure_data(FIGURE, f"{name}_embeddings.parquet"))
+    labels_df = pd.read_csv(figure_data(FIGURE, f"{name}_pop_labels.csv"))
+    colors_df = pd.read_csv(figure_data(FIGURE, f"{name}_pop_colors.csv"))
+    # split the long table back into the per-(p, m) frames the panels are built from
+    by_panel = {key: group.drop(columns=["p", "m"])
+                for key, group in embeddings.groupby(["p", "m"], sort=False)}
+    return by_panel, labels_df, colors_df
 
-SS_1d_pop_labels = pd.read_csv("../../outputs/simulations/SS/SS_1d_N100_m05/sim/data/pop_labels.csv")
-SS_1d_pop_colors = pd.read_csv("../../outputs/simulations/SS/SS_1d_N100_m05/sim/data/pop_colors.csv")
-
-SS_2d_pop_labels = pd.read_csv("../../outputs/simulations/SS/SS_2d_N100_m05/sim/data/pop_labels.csv")
-SS_2d_pop_colors = pd.read_csv("../../outputs/simulations/SS/SS_2d_N100_m05/sim/data/pop_colors.csv")
 # %% figure-wide layout constants
 # The only size parameter: the 2D slice panels are PANEL_SIZE x PANEL_SIZE squares, and
 # every other dimension follows. Each 3D panel is PANEL_SIZE tall and PANEL_SIZE *
@@ -61,10 +48,8 @@ N = 100                                  # deme size, used to label rows by Nm
 MIGRATION_RATES = [0.05, 0.01, 0.001]   # one row per rate, most to least migration
 P_VALUES = [1, 2]                        # left section is p=1, right section is p=2
 
-# each figure's trajectories are Procrustes-aligned to one migration rate's embedding,
-# per p, so rows differ by the demography rather than by the optimizer's arbitrary
-# rotation/reflection of the latent space. Chosen per figure as its clearest example.
-ALIGN_TO = {"SS_1d": 0.01, "SS_2d": 0.001}
+# the alignment reference used per figure is recorded in the prep script's params.csv;
+# the embeddings read here are already aligned.
 
 # Earliest time shown. The 3D panels' time axis starts here and the 2D panels show this
 # exact slice, so the square is the bottom face of the cube beside it. Set well clear of
@@ -180,18 +165,9 @@ def make_SS_figure(embeddings, labels_df, colors_df, out_name):
     """
     individual_colors = individual_color_map(labels_df, colors_df)
 
-    # Procrustes-align every rate's trajectories to the reference rate within each p, so
-    # the rows are comparable: the latent space is only identified up to rotation,
-    # reflection and scale, so unaligned panels would differ by an arbitrary transform.
-    align_m = ALIGN_TO[out_name]
-    aligned = {}
-    for p in P_VALUES:
-        reference = embeddings[(p, align_m)]
-        for m in MIGRATION_RATES:
-            aligned[(p, m)] = (
-                reference if m == align_m
-                else procrustes_align_trajectories_df(reference, embeddings[(p, m)])
-            )
+    # the embeddings arrive Procrustes-aligned within each p (see the prep script), so
+    # the rows are already comparable and are used as they come
+    aligned = embeddings
 
     # the 3D panels' width follows their true rendered aspect ratio, so build every
     # plotter up front: the panel geometry below is derived from the aspect ratio, and
@@ -421,30 +397,18 @@ def make_SS_figure(embeddings, labels_df, colors_df, out_name):
 
 
 # %% 1D stepping-stone
+SS_1d_embeddings, SS_1d_pop_labels, SS_1d_pop_colors = load_figure("SS_1d")
 SS_1d_fig = make_SS_figure(
-    embeddings={
-        (1, 0.05): SS_1d_p1_m05_embeddings,
-        (1, 0.01): SS_1d_p1_m01_embeddings,
-        (1, 0.001): SS_1d_p1_m001_embeddings,
-        (2, 0.05): SS_1d_p2_m05_embeddings,
-        (2, 0.01): SS_1d_p2_m01_embeddings,
-        (2, 0.001): SS_1d_p2_m001_embeddings,
-    },
+    embeddings=SS_1d_embeddings,
     labels_df=SS_1d_pop_labels,
     colors_df=SS_1d_pop_colors,
     out_name="SS_1d",
 )
 
 # %% 2D stepping-stone
+SS_2d_embeddings, SS_2d_pop_labels, SS_2d_pop_colors = load_figure("SS_2d")
 SS_2d_fig = make_SS_figure(
-    embeddings={
-        (1, 0.05): SS_2d_p1_m05_embeddings,
-        (1, 0.01): SS_2d_p1_m01_embeddings,
-        (1, 0.001): SS_2d_p1_m001_embeddings,
-        (2, 0.05): SS_2d_p2_m05_embeddings,
-        (2, 0.01): SS_2d_p2_m01_embeddings,
-        (2, 0.001): SS_2d_p2_m001_embeddings,
-    },
+    embeddings=SS_2d_embeddings,
     labels_df=SS_2d_pop_labels,
     colors_df=SS_2d_pop_colors,
     out_name="SS_2d",

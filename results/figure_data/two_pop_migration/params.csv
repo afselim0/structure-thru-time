@@ -1,0 +1,11 @@
+parameter,value
+max_time,3000.0
+delta_t,1.0
+n_timepoints,3001.0
+Ne,10000.0
+N_min,1.0
+N_max,1000000.0
+n_samples_per_pop,20.0
+split_time,2000.0
+early_mig_end_time,500.0
+deep_mig_end_time,1500.0

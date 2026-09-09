@@ -2,6 +2,12 @@
 # Regenerate every application (empirical: human / chimp) figure into app_figs/.
 # Each script is self-anchoring (it chdir's to its own directory), so this can be
 # run from anywhere. PNG intermediates are written to app_figs_png/.
+#
+# These scripts only plot: they read prepared tables from results/figure_data/.
+# To rebuild those tables from the raw run outputs in results/outputs/, run
+#   bash utils/runs/prepare_figure_data/prepare_all_figure_data.sh
+# (or the single script utils/runs/prepare_figure_data/<figure_name>.py).
+# See results/figure_data/README.md.
 set -euo pipefail
 
 cd "$(dirname "$0")"

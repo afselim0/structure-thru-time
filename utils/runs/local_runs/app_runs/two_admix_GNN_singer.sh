@@ -1,9 +1,9 @@
 #!/bin/bash
-# CoaSTT run: two_admix with GNN local ancestry, on trees inferred with tsinfer.
+# CoaSTT run: two_admix with GNN local ancestry, on trees inferred with SINGER (+POLEGON).
 #
 # Runs the same pipeline as sim_runs/two_admix_GNN.sh, but on inferred rather
-# than simulated trees, writing to a sibling "tsinfer" directory beside that
-# run's "sim" directory. Run sim_runs/two_admix_GNN.sh first: the VCFs it writes
+# than simulated trees, writing to a sibling "singer" directory beside that
+# run's "sim" directory. Run sim_runs/two_admix_GNN.sh first: its simulated trees
 # are this run's input.
 #
 # GNN (not True) is the LAI method here: ground-truth ancestry comes from the
@@ -23,8 +23,8 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 # All pipeline paths are relative to utils/, so run from there.
 cd "$script_dir/../../.."
 
-# Extra flags given to this script are forwarded to snakemake (e.g. -n).
+# Extra flags given to this script are forwarded to snakemake (e.g. -n); SINGER at 500 contigs needs ~10 min per contig per core.
 SNAKEMAKE_ARGS=("$@")
 source "$script_dir/../run_inferred.sh"
 
-run_inferred two_admix tsinfer LAI_method=GNN
+run_inferred two_admix singer LAI_method=GNN

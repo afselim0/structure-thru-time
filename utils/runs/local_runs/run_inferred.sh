@@ -13,7 +13,7 @@
 #   ../results/outputs/simulations/<demography>/sim/trees      <- simulated
 #   ../results/outputs/simulations/<demography>/<method>/trees <- inferred
 # The snakefile's vcf_dir defaults to tree_output_path with infer_method
-# swapped back to "sim", so infer_trees picks up the simulated VCFs with no
+# swapped back to "sim", so infer_trees picks up the simulated trees with no
 # explicit path. The matching sim_runs script must be run first.
 run_inferred() {
     local config_name="$1"; shift

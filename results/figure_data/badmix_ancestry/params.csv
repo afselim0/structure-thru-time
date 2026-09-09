@@ -1,0 +1,5 @@
+parameter,value
+max_time,5000
+xy_lims,1000000.0
+reference_example,ghost_admixture
+reference_ancestry,B

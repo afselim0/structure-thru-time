@@ -1,0 +1,5 @@
+parameter,value
+min_time,20
+max_time,4000
+time_scale,log
+N_max,1000000

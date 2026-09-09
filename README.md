@@ -24,6 +24,7 @@ data/     Inputs only (.csv and .yaml; plus data/trees/ for tree sequences)
 results/
   outputs/simulations/   One directory per CoaSTT simulation run
   outputs/empirical/     One directory per CoaSTT application run
+  figure_data/           One directory per figure: the tables it is drawn from
   figures/               Manuscript figures and the scripts that draw them
 ```
 
@@ -42,10 +43,18 @@ The `app_` equivalents work the same way once `data/configs/app_configs/` is pop
 The launch scripts are self-anchoring, so they can be invoked from any directory.
 
 # Figures
+Drawing a figure is split in two: a preparation script turns raw run outputs into tidy
+tables, and a plotting script reads only those tables. So the plotting scripts never
+read `results/outputs/`, run the optimizer, or align anything themselves.
 ```
+bash utils/runs/prepare_figure_data/prepare_all_figure_data.sh   # tables -> results/figure_data/
 bash results/figures/generate_sim_figs.sh    # simulation figures -> results/figures/sim_figs/
 bash results/figures/generate_app_figs.sh    # application figures -> results/figures/app_figs/
 ```
+The tables are already checked in, so the figure scripts can be run on their own; rebuild
+them only after a run changes. A figure whose run is not on this machine fails with
+`missing run: <path>`. Per-figure details are in `results/figure_data/README.md`.
+
 Figures are written as PDFs; PNG intermediates go to the gitignored `*_figs_png/` directories.
 
 # Basic Usage

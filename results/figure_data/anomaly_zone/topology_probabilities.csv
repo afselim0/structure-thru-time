@@ -1,0 +1,16 @@
+rank_shape,rank_label,topology,count,probability,is_correct_topology
+4,0,"((A,B),(C,D))",1225,0.1225,False
+4,2,"((A,D),(B,C))",1045,0.1045,False
+4,1,"((A,C),(B,D))",1025,0.1025,False
+3,11,"(D,(C,(A,B)))",855,0.0855,True
+3,8,"(C,(D,(A,B)))",764,0.0764,False
+3,2,"(A,(D,(B,C)))",653,0.0653,False
+3,5,"(B,(D,(A,C)))",616,0.0616,False
+3,10,"(D,(B,(A,C)))",615,0.0615,False
+3,9,"(D,(A,(B,C)))",590,0.059,False
+3,6,"(C,(A,(B,D)))",462,0.0462,False
+3,1,"(A,(C,(B,D)))",451,0.0451,False
+3,3,"(B,(A,(C,D)))",444,0.0444,False
+3,7,"(C,(B,(A,D)))",444,0.0444,False
+3,4,"(B,(C,(A,D)))",415,0.0415,False
+3,0,"(A,(B,(C,D)))",396,0.0396,False

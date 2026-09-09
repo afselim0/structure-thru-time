@@ -1,0 +1,4 @@
+parameter,value
+align_to_SS_1d,0.01
+align_to_SS_2d,0.001
+deme_size_N,100.0

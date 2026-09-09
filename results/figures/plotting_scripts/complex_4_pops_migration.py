@@ -1,4 +1,12 @@
 #%%
+"""
+The complex four-population example under increasing migration: three embeddings
+panels (A-C), one per migration rate, and the pair coalescence rates against the
+no-migration 1/(2Ne) baseline (D).
+
+Data: results/figure_data/complex_4_pops_migration/, written by
+utils/runs/prepare_figure_data/complex_4_pops_migration.py
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
@@ -7,51 +15,27 @@ import pandas as pd
 from results.figures.plotting_style import *
 import sys
 import os
-import demes
-import msprime
 filename = os.path.basename(__file__).split(".")[0]
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
 
-m0_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops.yaml"))
-m01_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_01.yaml"))
-m001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_001.yaml"))
-m0001_demography = msprime.Demography.from_demes(demes.load("../../../data/demes/complex_4_pops_m_0001.yaml"))
+FIGURE = "complex_4_pops_migration"
+all_embeddings = pd.read_parquet(figure_data(FIGURE, "embeddings.parquet"))
+coalescence_rates = pd.read_parquet(figure_data(FIGURE, "coalescence_rates.parquet"))
+inverse_2Ne = pd.read_parquet(figure_data(FIGURE, "inverse_2Ne.parquet"))
+pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
 
-m0_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m01_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_01/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-m0001_embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops_m_0001/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
+A_color = pop_colors.loc[pop_colors.population == "A", "color"].values[0]
+B_color = pop_colors.loc[pop_colors.population == "B", "color"].values[0]
 
-m01_embeddings = procrustes_align_trajectories_df(m0_embeddings, m01_embeddings, allow_reflections=True)
-m001_embeddings = procrustes_align_trajectories_df(m0_embeddings, m001_embeddings, allow_reflections=True)
-m0001_embeddings = procrustes_align_trajectories_df(m0_embeddings, m0001_embeddings, allow_reflections=True)
+# the embeddings panels, weakest migration first
+PANEL_M = ["0.0001", "0.001", "0.01"]
+panel_embeddings = [(f"m = {m}", all_embeddings[all_embeddings["m"] == m])
+                    for m in PANEL_M]
 
-
-times = m0001_embeddings.time.unique().astype(int)
-
-pop_labels = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_labels.csv")
-pop_colors = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_colors.csv")
-A_color = pop_colors.loc[pop_colors.population=="A","color"].values[0]
-B_color = pop_colors.loc[pop_colors.population=="B","color"].values[0]
-
-recent_time = np.arange(0, 1000)
-Ne = m0_demography.debug().population_size_trajectory(steps=recent_time)
-Inverse_Ne_A = 1 / (2*Ne[:,5])
-Inverse_Ne_B = 1 / (2*Ne[:,6])
-
-A_0_rates = m0_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"A":2})[0]
-B_0_rates = m0_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"B":2})[0]
-A_01_rates = m01_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"A":2})[0]
-B_01_rates = m01_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"B":2})[0]
-A_001_rates = m001_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"A":2})[0]
-B_001_rates = m001_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"B":2})[0]
-A_0001_rates = m0001_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"A":2})[0]
-B_0001_rates = m0001_demography.debug().coalescence_rate_trajectory(recent_time,lineages = {"B":2})[0]
+times = np.sort(all_embeddings["time"].unique()).astype(int)
 
 # %% build the three embeddings plotters
 # all three share the same time window and xy limits, so the panels are directly
@@ -60,14 +44,8 @@ B_0001_rates = m0001_demography.debug().coalescence_rate_trajectory(recent_time,
 MIN_TIME, MAX_TIME = float(times[times > 0].min()), float(times.max())
 XY_LIMS = max(
     np.abs(df[["X1", "X2"]].values).max()
-    for df in (m01_embeddings, m001_embeddings, m0001_embeddings)
+    for _, df in panel_embeddings
 ) * 1.05
-
-panel_embeddings = [
-    ("m = 0.0001", m0001_embeddings),
-    ("m = 0.001", m001_embeddings),
-    ("m = 0.01", m01_embeddings),
-]
 
 plotters = []
 for _, embeddings_df in panel_embeddings:
@@ -132,17 +110,17 @@ LINESTYLES = {
     "0.001": (0, (3, 1, 1, 1)),
     "0.01": (0, (1, 1)),
 }
+POP_COLORS = {"A": A_color, "B": B_color}
 
-rates_ax.plot(recent_time, Inverse_Ne_A, color=A_color)
-rates_ax.plot(recent_time, Inverse_Ne_B, color=B_color)
+for pop, color in POP_COLORS.items():
+    baseline = inverse_2Ne[inverse_2Ne["population"] == pop]
+    rates_ax.plot(baseline["time"], baseline["inverse_2Ne"], color=color)
 
-for m, (A_rates, B_rates) in {
-    "0.0001": (A_0001_rates, B_0001_rates),
-    "0.001": (A_001_rates, B_001_rates),
-    "0.01": (A_01_rates, B_01_rates),
-}.items():
-    rates_ax.plot(recent_time, A_rates, color=A_color, linestyle=LINESTYLES[m])
-    rates_ax.plot(recent_time, B_rates, color=B_color, linestyle=LINESTYLES[m])
+for m, linestyle in LINESTYLES.items():
+    for pop, color in POP_COLORS.items():
+        curve = coalescence_rates[(coalescence_rates["m"] == m)
+                                  & (coalescence_rates["population"] == pop)]
+        rates_ax.plot(curve["time"], curve["rate"], color=color, linestyle=linestyle)
 
 rates_ax.set_xscale("log")
 rates_ax.set_yscale("log")

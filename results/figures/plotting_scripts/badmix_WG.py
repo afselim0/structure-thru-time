@@ -1,4 +1,13 @@
 #%%
+"""
+Three admixture scenarios that are hard for the method: three-way admixture, ghost
+admixture and a recent bottleneck. Top row the demographies (A), bottom row the
+whole-genome embeddings (B).
+
+Data: results/figure_data/badmix_WG/, written by
+utils/runs/prepare_figure_data/badmix_WG.py -- the embeddings there are already
+Procrustes-aligned to the recent_bottleneck frame.
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
@@ -10,41 +19,33 @@ import demes
 import demesdraw
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
 
 misc_plot_path = "../sim_figs_png/misc"
-three_way_graph = demes.load("../../../data/demes/three_way_admixture.yaml")
-ghost_graph = demes.load("../../../data/demes/ghost_admixture.yaml")
-bottleneck_graph = demes.load("../../../data/demes/recent_bottleneck.yaml")
+FIGURE = "badmix_WG"
 
-three_way_pop_labels = pd.read_csv("../../outputs/simulations/three_way_admixture/sim/data/pop_labels.csv")
-ghost_pop_labels = pd.read_csv("../../outputs/simulations/ghost_admixture/sim/data/pop_labels.csv")
-bottleneck_pop_labels = pd.read_csv("../../outputs/simulations/recent_bottleneck/sim/data/pop_labels.csv")
+EXAMPLES = ["three_way_admixture", "ghost_admixture", "recent_bottleneck"]
+graphs = {ex: demes.load(f"../../../data/demes/{ex}.yaml") for ex in EXAMPLES}
 
-# Each simulation's own pop_colors.csv assigns the palette in a different
-# population order (e.g. A is purple in three_way/ghost but green in
-# recent_bottleneck), so a population would change color between panels. Pin one
-# canonical population -> color map, in A,B,C,D order, shared by all examples
-pop_colors = pd.DataFrame({
-    "population": ["A", "B", "C", "D"],
-    "color": ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3"],
-})
+all_embeddings = pd.read_parquet(figure_data(FIGURE, "embeddings.parquet"))
+all_pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
+params = pd.read_csv(figure_data(FIGURE, "params.csv")).set_index("parameter")["value"]
+
 pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-min_time = 5
-max_time = 5000
-xy_lims = 1e6
+min_time = float(params["min_time"])
+max_time = float(params["max_time"])
+xy_lims = float(params["xy_lims"])
 
-three_way_embeddings_WG = pd.read_parquet("../../outputs/simulations/three_way_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-ghost_embeddings_WG = pd.read_parquet("../../outputs/simulations/ghost_admixture/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-bottleneck_embeddings_WG = pd.read_parquet("../../outputs/simulations/recent_bottleneck/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet")
-
-three_way_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, three_way_embeddings_WG)
-ghost_embeddings_WG = procrustes_align_trajectories_df(bottleneck_embeddings_WG, ghost_embeddings_WG)
+embeddings = {ex: all_embeddings[all_embeddings["example"] == ex] for ex in EXAMPLES}
+pop_labels = {ex: all_pop_labels[all_pop_labels["example"] == ex] for ex in EXAMPLES}
+# the embeddings panels start at 50 generations except the bottleneck, whose structure
+# is recent enough to need the shorter axis
+panel_min_time = {"three_way_admixture": 50, "ghost_admixture": 50,
+                  "recent_bottleneck": min_time}
 #%%
-plotter = PlotEmbeddings(embeddings_df = three_way_embeddings_WG, labels_df = three_way_pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
+plotter = PlotEmbeddings(embeddings_df = embeddings[EXAMPLES[0]], labels_df = pop_labels[EXAMPLES[0]],
+                         colors_df = pop_colors, sample_id_col = "individual_id")
 plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
 plotter.add_sample_trajectories()
 # Every embeddings panel is rendered on this canvas. The cropped aspect ratio
@@ -52,7 +53,6 @@ plotter.add_sample_trajectories()
 # probe below and the final renders must share it for the panels to fill their axes
 RENDER_KW = dict(width = 1475, height = 1475)
 _, y = plotter.save_static(**RENDER_KW, scale = 1)  # cheap probe: scale does not affect the ratio
-# y=0.8
 # %%
 FIG_WIDTH = 6.5
 # Margins reserved around the grid, in inches. Left margin holds the demesdraw
@@ -80,40 +80,23 @@ gs = gridspec.GridSpec(
 axs = np.array([[fig.add_subplot(gs[i, j]) for j in range(3)] for i in range(2)])
 
 # Plotting demes
-demesdraw.tubes(three_way_graph, ax = axs[0,0], colours = pop_colors_dict, log_time = True, max_time = max_time, labels = "xticks")
-demesdraw.tubes(ghost_graph, ax = axs[0,1], colours = pop_colors_dict, log_time = True, max_time = max_time, labels = "xticks")
-demesdraw.tubes(bottleneck_graph, ax = axs[0,2], colours = pop_colors_dict, log_time = True, max_time = max_time, labels = "xticks")
-axs[0,0].set_ylim(bottom=min_time)
-axs[0,1].set_ylim(bottom=min_time)
-axs[0,2].set_ylim(bottom=min_time)
-axs[0,0].set_ylabel("Time (generations ago)", fontsize = 11)
-axs[0,1].set_ylabel("Time (generations ago)", fontsize = 11)
-axs[0,2].set_ylabel("Time (generations ago)", fontsize = 11)
+for j, ex in enumerate(EXAMPLES):
+    demesdraw.tubes(graphs[ex], ax = axs[0, j], colours = pop_colors_dict,
+                    log_time = True, max_time = max_time, labels = "xticks")
+    axs[0, j].set_ylim(bottom=min_time)
+    axs[0, j].set_ylabel("Time (generations ago)", fontsize = 11)
 
 # 3d plots
-plotter = PlotEmbeddings(embeddings_df = three_way_embeddings_WG, labels_df = three_way_pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = 50, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-img.save(f"{misc_plot_path}_three_way.png")
-axs[1,0].set_axis_off()
-axs[1,0].imshow(img, aspect = "equal")
-
-plotter = PlotEmbeddings(embeddings_df = ghost_embeddings_WG, labels_df = ghost_pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = 50, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-img.save(f"{misc_plot_path}_ghost.png")
-axs[1,1].set_axis_off()
-axs[1,1].imshow(img, aspect = "equal")
-
-plotter = PlotEmbeddings(embeddings_df = bottleneck_embeddings_WG, labels_df = bottleneck_pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = 5, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-img.save(f"{misc_plot_path}_bottleneck.png")
-axs[1,2].set_axis_off()
-axs[1,2].imshow(img, aspect = "equal")
+for j, ex in enumerate(EXAMPLES):
+    plotter = PlotEmbeddings(embeddings_df = embeddings[ex], labels_df = pop_labels[ex],
+                             colors_df = pop_colors, sample_id_col = "individual_id")
+    plotter.init_plot(min_time = panel_min_time[ex], max_time = max_time,
+                      time_scale = "log", xy_lims = xy_lims)
+    plotter.add_sample_trajectories()
+    img, _ = plotter.save_static(**RENDER_KW)
+    img.save(f"{misc_plot_path}_{ex}.png")
+    axs[1, j].set_axis_off()
+    axs[1, j].imshow(img, aspect = "equal")
 
 # Nudge the flanking embeddings panels outward to widen the gaps between the
 # three cubes

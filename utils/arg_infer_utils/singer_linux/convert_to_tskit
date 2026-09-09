@@ -50,7 +50,17 @@ def read_mutation(tables, mutation_file):
 
 def read_ARG(node_file, branch_file, mutation_file):
     tables = read_ts(node_file, branch_file)
-    # read_mutation(tables, mutation_file)
+    read_mutation(tables, mutation_file)
+    # BENCHMARK PATCH (not upstream). read_mutation appends mutations in file order
+    # and never sets parent pointers. At the handful of sites where SINGER places a
+    # recurrent/back mutation (two rows sharing a position), the resulting table
+    # violates tskit's ordering requirement and tables.tree_sequence() raises
+    # TSK_ERR_MUTATION_PARENT_AFTER_CHILD. sort() puts mutations in the required
+    # (site, time/topology) order and compute_mutation_parents() fills in the parent
+    # column, so every mutation is kept rather than dropped.
+    tables.sort()
+    tables.build_index()
+    tables.compute_mutation_parents()
     ts = tables.tree_sequence()
     return ts
 

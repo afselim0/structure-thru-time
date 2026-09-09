@@ -1,0 +1,7 @@
+parameter,value
+link,inverse_distance
+p,1
+N_max,100000000.0
+n_for_Nmin_sweep,50
+N_min_for_n_sweep,1
+init_seed,42

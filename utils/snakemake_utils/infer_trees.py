@@ -1,19 +1,32 @@
-#%%
 #!/usr/bin/env python3
+"""Infer tree sequences from simulated tree sequences with tsinfer, Relate or SINGER.
+
+One contig in, one contig out: for each simulated ``contig_{i}.trees`` the script
+overlays mutations with a fixed seed (i + 42), exports a VCF into a per-contig work
+directory, runs the chosen ARG inference method and writes ``contig_{i}.trees`` into
+the output directory. Nothing else is left in the output directory except the
+sentinel file, so downstream ``*.trees`` globs only ever see final tree sequences.
+
+Command lines and the fixes they encode (genetic-map units for Relate, calling the
+``singer`` binary directly, rebuilding mutation parents after POLEGON) are ported
+from the rate-bias benchmark driver, which ran 800 contigs without a failure.
+"""
+from __future__ import annotations
+
 import argparse
-import tskit
-import tsinfer
-import tsdate
-import glob
+import concurrent.futures
+import importlib.machinery
+import importlib.util
 import os
-import numpy as np
-from pathos.multiprocessing import Pool
-import subprocess
-import zarr
+import platform
 import shutil
-from time import time
-from tqdm import tqdm
+import subprocess
+import sys
+import time
+
 import msprime
+import numpy as np
+import tskit
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # The pipeline's relative paths (configs, data, results) are all anchored at utils/,
@@ -21,172 +34,218 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 utils_dir = os.path.dirname(script_dir)
 os.chdir(utils_dir)
 
-# ARG inference binaries live alongside the other inference tooling
-singer_path = os.path.join(utils_dir, "arg_infer_utils", "singer_linux")
-relate_path = os.path.join(utils_dir, "arg_infer_utils", "relate_mac")
+_SUFFIX = "_linux" if platform.system() == "Linux" else "_mac"
+BIN_ROOT = os.path.join(utils_dir, "arg_infer_utils")
+SINGER_DIR = os.path.join(BIN_ROOT, "singer" + _SUFFIX)
+RELATE_DIR = os.path.join(BIN_ROOT, "relate" + _SUFFIX)
+POLEGON_DIR = os.path.join(BIN_ROOT, "polegon_linux")
 
-def find_Ne(sim_ts_dir):
-    ts_files = glob.glob(os.path.join(sim_ts_dir, "*.trees"))
-    Ne = []
-    for ts_file in ts_files:
-        ts = tskit.load(ts_file)
-        Ne.append(ts.diversity(mode="branch")/4)
-    return np.mean(Ne)
+SINGER_POLAR = 0.99   # REF is the true ancestral allele in the simulated VCF
 
-def infer_tsinfer(vcf_file_path, output_path, output_name, mu=1.2e-8, r=1.2e-8, from_TreeSequence = True):
-    vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
-    contig_id = os.path.basename(vcf_path_prefix)
-    output_prefix = os.path.join(output_path, contig_id)
-    if from_TreeSequence:
-        ts = tskit.load(vcf_path_prefix + ".trees")
-        ts_mutated = msprime.sim_mutations(ts,rate=mu,random_seed=int(contig_id.split("_")[-1]) + 42)
-        vdata = tsinfer.SampleData.from_tree_sequence(ts_mutated)
-    else:
-        vcf_to_icf_command = f"vcf2zarr explode {vcf_path_prefix}.vcf {output_prefix}.icf --force"
-        icf_to_vcz_command = f"vcf2zarr encode {output_prefix}.icf {output_prefix}.vcz --force"
-        with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
-            subprocess.run(vcf_to_icf_command, shell=True, stdout = f, stderr = f)
-            subprocess.run(icf_to_vcz_command, shell=True, stdout = f, stderr = f)
-        vcz_path = os.path.join(output_prefix + ".vcz")
-        vcf_zarr = zarr.load(vcz_path)
-        vdata = tsinfer.VariantData(vcz_path, ancestral_state=vcf_zarr["variant_allele"][:, 0])
-    inferred_ts = tsinfer.infer(vdata, recombination_rate=r)
-    inferred_ts = inferred_ts.simplify()
-    dated_ts = tsdate.variational_gamma(inferred_ts, mutation_rate=mu)
-    dated_ts.dump(os.path.join(output_path, f"{contig_id}.trees"))
 
-    if not from_TreeSequence:
-        shutil.rmtree(f"{output_prefix}.icf")
-        shutil.rmtree(f"{output_prefix}.vcz")
-    return
+# ----------------------------------------------------------------- helpers
+def run(cmd, cwd, log):
+    """Run a command with its output appended to ``log``; fail loudly on non-zero exit."""
+    cmd = [str(c) for c in cmd]
+    with open(log, "a") as f:
+        f.write(f"$ {' '.join(cmd)}\n")
+        f.flush()
+        res = subprocess.run(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, text=True)
+        f.write(f"  -> exit {res.returncode}\n")
+    if res.returncode != 0:
+        raise RuntimeError(f"command failed (exit {res.returncode}): {' '.join(cmd)}")
 
-def infer_singer(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, contig_length=1e6, num_posterior_samples = 50, thinning_interval=100, burnin=1000):
-    vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
-    contig_id = os.path.basename(vcf_path_prefix)
-    output_prefix = os.path.join(output_path, contig_id)
-    num_burnin_samples = int(burnin/thinning_interval)
-    tot_posterior_samples = num_burnin_samples + num_posterior_samples
-    singer_infer_command = f"{singer_path}/singer_master -vcf {vcf_path_prefix} -output {output_prefix} -m {mu} -Ne {Ne} -start 0 -end {contig_length} -n {tot_posterior_samples} -thin {thinning_interval}"
-    convert_to_tskit_command = f"{singer_path}/convert_to_tskit -input {output_prefix} -output {output_prefix} -start {num_burnin_samples} -end {tot_posterior_samples} -step 1"
 
-    with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
-        subprocess.run(singer_infer_command, shell=True, stdout = f, stderr = f)
-        subprocess.run(convert_to_tskit_command, shell=True, stdout = f, stderr = f)
-    
-    os.remove(f"{output_prefix}.log")
-    os.remove(f"{output_prefix}_coordinates.txt")
-    os.remove(f"{output_prefix}_start_branches_0.txt")
-    os.remove(f"{output_prefix}_start_nodes_0.txt")
-    os.remove(f"{output_prefix}_start_muts_0.txt")
-    os.remove(f"{output_prefix}_start_recombs_0.txt")
-    for i in range(num_posterior_samples):
-        os.remove(f"{output_prefix}_branches_{i}.txt")
-        os.remove(f"{output_prefix}_nodes_{i}.txt")
-        os.remove(f"{output_prefix}_muts_{i}.txt")
-        os.remove(f"{output_prefix}_recombs_{i}.txt")
-    return
+def mutate(ts, i, mu):
+    """Overlay mutations with a per-contig fixed seed, then restrict to sites every
+    method consumes identically: sites carrying more than one mutation (recurrent /
+    multi-allelic; Relate's haps format is strictly biallelic and SINGER assumes
+    biallelic sites) and a site at position 0 (VCF is 1-based) are dropped."""
+    mts = msprime.sim_mutations(ts, rate=mu, random_seed=i + 42)
+    n_per_site = np.bincount(mts.mutations_site, minlength=mts.num_sites)
+    bad = np.flatnonzero((n_per_site != 1) | (mts.sites_position == 0))
+    return mts.delete_sites(bad) if len(bad) else mts
 
-def infer_relate(vcf_file_path, output_path, output_name, Ne, mu=1.2e-8, r=1.2e-8, contig_length=1e6):
-    vcf_path_prefix = vcf_file_path.removesuffix(".vcf")
-    contig_id = os.path.basename(vcf_path_prefix)
-    output_prefix = os.path.join(output_path, contig_id)
 
-    with open(f"{output_prefix}.map", "w") as f:
-        f.write(f"Position.bp.\tRate.cM.Mb.\tMap.cM.\n")
-        f.write(f"0\t{100*r*contig_length}\t{0}\n")
-        f.write(f"{contig_length}\t{0}\t{100*r*contig_length}")
-    
-    vcf_to_haps_command = f"{relate_path}/RelateFileFormats --mode ConvertFromVcf --input {vcf_path_prefix} --haps {output_prefix}.haps --sample {output_prefix}.sample"
-    os.chdir(output_path)
-    relative_relate_path = os.path.relpath(relate_path, start=os.getcwd())
-    relate_infer_command = f"{relative_relate_path}/Relate --mode All -m {mu} --effectiveN {int(2*Ne)} --haps {contig_id}.haps --sample {contig_id}.sample --map {contig_id}.map --output {contig_id}"
-    convert_to_tskit_command = f"{relative_relate_path}/RelateFileFormats --mode ConvertToTreeSequence --input {contig_id} --output {contig_id}"
-    os.chdir(utils_dir)
-    with open(f"{output_path}/{output_name}".removesuffix(".txt")+".log", "a") as f:
-        subprocess.run(vcf_to_haps_command, shell=True, stdout = f, stderr = f)
-        os.chdir(output_path)
-        subprocess.run(relate_infer_command, shell=True, stdout = f, stderr = f)
-        subprocess.run(convert_to_tskit_command, shell=True, stdout = f, stderr = f)
-        os.chdir(utils_dir)
-    
-    if os.path.exists(f"{output_prefix}.trees"):
-        os.remove(f"{output_prefix}.map")
-        os.remove(f"{output_prefix}.haps")
-        os.remove(f"{output_prefix}.sample")
-        os.remove(f"{output_prefix}.anc")
-        os.remove(f"{output_prefix}.mut")
+def write_vcf(mts, path, contig_id):
+    with open(path, "w") as f:
+        mts.write_vcf(f, contig_id=contig_id)
 
-    return
 
-def infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, burnin=None):
-    if method == "tsinfer":
-        infer_tsinfer(vcf_file_path, output_path, output_name, mu=mu, r=r)
-    elif method == "singer":
-        infer_singer(vcf_file_path, output_path, output_name, Ne, mu=mu, contig_length=contig_length, num_posterior_samples=num_posterior_samples, thinning_interval=thinning_interval, burnin=burnin)
-    elif method == "relate":
-        infer_relate(vcf_file_path, output_path, output_name, Ne, mu=mu, r=r, contig_length=contig_length)
-    else:
-        raise ValueError(f"Unknown method: {method}")
-    return
+def estimate_Ne(mts, mu):
+    """Data-only diploid Ne from site diversity: pi = 4 Ne mu. This is what
+    singer_master computes from the VCF and what Relate's --effectiveN (haploid,
+    hence 2*Ne) needs; using one value for both keeps the methods comparable."""
+    return float(mts.diversity(mode="site") / (4 * mu))
 
-def infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length = None, num_posterior_samples = None, thinning_interval = None, burnin=None, num_threads = 1):
-    # simulate_trees.py writes .trees only (its VCF output is disabled), while
-    # SINGER and Relate read the .vcf text directly. Fall back to enumerating
-    # the tree sequences so the tsinfer path, which loads contig_N.trees via
-    # from_TreeSequence, works without VCFs on disk. The .vcf suffix is kept on
-    # the paths because infer_single derives the contig id by stripping it.
-    vcf_files = sorted(glob.glob(os.path.join(vcf_dir, "*.vcf")))
-    if not vcf_files:
-        vcf_files = [f.removesuffix(".trees") + ".vcf"
-                     for f in sorted(glob.glob(os.path.join(vcf_dir, "*.trees")))]
-    if not vcf_files:
-        raise ValueError(f"No .vcf or .trees files found in directory: {vcf_dir}")
-    os.makedirs(output_path, exist_ok=True)
-    def infer_single_wrapper(vcf_file_path):
-        return infer_single(vcf_file_path, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin)
-    start_time = time()
-    if num_threads == 1:
-        for vcf_file in tqdm(vcf_files):
-            infer_single_wrapper(vcf_file)
-        return time() - start_time
-    else:
-        with Pool(num_threads) as pool:
-            list(tqdm(pool.imap(infer_single_wrapper, vcf_files), total=len(vcf_files)))
-    return time() - start_time
+
+def finalize(src, dest, expect_samples):
+    """Validate and move a finished tree sequence into place atomically."""
+    ts = tskit.load(src)
+    if ts.num_samples != expect_samples:
+        raise RuntimeError(f"{src}: {ts.num_samples} samples, expected {expect_samples}")
+    tmp = dest + ".tmp"
+    ts.dump(tmp)
+    os.replace(tmp, dest)
+    return ts
+
+
+# ----------------------------------------------------------------- methods
+def infer_tsinfer(mts, i, wd, log, args):
+    import tsdate
+    import tsinfer
+    vdata = tsinfer.SampleData.from_tree_sequence(mts)
+    its = tsinfer.infer(vdata, recombination_rate=args.r, num_threads=1).simplify()
+    dts = tsdate.variational_gamma(its, mutation_rate=args.mu)
+    out = os.path.join(wd, f"contig_{i}.trees")
+    dts.dump(out)
+    return out
+
+
+def infer_relate(mts, i, wd, log, args):
+    cid = f"contig_{i}"
+    vcf_prefix = os.path.join(wd, cid)
+    write_vcf(mts, vcf_prefix + ".vcf", str(i))
+    L = mts.sequence_length
+    # Genetic map: uniform rate. Rate column is cM/Mb, Map column cumulative cM.
+    with open(os.path.join(wd, f"{cid}.map"), "w") as f:
+        f.write("Position.bp.\tRate.cM.Mb.\tMap.cM.\n")
+        f.write(f"0\t{100 * args.r * 1e6}\t0\n")
+        f.write(f"{L:.0f}\t0\t{100 * args.r * L}\n")
+    run([os.path.join(RELATE_DIR, "RelateFileFormats"), "--mode", "ConvertFromVcf",
+         "--input", vcf_prefix, "--haps", f"{cid}.haps", "--sample", f"{cid}.sample"], wd, log)
+    # Relate writes into cwd; keep it inside the work dir.
+    run([os.path.join(RELATE_DIR, "Relate"), "--mode", "All", "-m", args.mu,
+         "--effectiveN", int(round(2 * estimate_Ne(mts, args.mu))),
+         "--haps", f"{cid}.haps", "--sample", f"{cid}.sample", "--map", f"{cid}.map",
+         "--seed", i + 1, "--output", cid], wd, log)
+    run([os.path.join(RELATE_DIR, "RelateFileFormats"), "--mode", "ConvertToTreeSequence",
+         "-i", cid, "-o", cid], wd, log)
+    return os.path.join(wd, f"{cid}.trees")
+
+
+def _polegon(singer_trees, i, wd, log, mu):
+    """Re-date a SINGER draw with POLEGON (posterior-average ARG). The binary is run
+    here rather than through polegon_master, which prints "polegon failed" and exits 0."""
+    if platform.system() != "Linux":
+        raise RuntimeError("POLEGON is only distributed for Linux; rerun with --no_polegon")
+    in_prefix = os.path.join(wd, f"contig_{i}_pg")
+    out_prefix = in_prefix + "_polegon"
+    loader = importlib.machinery.SourceFileLoader(
+        "polegon_master", os.path.join(POLEGON_DIR, "polegon_master"))
+    spec = importlib.util.spec_from_loader("polegon_master", loader)
+    pm = importlib.util.module_from_spec(spec)
+    loader.exec_module(pm)
+    old_ts = tskit.load(singer_trees)
+    if old_ts.num_mutations == 0:
+        raise RuntimeError("SINGER tree sequence carries no mutations; POLEGON needs them")
+    pm.write_arg(old_ts, f"{in_prefix}_nodes.txt", f"{in_prefix}_branches.txt")
+    pm.write_muts(old_ts, f"{in_prefix}_muts.txt")
+    Ne = old_ts.diversity(mode="site") / 2 / mu   # polegon_master's own convention
+    run([os.path.join(POLEGON_DIR, "polegon"), "-m", mu, "-Ne", Ne, "-burn_in", 100,
+         "-num_samples", 100, "-thin", 10, "-scaling_rep", 3, "-max_step", 10,
+         "-input", in_prefix, "-output", out_prefix], wd, log)
+    # polegon_master.read_mutation never sets mutation parents, so a site carrying
+    # more than one mutation is rejected with TSK_ERR_BAD_MUTATION_PARENT. Rebuild
+    # with the standard sort + compute_mutation_parents so every mutation is kept.
+    tables = pm.read_ARG(f"{in_prefix}_new_nodes.txt", f"{in_prefix}_branches.txt")
+    pm.read_mutation(tables, f"{in_prefix}_muts.txt")
+    tables.sort()
+    tables.build_index()
+    tables.compute_mutation_parents()
+    out = f"{out_prefix}.trees"
+    tables.tree_sequence().dump(out)
+    return out
+
+
+def infer_singer(mts, i, wd, log, args):
+    cid = f"contig_{i}"
+    prefix = os.path.join(wd, cid)
+    write_vcf(mts, prefix + ".vcf", str(i))
+    # n MCMC samples spaced by --thinning_interval cover the burn-in; only the last
+    # one (index n-1) is converted and kept.
+    n = int(np.ceil(args.burnin / args.thinning_interval))
+    # The binary is called directly: singer_master's auto-debug loop retries up to
+    # 100 seeds on failure, which would hide crashes.
+    run([os.path.join(SINGER_DIR, "singer"), "-Ne", estimate_Ne(mts, args.mu),
+         "-m", args.mu, "-r", args.r, "-input", prefix, "-output", prefix,
+         "-start", 0, "-end", f"{mts.sequence_length:.0f}", "-polar", SINGER_POLAR,
+         "-n", n, "-thin", args.thinning_interval, "-seed", i + 1], wd, log)
+    last = n - 1
+    run([sys.executable, os.path.join(SINGER_DIR, "convert_to_tskit"), "-input", prefix,
+         "-output", prefix, "-start", last, "-end", n, "-step", 1], wd, log)
+    out = f"{prefix}_{last}.trees"
+    return _polegon(out, i, wd, log, args.mu) if args.polegon else out
+
+
+METHODS = {"tsinfer": infer_tsinfer, "relate": infer_relate, "singer": infer_singer}
+
+
+# ----------------------------------------------------------------- driver
+def infer_contig(i, args):
+    dest = os.path.join(args.output_path, f"contig_{i}.trees")
+    if os.path.exists(dest):
+        return f"contig_{i}: exists, skipped"
+    root = os.path.dirname(os.path.abspath(args.output_path))
+    # Absolute: the external binaries are run with cwd set to the work directory,
+    # so every path handed to them has to resolve independently of that cwd.
+    wd = os.path.join(root, "work", f"contig_{i}")
+    log_dir = os.path.join(root, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    shutil.rmtree(wd, ignore_errors=True)   # discard a previous failed attempt
+    os.makedirs(wd)
+    log = os.path.join(log_dir, f"contig_{i}.log")
+    t0 = time.time()
+    mts = mutate(tskit.load(os.path.join(args.sim_dir, f"contig_{i}.trees")), i, args.mu)
+    ts = finalize(METHODS[args.method](mts, i, wd, log, args), dest, mts.num_samples)
+    shutil.rmtree(wd)
+    return (f"contig_{i}: {ts.num_trees} trees, {ts.num_samples} samples, "
+            f"L={ts.sequence_length:.0f}, {ts.num_sites} sites, {(time.time() - t0) / 60:.1f} min")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Infer tree sequences from simulated data")
-    parser.add_argument("--vcf_dir", required=True, help="Path to simulated tree directory")
-    parser.add_argument("--output_path", required=True, help="Output directory for inferred trees")
-    parser.add_argument("--method", required=True, help="Method used for inference")
-    parser.add_argument("--contig_length", type=int, default=1e6, help="length of contigs")
-    parser.add_argument("--num_posterior_samples", type=int, default=100, help="Number of posterior samples for singer")
-    parser.add_argument("--thinning_interval", type=int, default=60, help="Thinning interval for singer")
-    parser.add_argument("--burnin", type=int, default=1000, help="Burn-in period for singer")
-    parser.add_argument("--mu", type=float, default=1.2e-8, help="Mutation rate")
-    parser.add_argument("--r", type=float, default=1.2e-8, help="Recombination rate")
-    parser.add_argument("--output_name", required=True, help="Name of the output file to save inference time")
-    parser.add_argument("--num_threads", type=int, default=10, help="Number of threads to use for inference")
-    args = parser.parse_args()
-    vcf_dir = args.vcf_dir
-    output_path = args.output_path
-    method = args.method
-    contig_length = args.contig_length
-    num_posterior_samples = args.num_posterior_samples
-    thinning_interval = args.thinning_interval
-    burnin = args.burnin
-    mu = args.mu
-    r = args.r
-    output_name = args.output_name
-    num_threads = args.num_threads
-    Ne = find_Ne(vcf_dir)
+    p = argparse.ArgumentParser(description="Infer tree sequences from simulated tree sequences")
+    p.add_argument("--sim_dir", required=True, help="directory holding simulated contig_{i}.trees")
+    p.add_argument("--output_path", required=True, help="directory receiving inferred contig_{i}.trees")
+    p.add_argument("--output_name", required=True, help="sentinel file written into output_path when done")
+    p.add_argument("--method", required=True, choices=tuple(METHODS))
+    p.add_argument("--num_contigs", type=int, default=None,
+                   help="infer contig_0 .. contig_{n-1} (default: all contig_*.trees in sim_dir)")
+    p.add_argument("--mu", type=float, default=1.2e-8, help="mutation rate")
+    p.add_argument("--r", type=float, default=1.2e-8, help="recombination rate")
+    p.add_argument("--burnin", type=int, default=1000, help="SINGER: total burn-in iterations")
+    p.add_argument("--thinning_interval", type=int, default=20, help="SINGER: -thin")
+    p.add_argument("--polegon", dest="polegon", action="store_true", default=True,
+                   help="SINGER: re-date the draw with POLEGON (default)")
+    p.add_argument("--no_polegon", dest="polegon", action="store_false",
+                   help="SINGER: keep the raw SINGER draw")
+    p.add_argument("--num_threads", type=int, default=1, help="contigs inferred in parallel")
+    args = p.parse_args()
 
-    print(f"inferring trees from vcf files in {vcf_dir} using method {method}")
-    time_taken = infer_multiple(vcf_dir, output_path, output_name, Ne, mu, r, method, contig_length, num_posterior_samples, thinning_interval, burnin, num_threads)
+    n = args.num_contigs
+    if n is None:
+        n = len([f for f in os.listdir(args.sim_dir)
+                 if f.startswith("contig_") and f.endswith(".trees")])
+    if n == 0:
+        raise ValueError(f"no contig_*.trees found in {args.sim_dir}")
+    os.makedirs(args.output_path, exist_ok=True)
+    print(f"inferring {n} contigs from {args.sim_dir} with {args.method}"
+          f"{'+polegon' if args.method == 'singer' and args.polegon else ''}", flush=True)
 
-    with open(f"{output_path}/{output_name}", "w") as f:
-        f.write(f"inference took {time_taken/60:.2f} minutes")
+    t0 = time.time()
+    if args.num_threads == 1:
+        for i in range(n):
+            print(infer_contig(i, args), flush=True)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(args.num_threads) as ex:
+            futures = [ex.submit(infer_contig, i, args) for i in range(n)]
+            for fut in futures:
+                print(fut.result(), flush=True)   # fail fast on the first exception
+    took = time.time() - t0
+
+    with open(os.path.join(args.output_path, args.output_name), "w") as f:
+        f.write(f"inference took {took / 60:.2f} minutes")
+
 
 if __name__ == "__main__":
     main()
-# %%

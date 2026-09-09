@@ -1,0 +1,5 @@
+parameter,value
+min_time,5
+max_time,5000
+xy_lims,1000000.0
+reference_example,recent_bottleneck

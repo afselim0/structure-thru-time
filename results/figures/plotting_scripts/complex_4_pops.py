@@ -1,38 +1,43 @@
 #%%
+"""
+The complex four-population example: demography, embeddings through time, how well
+the reconstructed rates match the estimated ones, and how the fit varies with p.
+
+Data: results/figure_data/complex_4_pops/, written by
+utils/runs/prepare_figure_data/complex_4_pops.py
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import numpy as np
 import pandas as pd
 from results.figures.plotting_style import *
 import sys
 import demes
 import demesdraw
 import os
-import yaml
-from PIL import Image
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
 sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
 import matplotlib.ticker as ticker
 from evaluate_performance import reconstructed_vs_input_hist2d
-    
 
+FIGURE = "complex_4_pops"
 demes_file_path = "../../../data/demes/complex_4_pops.yaml"
-pop_colors = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_colors.csv")
-pop_labels = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/pop_labels.csv")
-config_file = "../../../data/configs/sim_configs/complex_4_pops.yaml"
-with open(config_file, 'r') as f:
-    config_data = yaml.safe_load(f)
-embeddings = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/embeddings.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-true_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim//data/rates_true.parquet")
-estimated_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/rates.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-reconstructed_rates = pd.read_parquet("../../outputs/simulations/complex_4_pops/sim/data/reconstructed_rates.d2.Nmin1000.Nmax1000000.p1.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.parquet")
-scan_p = pd.read_csv("../../outputs/simulations/complex_4_pops/sim/data/scan_p.d2.Nmin1000.Nmax1000000.linkinverse_distance.L1[None].nTe1000.minWS40.maxWS200.V1.FS1.0.maxT4000.nT1000.csv")
+
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
+pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+embeddings = pd.read_parquet(figure_data(FIGURE, "embeddings.parquet"))
+estimated_rates = pd.read_parquet(figure_data(FIGURE, "estimated_rates.parquet"))
+reconstructed_rates = pd.read_parquet(figure_data(FIGURE, "reconstructed_rates.parquet"))
+scan_p = pd.read_csv(figure_data(FIGURE, "scan_p.csv"))
+plot_params = pd.read_csv(figure_data(FIGURE, "plot_params.csv")).set_index("parameter")["value"]
+
 scan_p_input = scan_p[scan_p["vs"] == "input"]
 scan_p_true = scan_p[scan_p["vs"] == "true"]
-N_max = 1000000
+min_time = float(plot_params["min_time"])
+max_time = float(plot_params["max_time"])
+time_scale = plot_params["time_scale"]
+N_max = float(plot_params["N_max"])
 
 # %%
 #----------------------------------------------------------
@@ -44,7 +49,7 @@ plotter = PlotEmbeddings(
     colors_df = pop_colors,
     sample_id_col = "individual_id"
 )
-plotter.init_plot(min_time = config_data['min_time'], max_time = config_data['max_time'], time_scale = config_data['time_scale'])
+plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = time_scale)
 plotter.add_sample_trajectories()
 # the panel is 3in tall and rendered at 500 dpi; the cropped aspect ratio depends on
 # this canvas size, so the probe and the final render below must share it
@@ -91,12 +96,12 @@ demesdraw.tubes(
     graph,
     ax=demography_ax,
     colours=pop_colors_dict,
-    max_time=config_data['max_time'],
-    log_time=config_data['time_scale'],
+    max_time=max_time,
+    log_time=time_scale,
     positions=positions,
     labels = "xticks"
 )
-demography_ax.set_ylim(bottom=config_data['min_time'])
+demography_ax.set_ylim(bottom=min_time)
 demography_ax.set_ylabel("Time (generations ago)", fontsize=11)
 demography_ax.text(-0.1, 1, "A", transform=demography_ax.transAxes,
            fontsize=12, fontweight="bold", va="top", ha="right")
@@ -108,7 +113,7 @@ plotter = PlotEmbeddings(
     colors_df = pop_colors,
     sample_id_col = "individual_id"
 )
-plotter.init_plot(min_time = config_data['min_time'], max_time = config_data['max_time'], time_scale = config_data['time_scale'])
+plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = time_scale)
 plotter.add_sample_trajectories()
 img, _ = plotter.save_static(**RENDER_KW)
 img.save("../sim_figs_png/complex_4_pops_embeddings.png")

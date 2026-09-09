@@ -19,7 +19,7 @@ set -euo pipefail
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")"
 RUN_DIR="local_runs/app_runs"
-CONDA_ENV="${COASTT_CONDA_ENV:-CoaSTT}"
+CONDA_ENV="${COASTT_CONDA_ENV:-/project/jnovembre/afselim/CoaSTT_env}"
 
 shopt -s nullglob
 scripts=("$RUN_DIR"/*.sh)   # nullglob: expands to nothing when the dir is empty
@@ -76,6 +76,9 @@ echo "Task $SLURM_ARRAY_TASK_ID -> $(basename "$script")"
 if [[ -n "${CONDA_EXE:-}" ]]; then
     source "$(dirname "$CONDA_EXE")/../etc/profile.d/conda.sh"
     conda activate "$CONDA_ENV"
+    # snakemake's highspy ships a libstdc++ that shadows the env's; numpy then
+    # fails with a GLIBCXX error unless the env's lib comes first.
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
 # --nolock: array tasks share the utils/ working directory

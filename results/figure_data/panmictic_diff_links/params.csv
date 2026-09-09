@@ -1,0 +1,6 @@
+parameter,value
+Ne,10000.0
+n_samples,50.0
+N_min,1.0
+N_max,100000000.0
+init_seed,42.0

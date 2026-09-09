@@ -1,10 +1,13 @@
 #%%
 """
-Script for generation figure describing the embeddings model in the paper
-a) Rates as a funciton of time in the sawtoot?h model
-b) Embeddings at two timepoints
-c) 3D embeddings at all time points
-d) distance between embeddings at different time points
+Schematic describing the embeddings model:
+a) coalescence rate as a function of time in the sawtooth model
+b) embeddings at two timepoints
+c) 3D embeddings at all timepoints
+d) distances between embeddings through time
+
+Data: results/figure_data/model_description/, written by
+utils/runs/prepare_figure_data/model_description.py
 """
 import numpy as np
 import os
@@ -12,87 +15,61 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import sys
-from PIL import Image
 from plotly import graph_objects as go
 from matplotlib.lines import Line2D
 import matplotlib.ticker as ticker
 from matplotlib.transforms import ScaledTranslation, Bbox
 from matplotlib.patches import FancyArrowPatch
 
-import os as _os
-sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "src"))
-sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "utils", "snakemake_utils"))
-sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "utils", "misc_utils"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "..", "..", "src"))
 os.chdir(os.path.dirname(__file__))
-sys.path.append("../misc_scripts")
 file_name = os.path.basename(__file__).split(".")[0]
 from results.figures.plotting_style import *
-from compute_rates_true import compute_true_rates, expand_true_rates
-from preprocess_demography import preprocess_demography
-from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 from PlotEmbeddings import PlotEmbeddings
-
-def compute_distances(embeddings_df):
-    """Compute the Euclidean distance between embeddings at different time points."""
-    embeddings_pairs = embeddings_df.merge(embeddings_df, on="time", suffixes=("_1", "_2"))
-    embeddings_pairs = embeddings_pairs[embeddings_pairs["individual_id_1"] < embeddings_pairs["individual_id_2"]]
-    embeddings_pairs["distance"] = np.sqrt(
-    (embeddings_pairs["X1_1"] - embeddings_pairs["X1_2"])**2 +
-    (embeddings_pairs["X2_1"] - embeddings_pairs["X2_2"])**2)
-
-    D_df = (embeddings_pairs
-    .set_index(["individual_id_1", "individual_id_2", "time"])["distance"]
-    .unstack("time"))
-
-    return D_df
 
 t1_color = "blue"
 t2_color = "deepskyblue"
 rates_color = "maroon"
 distances_color = "magenta"
 
+FIGURE = "model_description"
+embeddings_df = pd.read_parquet(figure_data(FIGURE, "embeddings.parquet"))
+distances_df = pd.read_parquet(figure_data(FIGURE, "distances.parquet"))
+true_rates = pd.read_parquet(figure_data(FIGURE, "true_rates.parquet"))
+mean_distances_df = pd.read_parquet(figure_data(FIGURE, "mean_distances.parquet"))
+sample_colors = pd.read_csv(figure_data(FIGURE, "sample_colors.csv"))
+params = pd.read_csv(figure_data(FIGURE, "params.csv")).set_index("parameter")["value"]
 
-# %%
-#----------------------------------------------------------
-# Computing Embeddings through time for the sawtooth model
-#----------------------------------------------------------
+max_time = int(params["max_time"])
+delta_t = int(params["delta_t"])
+t1, t2 = int(params["t1"]), int(params["t2"])
+t1_idx, t2_idx = t1 // delta_t, t2 // delta_t
+# the pair the figure follows, chosen in the prep script
+i, j = int(params["focal_i"]), int(params["focal_j"])
+xy_lims = float(params["xy_lims"])
 
-# Example parameters for the sawtooth model
-deme_file = "../../../data/demes/zigzag.yaml"
-max_time = 40000
-delta_t = 10
-n_timepoints = max_time//delta_t + 1
-n_samples_per_pop = 20
-N_min = 1000
-N_max = 1000000
-pop_labels, pop_colors = preprocess_demography(deme_file, n_samples_per_pop=n_samples_per_pop)
-true_rates = compute_true_rates(deme_file, max_time, n_timepoints)
-expanded_true_rates = expand_true_rates(true_rates, pop_labels, phased = False)
+times = true_rates["time"].to_numpy()
+rate_curve = true_rates["rate"].to_numpy()
+mean_distances = mean_distances_df["mean_distance"].to_numpy()
+focal_distances = mean_distances_df["focal_distance"].to_numpy()
 
-# Compute latent space embeddings through time and distances between them
-LSE = LatentSpaceEmbeddings(expanded_true_rates, N_min = N_min, N_max = N_max)
-np.random.seed(0)
-X_init = np.random.rand(LSE.num_samples, LSE.n_components, LSE.num_timepoints)
-X,loss = LSE.compute_embeddings_through_time(X_init)
-embeddings_df = LSE.get_embeddings_df(id_label = "individual_id")
-distances_df = compute_distances(embeddings_df)
-mean_distances = distances_df.mean(axis=0).values
-times = distances_df.columns.values.astype(int)
-#%%
-t1 = 300
-t2 = 600
-t1_idx = t1//delta_t
-t2_idx = t2//delta_t
-distance_order = distances_df.iloc[:,0].sort_values().index[::-1]
-focal_pair_order = 5
-i = distance_order[focal_pair_order][0]
-j = distance_order[focal_pair_order][1]
-pop_labels = pop_labels[["individual_id","population"]].drop_duplicates().reset_index(drop=True)
-pop_labels.iloc[i,1] = "focal"
-pop_labels.iloc[j,1] = "focal"
-pop_colors = pd.DataFrame({"population": ["generic","focal"],"color": ["#BEBEBE","#000000"]})
-pop_labels["color"] = pop_labels["population"].map(pop_colors.set_index("population")["color"])
+# X[sample, component, timepoint], rebuilt from the tidy embeddings table so the
+# 2D snapshot panels can index it by timepoint
+X = (embeddings_df.sort_values(["individual_id", "time"])
+     .set_index(["individual_id", "time"])[["X1", "X2"]]
+     .to_numpy()
+     .reshape(embeddings_df["individual_id"].nunique(), -1, 2)
+     .transpose(0, 2, 1))
+
+# the labels/colours the 3D panel and the 2D snapshots share
+pop_labels = sample_colors[["individual_id", "role"]].rename(columns={"role": "population"})
+pop_colors = pd.DataFrame({"population": ["generic", "focal"],
+                           "color": ["#BEBEBE", "#000000"]})
+pop_labels["color"] = pop_labels["population"].map(
+    pop_colors.set_index("population")["color"])
 colors = pop_labels["color"].values
+
 # %%
 #----------------------------------------------------------
 # Preparing plotting parameters 
@@ -140,7 +117,7 @@ t2_ax = fig.add_subplot(inner[0])
 
 
 # Plot rates over time
-rates_ax.plot(true_rates.values[0], times, color = rates_color, lw = 2)
+rates_ax.plot(rate_curve, times, color = rates_color, lw = 2)
 rates_ax.set_yscale("log")
 rates_ax.invert_xaxis()
 rates_ax.yaxis.tick_right()
@@ -197,9 +174,9 @@ embeddings_ax.axis('off')
 # Plot distances over time, mirroring the rates panel but with the axis on the right
 distances_ax.plot(distances_df.values.T, times, color="#D9D9D9", lw=0.4, zorder=1)
 distances_ax.plot(mean_distances, times, color=distances_color, lw=2, zorder=3)
-distances_ax.plot(distances_df.loc[(i, j)].values, times, color="black", lw=1.5, zorder=2)
+distances_ax.plot(focal_distances, times, color="black", lw=1.5, zorder=2)
 # Inverse coalescent rate, i.e. N_e(t), for comparison against the recovered distances
-distances_ax.plot(1 / true_rates.values[0], times, color=rates_color, ls="--", lw=2, zorder=4)
+distances_ax.plot(1 / rate_curve, times, color=rates_color, ls="--", lw=2, zorder=4)
 distances_ax.set_yscale("log")
 distances_ax.invert_xaxis()
 distances_ax.yaxis.tick_right()
@@ -281,6 +258,5 @@ fig.legend(legend_handles, legend_labels, ncol=3, loc="upper center",
            handlelength=1.5, columnspacing=1.5, handletextpad=0.5)
 
 # %%
-filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../sim_figs/{filename}.pdf", bbox_inches="tight", dpi=500)
+fig.savefig(f"../sim_figs/{file_name}.pdf", bbox_inches="tight", dpi=500)
 # %%

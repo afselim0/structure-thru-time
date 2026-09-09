@@ -1,4 +1,12 @@
 #%%
+"""
+The two-group 2D stepping-stone example: a schematic of the demography (A), the
+smoothed embeddings through time (B), and at four timepoints the 2D embedding
+slice beside the estimated-vs-reconstructed rates (C).
+
+Data: results/figure_data/double_SS_2d/, written by
+utils/runs/prepare_figure_data/double_SS_2d.py
+"""
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
@@ -10,21 +18,21 @@ import numpy as np
 import pandas as pd
 from results.figures.plotting_style import *
 import sys
-import yaml
 import os
 filename = os.path.basename(__file__).split(".")[0]
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-config_file = "../../../data/configs/sim_configs/double_2d_SS.yaml"
-N_max = 1e6
-embeddings_df = pd.read_parquet("../../outputs/simulations/double_2d_SS/sim/data/smooth_embeddings.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet")
-estimated_rates = pd.read_parquet("../../outputs/simulations/double_2d_SS/sim/data/rates.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
-reconstructed_rates = pd.read_parquet("../../outputs/simulations/double_2d_SS/sim/data/smooth_reconstructed_rates.d2.Nmin1.Nmax10000000.p2.linkinverse_distance.L1[1e-2,1e-3].nTe2000.minWS50.maxWS200.V1.FS1.0.maxT6000.nT2000.parquet") + 1/N_max
-pop_labels = pd.read_csv("../../outputs/simulations/double_2d_SS/sim/data/pop_labels.csv")
-pop_colors = pd.read_csv("../../outputs/simulations/double_2d_SS/sim/data/pop_colors.csv")
+
+FIGURE = "double_SS_2d"
+embeddings_df = pd.read_parquet(figure_data(FIGURE, "embeddings.parquet"))
+# the rate tables already carry the 1/N_max shift the panels are drawn on
+estimated_rates = pd.read_parquet(figure_data(FIGURE, "estimated_rates.parquet"))
+reconstructed_rates = pd.read_parquet(figure_data(FIGURE, "reconstructed_rates.parquet"))
+pair_types_df = pd.read_parquet(figure_data(FIGURE, "pair_types.parquet"))
+pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
+
 times = estimated_rates.columns.astype(float)
 min_time = 50
 # recolor demes by their "g<N>_" group: each group gets its own sequential colormap, so the
@@ -148,10 +156,6 @@ individual_colors = (
 # rates are stored wide, one column per timepoint; the two frames label their columns
 # with different dtypes (str vs float), so they are indexed positionally below
 rate_times = estimated_rates.columns.astype(float)
-if not np.allclose(rate_times, reconstructed_rates.columns.astype(float)):
-    raise ValueError("Estimated and reconstructed rates are on different time grids")
-if not estimated_rates.index.equals(reconstructed_rates.index):
-    raise ValueError("Estimated and reconstructed rates cover different sample pairs")
 embedding_times = np.sort(embeddings_df["time"].unique())
 
 def nearest_rate_idx(t):
@@ -173,11 +177,8 @@ individual_groups = (
     .set_index("individual_id")["population"]
     .str.split("_").str[0]
 )
-group_1 = individual_groups.reindex(estimated_rates.index.get_level_values(0)).to_numpy()
-group_2 = individual_groups.reindex(estimated_rates.index.get_level_values(1)).to_numpy()
-if pd.isna(group_1).any() or pd.isna(group_2).any():
-    raise ValueError("Some rate pairs reference individuals missing from pop_labels")
-pair_types = np.where(group_1 == group_2, group_1, "between")
+# which of the three pair types each rate row is, prepared alongside the rates
+pair_types = pair_types_df["pair_type"].to_numpy()
 
 # shared limits so panels are comparable across timepoints
 emb_lim = np.abs(embeddings_df[["X1", "X2"]].values).max() * 1.05

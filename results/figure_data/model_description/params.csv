@@ -1,0 +1,13 @@
+parameter,value
+max_time,40000
+delta_t,10
+n_samples_per_pop,20
+N_min,1000
+N_max,1000000
+init_seed,0
+t1,300
+t2,600
+focal_pair_order,5
+focal_i,2
+focal_j,9
+xy_lims,140000

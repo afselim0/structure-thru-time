@@ -1,0 +1,4 @@
+parameter,value
+n_per_pop,20
+N_min,1
+init_seed,42

@@ -1,62 +1,36 @@
 #%%
-import numpy as np
+"""
+Average embedded pairwise distance in a panmictic population, against the minimum
+resolvable population size N_min (A) and against the number of samples (B).
+
+Data: results/figure_data/avg_distance_vs_Nmin_n/, written by
+utils/runs/prepare_figure_data/avg_distance_vs_Nmin_n.py
+"""
+import pandas as pd
 import matplotlib.pyplot as plt
-import sys
-import os as _os
-sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "src"))
-from scipy.spatial.distance import pdist, squareform
-from scipy.spatial import ConvexHull
 import os
 from results.figures.plotting_style import *
-from OptimizationFunctions import optimize_timepoint, LinkFunction
-from tqdm import tqdm
 
 # Relative paths below are anchored at this script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-def compute_embeddings_panmictic(Ne, link, p, n=50, N_min = 1, N_max = 1e8, init_seed=42):
-    np.random.seed(init_seed)
-    X_init = np.random.rand(n, 2)
-    R = np.ones((n,n)) * 1/Ne
-    np.fill_diagonal(R, np.nan)
+FIGURE = "avg_distance_vs_Nmin_n"
+vs_N_min = pd.read_parquet(figure_data(FIGURE, "vs_N_min.parquet"))
+vs_n = pd.read_parquet(figure_data(FIGURE, "vs_n.parquet"))
 
-    X,_,_,_ = optimize_timepoint(X_init, R, W_t=None, N_min=N_min, N_max=N_max, p=p, link=link)
-    X = X - np.mean(X, axis=0) # center the embeddings
-    return X
-# %%
-Ne_list = [1000, 5000, 10000, 20000]
-# N_min_list = np.logspace(1, np.log10(12000), 100).astype(int)
-N_min_list = np.linspace(1, 21000, 100).astype(int)
-# n_list = np.arange(10,100,2).astype(int)
-n_list = np.logspace(1, np.log10(500), 50).astype(int)
-N_max = 1e8
-
-average_pairwise_distances_Nmin = {}
-average_pairwise_distances_n = {}
-for Ne in Ne_list:
-    average_pairwise_distances_Nmin[Ne] = []
-    average_pairwise_distances_n[Ne] = []
-    for N_min in tqdm(N_min_list):
-        X = compute_embeddings_panmictic(Ne, link="inverse_distance", p=1, n=50, N_min=N_min, N_max=N_max)
-        avg_distance = np.nanmean(pdist(X))
-        average_pairwise_distances_Nmin[Ne].append(avg_distance)
-    for n in tqdm(n_list):
-        X = compute_embeddings_panmictic(Ne, link="inverse_distance", p=1, n=n, N_min=1, N_max=N_max)
-        avg_distance = np.nanmean(pdist(X))
-        average_pairwise_distances_n[Ne].append(avg_distance)
+Ne_list = list(dict.fromkeys(vs_N_min["Ne"]))
 #%%
-fig,ax = plt.subplots(1,2,figsize=(6,3))
+fig, ax = plt.subplots(1, 2, figsize=(6, 3))
 for Ne in Ne_list:
-    ax[0].plot(N_min_list, average_pairwise_distances_Nmin[Ne], label=f"Ne={Ne}")
-    ax[1].plot(n_list, average_pairwise_distances_n[Ne], label=f"Ne={Ne}")
+    left = vs_N_min[vs_N_min["Ne"] == Ne]
+    right = vs_n[vs_n["Ne"] == Ne]
+    ax[0].plot(left["N_min"], left["avg_pairwise_distance"], label=f"Ne={Ne}")
+    ax[1].plot(right["n"], right["avg_pairwise_distance"], label=f"Ne={Ne}")
 ax[0].set_xlabel(r"Minimum resolvable $N_e$ ($N_{\mathrm{min}}$)")
 ax[0].set_ylabel("Average pairwise distance")
 ax[1].set_xlabel("number of samples")
 ax[1].set_ylabel("Average pairwise distance")
 ax[0].legend()
-# ax[1].legend()
-# ax[1].set_xscale('log')
-# ax[1].set_yscale('log')
 ax[0].set_title("A", loc='left', fontweight='bold')
 ax[1].set_title("B", loc='left', fontweight='bold')
 fig.suptitle(r"$f(x) = (N_{\mathrm{min}} + x)^{-1}$")

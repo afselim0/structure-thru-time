@@ -1,0 +1,6 @@
+parameter,value
+y_low,0.05
+y_high,0.1
+x_min,0.0
+x_max,12.0
+n_points,2000.0

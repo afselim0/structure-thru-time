@@ -1,7 +1,15 @@
 #%%
+"""
+The two-admixture example under true local ancestry: the demography (A), the
+whole-genome embeddings (B), how well their reconstructed rates match the input
+ones (C), and one embeddings panel per source ancestry (D).
+
+Data: results/figure_data/double_admix_true/, written by
+utils/runs/prepare_figure_data/double_admix_true.py -- the ancestry embeddings
+there are already Procrustes-aligned.
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import numpy as np
 import pandas as pd
 from results.figures.plotting_style import *
 import sys
@@ -11,42 +19,31 @@ import demesdraw
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
 sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
 from evaluate_performance import reconstructed_vs_input_hist2d
 plt.rcParams['savefig.bbox'] = None
 
-misc_plot_path = "../sim_figs_png/misc.png"
+FIGURE = "double_admix_true"
 graph = demes.load("../../../data/demes/two_admix.yaml")
-pop_colors = pd.read_csv("../../outputs/simulations/two_admix/sim/data/pop_colors.csv")
-pop_colors.iloc[-1,-1] = "#505011"
-pop_labels = pd.read_csv("../../outputs/simulations/two_admix/sim/data/pop_labels.csv")
+
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
+pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
 pop_colors_dict = dict(zip(pop_colors['population'], pop_colors['color']))
-min_time = 50
-max_time = 5000
-xy_lims = 1e6
-N_max = 1000000
 
-embeddings_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-input_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/rates.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-reconstructed_rates_WG = pd.read_parquet("../../outputs/simulations/two_admix/sim/data/reconstructed_rates.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+embeddings_WG = pd.read_parquet(figure_data(FIGURE, "embeddings_WG.parquet"))
+input_rates_WG = pd.read_parquet(figure_data(FIGURE, "input_rates_WG.parquet"))
+reconstructed_rates_WG = pd.read_parquet(figure_data(FIGURE, "reconstructed_rates_WG.parquet"))
+ancestry_embeddings = pd.read_parquet(figure_data(FIGURE, "ancestry_embeddings.parquet"))
+params = pd.read_csv(figure_data(FIGURE, "params.csv")).set_index("parameter")["value"]
 
-true_embeddings_A = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/A/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_B = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/B/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_C = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/C/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
-true_embeddings_D = pd.read_parquet("../../outputs/simulations/two_admix/sim/ancestry_STT/True/D/data/embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet")
+min_time = float(params["min_time"])
+max_time = float(params["max_time"])
+xy_lims = float(params["xy_lims"])
+N_max = float(params["N_max"])
 
-ref_embeddings_AB = true_embeddings_A
-ref_embeddings_CD = true_embeddings_D
-
-# Procrustes-align the embeddings to a common reference frame so that they can be compared visually
-print("Aligning True-ancestry embeddings to reference...")
-true_embeddings_A = procrustes_align_trajectories_df(ref_embeddings_AB, true_embeddings_A, allow_reflections=True)
-true_embeddings_B = procrustes_align_trajectories_df(ref_embeddings_AB, true_embeddings_B, allow_reflections=True)
-true_embeddings_C = procrustes_align_trajectories_df(ref_embeddings_CD, true_embeddings_C, allow_reflections=True)
-true_embeddings_D = procrustes_align_trajectories_df(ref_embeddings_CD, true_embeddings_D, allow_reflections=True)
-
+ANCESTRIES = ["A", "B", "C", "D"]
+true_embeddings = {a: ancestry_embeddings[ancestry_embeddings["ancestry"] == a]
+                   for a in ANCESTRIES}
 
 plotter = PlotEmbeddings(embeddings_df = embeddings_WG,labels_df = pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
 plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
@@ -115,47 +112,19 @@ ynudge = 0.04
 new_pos = [pos.x0 - xnudge, pos.y0 - ynudge, pos.width, pos.height]
 WG_embeddings_ax.set_position(new_pos)
 #%%
-# Lower grid
-## True
-plotter = PlotEmbeddings(embeddings_df = true_embeddings_A,labels_df = pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-ancestry_axes[0][0].spines['left'].set_visible(False)
-ancestry_axes[0][0].spines['bottom'].set_visible(False)
-ancestry_axes[0][0].set_xticks([])
-ancestry_axes[0][0].set_yticks([])
-ancestry_axes[0][0].imshow(img, aspect = "equal")
-
-plotter = PlotEmbeddings(embeddings_df = true_embeddings_B,labels_df = pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-ancestry_axes[0][1].spines['left'].set_visible(False)
-ancestry_axes[0][1].spines['bottom'].set_visible(False)
-ancestry_axes[0][1].set_xticks([])
-ancestry_axes[0][1].set_yticks([])
-ancestry_axes[0][1].imshow(img, aspect = "equal")
-
-plotter = PlotEmbeddings(embeddings_df = true_embeddings_C,labels_df = pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-ancestry_axes[0][2].spines['left'].set_visible(False)
-ancestry_axes[0][2].spines['bottom'].set_visible(False)
-ancestry_axes[0][2].set_xticks([])
-ancestry_axes[0][2].set_yticks([])
-ancestry_axes[0][2].imshow(img, aspect = "equal")
-
-plotter = PlotEmbeddings(embeddings_df = true_embeddings_D,labels_df = pop_labels,colors_df = pop_colors,sample_id_col = "individual_id")
-plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
-plotter.add_sample_trajectories()
-img, _ = plotter.save_static(**RENDER_KW)
-ancestry_axes[0][3].spines['left'].set_visible(False)
-ancestry_axes[0][3].spines['bottom'].set_visible(False)
-ancestry_axes[0][3].set_xticks([])
-ancestry_axes[0][3].set_yticks([])
-ancestry_axes[0][3].imshow(img, aspect = "equal")
+# Lower grid: one panel per source ancestry, in A,B,C,D order
+for j, ancestry in enumerate(ANCESTRIES):
+    plotter = PlotEmbeddings(embeddings_df = true_embeddings[ancestry], labels_df = pop_labels,
+                             colors_df = pop_colors, sample_id_col = "individual_id")
+    plotter.init_plot(min_time = min_time, max_time = max_time, time_scale = "log", xy_lims = xy_lims)
+    plotter.add_sample_trajectories()
+    img_ancestry, _ = plotter.save_static(**RENDER_KW)
+    ax = ancestry_axes[0][j]
+    ax.spines['left'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.imshow(img_ancestry, aspect = "equal")
 
 #%%
 # Panel labels, anchored to the top-left of each labelled axis/row
@@ -168,10 +137,8 @@ fig.text(rates_hist_ax.get_position().x0-0.03, row1_top, "C", fontsize=12, fontw
 
 fig.text(ancestry_axes[0][0].get_position().x0-0.01, row2_top, "D", fontsize=12, fontweight="bold", va="top", ha="left")
 
-ancestry_axes[0][0].set_title("A Ancestry", fontsize=10)
-ancestry_axes[0][1].set_title("B Ancestry", fontsize=10)
-ancestry_axes[0][2].set_title("C Ancestry", fontsize=10)
-ancestry_axes[0][3].set_title("D Ancestry", fontsize=10)
+for j, ancestry in enumerate(ANCESTRIES):
+    ancestry_axes[0][j].set_title(f"{ancestry} Ancestry", fontsize=10)
 
 filename = os.path.basename(__file__).split(".")[0]
 fig.savefig(f"../sim_figs/{filename}.pdf", dpi=500, bbox_inches="tight", pad_inches=0.01)

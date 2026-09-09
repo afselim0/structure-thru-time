@@ -1,4 +1,13 @@
 #%%
+"""
+Per-ancestry embeddings for the three hard admixture scenarios, one figure per
+local-ancestry method (badmix_GNN.pdf, badmix_RFmix.pdf). Rows are the ancestries
+carried by the admixed individuals (B, C, D); columns are the examples.
+
+Data: results/figure_data/badmix_ancestry/, written by
+utils/runs/prepare_figure_data/badmix_ancestry.py -- the embeddings there are
+already Procrustes-aligned to a common reference panel.
+"""
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
@@ -9,42 +18,28 @@ import sys
 import os
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
 from PlotEmbeddings import *
-from OptimizationFunctions import procrustes_align_trajectories_df
 
 misc_plot_path = "../sim_figs_png/misc_ancestry"
-sim_path = "../../outputs/simulations"
+FIGURE = "badmix_ancestry"
 
-# Columns are examples, rows are the ancestries carried by admixed individuals.
-# Each example ran the embedding with its own window-size settings, so the
-# embeddings filename suffix differs per example
+# Columns are examples, rows are the ancestries carried by admixed individuals
 examples = ["three_way_admixture", "ghost_admixture", "recent_bottleneck"]
 example_titles = ["Three-way admixture", "Ghost admixture", "Recent bottleneck"]
 ancestries = ["B", "C", "D"]
-embeddings_suffix = {
-    "three_way_admixture": "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
-    "ghost_admixture":     "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS100.maxWS200.V1.FS1.0.maxT5000.nT2500.parquet",
-    "recent_bottleneck":   "embeddings.d2.Nmin100.Nmax1000000.p1.linkinverse_distance.L1[None].nTe2500.minWS20.maxWS300.V1.FS1.0.maxT5000.nT2500.parquet",
-}
 
-# Each simulation's own pop_colors.csv assigns the palette in a different
-# population order (e.g. A is purple in three_way/ghost but green in
-# recent_bottleneck), so a population would change color between panels. Pin one
-# canonical population -> color map, in A,B,C,D order, shared by all examples
-pop_colors = pd.DataFrame({
-    "population": ["A", "B", "C", "D"],
-    "color": ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3"],
-})
+# One canonical population -> color map, shared by all examples, so a population
+# keeps its color across panels
+pop_colors = pd.read_csv(figure_data(FIGURE, "pop_colors.csv"))
+all_pop_labels = pd.read_csv(figure_data(FIGURE, "pop_labels.csv"))
+pop_labels = {ex: all_pop_labels[all_pop_labels["example"] == ex] for ex in examples}
 
-# Labels are per-example: they map each individual to its source population
-pop_labels = {ex: pd.read_csv(f"{sim_path}/{ex}/sim/data/pop_labels.csv") for ex in examples}
-
+params = pd.read_csv(figure_data(FIGURE, "params.csv")).set_index("parameter")["value"]
 # recent_bottleneck's structure is recent enough to need a shorter time axis
-min_time = {"three_way_admixture": 50, "ghost_admixture": 50, "recent_bottleneck": 10}
-max_time = 5000
-xy_lims = 1e6
+min_time = (pd.read_csv(figure_data(FIGURE, "example_params.csv"))
+            .set_index("example")["min_time"].to_dict())
+max_time = float(params["max_time"])
+xy_lims = float(params["xy_lims"])
 
 FIG_WIDTH = 6.5
 MARGIN_LEFT, MARGIN_RIGHT = 0.15, 0.15
@@ -53,15 +48,10 @@ wspace, hspace = 0, 0.05  # fractions of a panel's width/height, as matplotlib d
 
 
 def load_ancestry_embeddings(method: str) -> dict:
-    """Load the per-ancestry embeddings for one LAI method, keyed by (example, ancestry)."""
-    embeddings = {}
-    for ex in examples:
-        for anc in ancestries:
-            path = f"{sim_path}/{ex}/sim/ancestry_STT/{method}/{anc}/data/{embeddings_suffix[ex]}"
-            if not os.path.exists(path):
-                raise FileNotFoundError(f"Missing {method} embeddings for {ex}/{anc}: {path}")
-            embeddings[(ex, anc)] = pd.read_parquet(path)
-    return embeddings
+    """The prepared per-ancestry embeddings for one LAI method, keyed by (example, ancestry)."""
+    table = pd.read_parquet(figure_data(FIGURE, f"{method}_embeddings.parquet"))
+    return {key: group.drop(columns=["example", "ancestry"])
+            for key, group in table.groupby(["example", "ancestry"], sort=False)}
 
 
 def make_plotter(embeddings_df: pd.DataFrame, example: str) -> PlotEmbeddings:
@@ -84,19 +74,12 @@ def build_ancestry_figure(method: str) -> plt.Figure:
     """
     embeddings = load_ancestry_embeddings(method)
 
-    # Procrustes-align each panel to the same reference so that trajectories are
-    # comparable across ancestries and examples. The reference is the first panel
-    # (top-left), which is left unrotated
-    reference = embeddings[(examples[1], ancestries[0])]
-    for key, df in embeddings.items():
-        if key != (examples[0], ancestries[0]):
-            embeddings[key] = procrustes_align_trajectories_df(reference, df)
-
     # The static export's aspect ratio is only knowable after a render, so probe
     # the first panel and derive every panel's height from it. The cropped ratio
     # depends on the canvas pixel size, so every panel is rendered at RENDER_KW --
     # the probe included (scale is safe to lower, it does not affect the ratio)
     RENDER_KW = dict(width=1475, height=1475)
+    reference = embeddings[(examples[0], ancestries[0])]
     _, aspect_ratio = make_plotter(reference, examples[0]).save_static(**RENDER_KW, scale=1)
     col_width = (FIG_WIDTH - MARGIN_LEFT - MARGIN_RIGHT) / (3 + 2*wspace)
     row_height = col_width / aspect_ratio

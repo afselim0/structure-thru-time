@@ -26,10 +26,11 @@ recombination_rate                = read_config("recombination_rate", default = 
 
 # Inference Parameters
 infer_method                      = read_config("infer_method", default = "None")
-num_posterior_samples             = read_config("num_posterior_samples", default = 1)
-thinning_interval                 = read_config("thinning_interval", default = 60)
-burnin                            = read_config("burnin", default = 4000)
-vcf_dir                           = read_config("vcf_dir", default=tree_output_path.replace(infer_method,"sim"))
+thinning_interval                 = read_config("thinning_interval", default = 20)   # SINGER: -thin
+burnin                            = read_config("burnin", default = 1000)            # SINGER: total burn-in iterations
+singer_polegon                    = str(read_config("singer_polegon", default = "True")).lower() == "true" # SINGER: re-date the retained draw with POLEGON
+num_infer_contigs                 = int(read_config("num_infer_contigs", default = num_contigs)) # Number of simulated contigs to infer trees for
+sim_trees_dir                     = read_config("sim_trees_dir", default=tree_output_path.replace(infer_method,"sim"))
 
 # Rate Inference Parameters
 fraction_samples                  = read_config("fraction_samples", default = 1.0)   # Fraction of samples taken into account in pdf computation at each contig
@@ -729,8 +730,8 @@ rule simulate_trees:
 # # ______________________infer Rules_____________________
 rule infer_trees:
     input:
-        vcf_dir = vcf_dir,
-        sim_finished = os.path.join(vcf_dir,sim_finished_file_name),
+        sim_trees_dir = sim_trees_dir,
+        sim_finished = os.path.join(sim_trees_dir,sim_finished_file_name),
         script = infer_trees_script
     output:
         infer_finished
@@ -738,10 +739,11 @@ rule infer_trees:
         outdir = tree_output_path,
         output_name = infer_finished_file_name,
         method = infer_method,
-        contig_length = contig_length,
-        num_posterior_samples = num_posterior_samples,
+        num_contigs = num_infer_contigs,
         thinning_interval = thinning_interval,
         burnin = burnin,
+        # POLEGON re-dates the retained SINGER draw; ignored by the other methods.
+        polegon = "" if singer_polegon else "--no_polegon",
         mu = mutation_rate,
         r = recombination_rate,
         num_threads = num_threads
@@ -749,17 +751,17 @@ rule infer_trees:
         """
         mkdir -p {params.outdir}
         python {input.script} \
-            --vcf_dir {input.vcf_dir} \
+            --sim_dir {input.sim_trees_dir} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --method {params.method} \
-            --contig_length {params.contig_length} \
-            --num_posterior_samples {params.num_posterior_samples} \
-            --thinning_interval {params.thinning_interval} \
+            --num_contigs {params.num_contigs} \
             --burnin {params.burnin} \
+            --thinning_interval {params.thinning_interval} \
             --mu {params.mu} \
             --r {params.r} \
-            --num_threads {params.num_threads}
+            --num_threads {params.num_threads} \
+            {params.polegon}
         """
 # ______________________admixture Rules____________________
 if admix_mode:
