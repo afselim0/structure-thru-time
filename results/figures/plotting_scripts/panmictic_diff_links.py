@@ -2,7 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-sys.path.append("../../../src")
+import os as _os
+sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "src"))
 import os
 from results.figures.plotting_style import *
 from OptimizationFunctions import optimize_timepoint

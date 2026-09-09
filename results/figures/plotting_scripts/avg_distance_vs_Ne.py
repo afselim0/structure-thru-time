@@ -2,7 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-sys.path.append("../../../src")
+import os as _os
+sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "src"))
 from scipy.spatial.distance import pdist, squareform
 from scipy.spatial import ConvexHull
 import os

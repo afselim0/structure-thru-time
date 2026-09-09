@@ -1,6 +1,7 @@
-name: CoaSTT
+name: CoaSTT_env
 channels:
   - conda-forge
+  - bioconda        # rfmix, bcftools — keep below conda-forge (bioconda's own convention)
   - defaults
   - pip
 dependencies:
@@ -13,7 +14,12 @@ dependencies:
   - seaborn
   - plotly
   - tskit=1.0.3
-  - msprime
+  # Capped at 1.4.2 deliberately, not by accident: bcftools needs gsl <2.8 while
+  # msprime >=1.4.3 needs gsl >=2.8, so the two cannot coexist. 1.4.2 is the newest
+  # msprime built against gsl 2.7. Raising this pin makes the environment unsolvable
+  # unless bcftools/rfmix are dropped. Simulated tree sequences are unaffected in
+  # practice: the RFmix runs reuse trees produced by earlier stages.
+  - msprime=1.4.2
   - stdpopsim
   - demes
   - numba
@@ -26,6 +32,10 @@ dependencies:
   - zarr
   - fastparquet=2024.11.0
   - pyarrow=20.0.0
+  # External binaries shelled out to by src/LocalAncestryRFmix.py (LAI_method=RFmix).
+  # Both must be on PATH; the code checks for them by name and fails per tree sequence.
+  - rfmix=2.03
+  - bcftools=1.24
   - pip
   - pip:
     - demesdraw

@@ -19,9 +19,10 @@ import matplotlib.ticker as ticker
 from matplotlib.transforms import ScaledTranslation, Bbox
 from matplotlib.patches import FancyArrowPatch
 
-sys.path.append("../../../src")
-sys.path.append("../../../utils/snakemake_utils")
-sys.path.append("../../../utils/misc_utils")
+import os as _os
+sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "src"))
+sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "utils", "snakemake_utils"))
+sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "..", "utils", "misc_utils"))
 os.chdir(os.path.dirname(__file__))
 sys.path.append("../misc_scripts")
 file_name = os.path.basename(__file__).split(".")[0]
