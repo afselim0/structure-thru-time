@@ -42,7 +42,7 @@ def _compute_metrics(rates_df, reconstructed_rates_df, N_max, label):
 
 
 # --- Compute embeddings for a single d value (one parallel task) ---
-def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_label,
+def _compute_for_d(d, rates_df, weights_df, output_path, N_min, N_max, p, link, id_label,
                     input_rates_df, true_rates_df, l1_penalties):
     """Build a fresh LatentSpaceEmbeddings at n_components=d, fit it, save it, and return
     loss + goodness-of-fit records.
@@ -53,7 +53,7 @@ def _compute_for_d(d, rates_df, se_df, output_path, N_min, N_max, p, link, id_la
     this d, warm-started from the unsmoothed solution, mirroring compute_embeddings.py.
     """
     print(f"Computing embeddings with d={d}...")
-    LSE = LatentSpaceEmbeddings(rates_df, se_df=se_df, N_min=N_min, N_max=N_max, n_components=d,
+    LSE = LatentSpaceEmbeddings(rates_df, weights_df=weights_df, N_min=N_min, N_max=N_max, n_components=d,
                                  l1_strengths=l1_penalties)
     # Exact-Hessian covariances are only implemented for p == 1, but since p can be != 1 here too, keep it off
     X, _ = LSE.compute_embeddings_through_time(
@@ -106,7 +106,7 @@ def _metrics_records(d, loss, reconstructed_rates_df, input_rates_df, true_rates
 
 
 # --- Compute embeddings over a grid of d (n_components) values ---
-def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d=10, num_d=9,
+def scan_d(rates_df, output_path, weights_df=None, true_rates_df=None, min_d=2, max_d=10, num_d=9,
            N_min=1, N_max=1e7, p=1, link="inverse_distance", n_timepoints_emb=400,
            id_label="sample_id", n_jobs=None, l1_penalties=None):
     """Compute embeddings for a grid of n_components values (fixed p), saving each as a parquet
@@ -126,9 +126,9 @@ def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d
         idx = np.round(np.linspace(0, len(unique_times) - 1, n_timepoints_emb)).astype(int)
         selected_times = [unique_times[i] for i in idx]
         rates_df = rates_df[selected_times]
-        if se_df is not None:
-            se_df.columns = se_df.columns.astype(float)
-            se_df = se_df[selected_times]
+        if weights_df is not None:
+            weights_df.columns = weights_df.columns.astype(float)
+            weights_df = weights_df[selected_times]
         print(f"Subsampled to {len(selected_times)} timepoints "
               f"(requested {n_timepoints_emb} of {len(unique_times)})")
 
@@ -145,7 +145,7 @@ def scan_d(rates_df, output_path, se_df=None, true_rates_df=None, min_d=2, max_d
             _compute_for_d,
             d_values,
             [rates_df] * len(d_values),
-            [se_df] * len(d_values),
+            [weights_df] * len(d_values),
             [output_path] * len(d_values),
             [N_min] * len(d_values),
             [N_max] * len(d_values),
@@ -168,7 +168,7 @@ def main():
     parser.add_argument("--rates", required=True, help="Path to the input (estimated) rates parquet file.")
     parser.add_argument("--output_path", required=True, help="Directory to write per-d embeddings/reconstructed rates.")
     parser.add_argument("--output", required=True, help="Path to write the diagnostics csv (d, loss, r2, r2_log, spearman_rho, vs).")
-    parser.add_argument("--se_df", default=None, help="Path to the standard-errors parquet file.")
+    parser.add_argument("--weights_df", default=None, help="Path to the weights parquet file.")
     parser.add_argument("--true_rates", default=None, help="Path to ground-truth demographic rates parquet file, if available.")
     parser.add_argument("--min_d", type=int, default=2, help="Smallest n_components value.")
     parser.add_argument("--max_d", type=int, default=10, help="Largest n_components value.")
@@ -186,7 +186,7 @@ def main():
 
     id_label = "sample_id" if args.per_haplotype else "individual_id"
     rates_df = pd.read_parquet(args.rates)
-    se_df = pd.read_parquet(args.se_df) if args.se_df is not None else None
+    weights_df = pd.read_parquet(args.weights_df) if args.weights_df is not None else None
     true_rates_df = pd.read_parquet(args.true_rates) if args.true_rates is not None else None
     if true_rates_df is not None:
         true_rates_df.columns = true_rates_df.columns.astype(float)
@@ -195,7 +195,7 @@ def main():
     l1_penalties = None if args.l1_penalties == "None" else {i + 1: float(v) for i, v in enumerate(args.l1_penalties.split(","))}
 
     metrics_df = scan_d(
-        rates_df=rates_df, output_path=args.output_path, se_df=se_df, true_rates_df=true_rates_df,
+        rates_df=rates_df, output_path=args.output_path, weights_df=weights_df, true_rates_df=true_rates_df,
         min_d=args.min_d, max_d=args.max_d, num_d=args.num_d,
         N_min=args.N_min, N_max=args.N_max, p=args.p, link=args.link,
         n_timepoints_emb=args.n_timepoints_emb, id_label=id_label, n_jobs=args.n_jobs,

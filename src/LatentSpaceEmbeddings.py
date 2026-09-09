@@ -36,14 +36,12 @@ class LatentSpaceEmbeddings:
 
     def __init__(self,
                  rates_df:             pd.DataFrame,
-                 se_df:                Optional[pd.DataFrame] = None,
+                 weights_df:           Optional[pd.DataFrame] = None,
                  sample_times:         Optional[list]         = None,
                  N_min:                float                  = 1,
                  N_max:                float                  = np.inf,
                  n_components:         int                    = 2,
                  l1_strengths:         Optional[dict]         = None,
-                 se_floor_quantile:    float                  = 0.01,
-                 weight_cap_factor:    float                  = 100.0,
                  pseudo_huber_factor:  float                  = 1e-3,
                  default_weights:      int                    = 1_000_000,
                  link_function:        str                    = "inverse_distance"):
@@ -51,18 +49,15 @@ class LatentSpaceEmbeddings:
 
         Args:
             rates_df: Pairwise rates, indexed by (sample_1, sample_2), columns time.
-            se_df: Matching standard errors of those rates; if None, uniform weights.
+            weights_df: Matching loss weights from compute_coal_rate_weights; if
+                None, uniform weights.
             sample_times: Sampling time per sample; non-zero marks an ancient sample.
             N_min, N_max: Link function parameters.
             n_components: Latent dimensionality d.
             l1_strengths: {order: gamma} dimensionless group-fused-lasso strengths.
-            se_floor_quantile: Quantile of the strictly-positive squared SEs used to
-                regularize the weight denominator, per time slice.
-            weight_cap_factor: Per-slice weights are capped at this multiple of the
-                slice's median weight.
             pseudo_huber_factor: eps_k = pseudo_huber_factor * median group norm of
                 the stage-1 solution's k-th differences.
-            default_weights: Uniform weight used when se_df is None.
+            default_weights: Uniform weight used when weights_df is None.
             link_function: Link name.
         """
         # Read the column labels as floats without mutating the caller's DataFrame
@@ -80,8 +75,6 @@ class LatentSpaceEmbeddings:
         self.N_min           = N_min
         self.N_max           = N_max
         self.link_function   = link_function
-        self.se_floor_quantile   = se_floor_quantile
-        self.weight_cap_factor   = weight_cap_factor
         self.pseudo_huber_factor = pseudo_huber_factor
         self.embeddings      = None
         self.smoothing_params = None
@@ -109,7 +102,7 @@ class LatentSpaceEmbeddings:
         # --- Build R and W ---
         n, T = self.num_samples, self.num_timepoints
         R = np.full((n, n, T), np.nan)
-        SE = np.full((n, n, T), np.nan)
+        W = np.full((n, n, T), np.nan)
 
         for (s1, s2), row in rates_df.iterrows():
             i = self.sample_idx_map[s1]
@@ -117,15 +110,19 @@ class LatentSpaceEmbeddings:
             r = row.values
             R[i, j, :] = r
             R[j, i, :] = r
-            if se_df is not None:
-                se = se_df.loc[(s1, s2)].values
-                SE[i, j, :] = se
-                SE[j, i, :] = se
+            if weights_df is not None:
+                w = weights_df.loc[(s1, s2)].values
+                W[i, j, :] = w
+                W[j, i, :] = w
 
-        if se_df is not None:
-            W = self._weights_from_standard_errors(R, SE)
-        else:
+        if weights_df is None:
             W = np.where(np.isnan(R), np.nan, float(default_weights))
+        elif np.any(np.isfinite(W) & (W <= 0)):
+            raise ValueError(
+                f"{int(np.sum(np.isfinite(W) & (W <= 0)))} non-positive weights in "
+                "weights_df; w = S_hat / (dt * sum Phi^2) is strictly positive, so "
+                "this indicates a corrupt or mismatched weights file."
+            )
 
         # --- Mask ancient samples in both R and W ---
         sampled_by_time = self.sample_times[:, np.newaxis] <= self.time_points
@@ -136,9 +133,6 @@ class LatentSpaceEmbeddings:
             R[:, absent, t] = np.nan
             W[absent, :, t] = np.nan
             W[:, absent, t] = np.nan
-
-        # The cap is applied after masking, so absent entries do not enter the medians
-        W = self._cap_weights_per_slice(W)
 
         # Stored as float32 to halve the footprint of the two (n, n, T) tensors;
         # all downstream accumulation promotes to float64
@@ -156,66 +150,6 @@ class LatentSpaceEmbeddings:
 
         self.l1_strengths = l1_strengths
         self.covariances  = None
-
-    def _weights_from_standard_errors(self, R: np.ndarray, SE: np.ndarray) -> np.ndarray:
-        """Build weights w = (r + 1/N_max) / (se^2 + se^2_floor_t) from rates and SEs.
-
-        A zero SE is a legitimate outcome -- it means the rate is confidently zero --
-        so it must not produce NaN (r=0, se=0, N_max=inf) or inf (finite N_max).  The
-        denominator is regularized the way the numerator already is, using a per-slice
-        quantile of the strictly-positive squared SEs.  This keeps w finite, preserves
-        ordering, and gives confidently-zero-rate pairs a high but bounded weight.
-        """
-        T = R.shape[2]
-        W = np.full_like(R, np.nan)
-
-        for t in range(T):
-            se_t = SE[:, :, t]
-            positive = se_t[np.isfinite(se_t) & (se_t > 0)]
-            if positive.size == 0:
-                raise ValueError(
-                    f"Time slice {t} (time={self.time_points[t]}) has no strictly "
-                    "positive standard error, so the weight denominator cannot be "
-                    "regularized. This usually means the SE file is empty or all-zero "
-                    "at this slice."
-                )
-            se_sq_floor = np.quantile(positive ** 2, self.se_floor_quantile)
-            W[:, :, t] = (R[:, :, t] + 1.0 / self.N_max) / (se_t ** 2 + se_sq_floor)
-
-        # With the floored denominator infinities can no longer arise
-        if np.isinf(W).any():
-            raise FloatingPointError(
-                "Infinite weights after applying the standard-error floor; this "
-                "should be impossible and indicates a non-finite rate or SE in the input."
-            )
-        return W
-
-    def _cap_weights_per_slice(self, W: np.ndarray) -> np.ndarray:
-        """Cap each slice's weights at weight_cap_factor times that slice's median.
-
-        A single global percentile cap is set by whichever epoch has the largest
-        weights: it clips nearly everything in that epoch and never binds elsewhere,
-        and it always clips a fixed fraction whether or not outliers exist.  A
-        per-slice ratio cap binds only where a slice actually has outliers.
-        """
-        T = W.shape[2]
-        print(f"Capping weights per slice at {self.weight_cap_factor}x the slice median:")
-        for t in range(T):
-            W_t = W[:, :, t]
-            finite = np.isfinite(W_t)
-            if not finite.any():
-                continue                     # slice with no present samples
-            cap_t = self.weight_cap_factor * np.nanmedian(W_t)
-            clipped = finite & (W_t > cap_t)
-            total_before = np.nansum(W_t)
-            W[:, :, t] = np.minimum(W_t, cap_t)
-            total_after = np.nansum(W[:, :, t])
-            frac = clipped.sum() / finite.sum()
-            if t % max(1, T // 10) == 0 or frac > 0:
-                print(f"  slice {t:5d} (time={self.time_points[t]:10.2f}): "
-                      f"cap={cap_t:.6g}, clipped {frac:6.2%} of entries, "
-                      f"total weight {total_before:.6g} -> {total_after:.6g}")
-        return W
 
     def _parse_smoothing_params(self, l1_strengths: Optional[dict]) -> None:
         """Calibrate the smoothing weights against the stage-1 solution's roughness.

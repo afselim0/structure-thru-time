@@ -9,39 +9,6 @@ from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 from OptimizationFunctions import compute_distance_df, reconstruct_rates
 import numpy as np
 
-def _standard_errors_from_variance(variance_df, rates_df):
-    """Convert a block-jackknife variance dataframe to standard errors.
-
-    Two things need handling before the square root:
-      - Jackknife variances can come out very slightly negative (order -1e-44) where
-        the true variance is numerically zero. Those are clamped to zero, which is the
-        legitimate "confidently zero rate" case that the SE floor in
-        LatentSpaceEmbeddings is designed to absorb.
-      - Entries with no variance estimate at all are NaN. A pair with no variance has
-        no defensible weight, so its rate is masked out too and the pair is excluded
-        from the fit at that timepoint rather than given a fabricated weight.
-    """
-    variance = variance_df.values
-    missing = np.isnan(variance)
-
-    n_negative = int((variance < 0).sum())
-    if n_negative:
-        most_negative = float(np.nanmin(variance))
-        print(f"Clamping {n_negative} negative jackknife variances "
-              f"({n_negative / variance.size:.2%}, most negative {most_negative:.3g}) to zero")
-
-    se_df = pd.DataFrame(np.sqrt(np.clip(variance, 0.0, None)),
-                         index=variance_df.index, columns=variance_df.columns)
-
-    if missing.any():
-        print(f"Dropping {missing.sum()} ({missing.mean():.2%}) (pair, time) entries "
-              "with no variance estimate; they are excluded from the fit")
-        rates_df.mask(missing, inplace=True)
-        se_df = se_df.mask(missing)
-
-    return se_df
-
-
 def _uniform_subsample(unique_times, n_requested):
     """Subsample timepoints on a uniform stride, preserving even spacing.
 
@@ -120,36 +87,36 @@ def main():
     rates_df = pd.read_parquet(input)
     input_filename = os.path.basename(input)
 
-    # compute_rates.py writes the block-jackknife *variance* as "variance_<rates name>";
-    # the weights need standard errors, so take the square root here.
-    variance_path = os.path.join(os.path.dirname(input), "variance_" + input_filename)
-    se_df = None
-    if os.path.exists(variance_path):
-        variance_df = pd.read_parquet(variance_path)
+    # compute_rates.py writes the loss weights as "weights_<rates name>". They
+    # are already per-individual-pair (haplotypes pooled on the survival before
+    # the weight is formed), so they need no conversion here.
+    weights_path = os.path.join(os.path.dirname(input), "weights_" + input_filename)
+    weights_df = None
+    if os.path.exists(weights_path):
+        weights_df = pd.read_parquet(weights_path)
 
-        # Ignore a variance file whose pair index does not match the rates (e.g. a
+        # Ignore a weights file whose pair index does not match the rates (e.g. a
         # stale per-haplotype file left over from a phased run, while the current
         # rates are per-individual). Using it would raise a KeyError downstream.
-        if not variance_df.index.equals(rates_df.index):
+        if not weights_df.index.equals(rates_df.index):
             print(
-                f"Variance file {variance_path} has a pair index that does not match "
+                f"Weights file {weights_path} has a pair index that does not match "
                 "the rates (likely stale or computed with a different phased setting); ignoring it."
             )
-        else:
-            se_df = _standard_errors_from_variance(variance_df, rates_df)
+            weights_df = None
     else:
-        print(f"No variance file at {variance_path}; falling back to uniform weights.")
+        print(f"No weights file at {weights_path}; falling back to uniform weights.")
 
     rates_df.columns = rates_df.columns.astype(float)
-    if se_df is not None:
-        se_df.columns = se_df.columns.astype(float)
+    if weights_df is not None:
+        weights_df.columns = weights_df.columns.astype(float)
 
     unique_times = sorted(rates_df.columns.tolist())
     if args.n_timepoints_emb < len(unique_times):
         selected_times = _uniform_subsample(unique_times, args.n_timepoints_emb)
         rates_df = rates_df[selected_times]
-        if se_df is not None:
-            se_df = se_df[selected_times]
+        if weights_df is not None:
+            weights_df = weights_df[selected_times]
         print(f"Subsampled to {len(selected_times)} timepoints "
             f"(requested {args.n_timepoints_emb} of {len(unique_times)}), "
             f"keeping every {(len(unique_times) - 1) // (len(selected_times) - 1)}th point "
@@ -171,10 +138,10 @@ def main():
     else:
         sample_times = None
 
-    if se_df is not None:
-        print("standard errors dataframe found, will use for weighting")
+    if weights_df is not None:
+        print("weights dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, se_df=se_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, weights_df=weights_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties)
     X_init = None
 
     if args.seed is not None:

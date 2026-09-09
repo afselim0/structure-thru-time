@@ -6,7 +6,7 @@ import shutil
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from ComputeCoalescentRates import compute_coal_rates, compute_coal_rates_variance
+from ComputeCoalescentRates import compute_coal_rates, compute_coal_rate_weights
 import pandas as pd
 
 def main():
@@ -18,7 +18,6 @@ def main():
     parser.add_argument("--maximum_window_size", type=float, required=True, help="maximum window size for rate calculation")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, per-sample-pair (haplotype) rates are returned. Otherwise rates are averaged over pairs of haploid samples from the same diploid individual to return per-individual-pair rates.")
     parser.add_argument("--pop_labels", type=str, default=None, help="Path to population labels csv (with sample_id and individual_id columns). Used to map haploid samples to diploid individuals when phased=False. If omitted, consecutive sample IDs (2k, 2k+1) are assumed to belong to individual k.")
-    parser.add_argument("--compute_variance", action="store_true", help="Compute standard errors using jackknife approach")
     args = parser.parse_args()
 
     pdf_path = args.pdf_path
@@ -26,7 +25,6 @@ def main():
     output_name = args.output_name
     minimum_window_size = args.minimum_window_size
     maximum_window_size = args.maximum_window_size
-    compute_variance = args.compute_variance
     per_haplotype = args.per_haplotype
     print(f"computing rates from estimates of the pdfs of pairwise coalescent times: {args.pdf_path}")
     pdf_df = pd.read_parquet(pdf_path)
@@ -44,23 +42,18 @@ def main():
     rates_df.columns = rates_df.columns.astype(str)
     rates_df.to_parquet(f"{output_path}/{output_name}")
 
-    if compute_variance:
-        variance_df = compute_coal_rates_variance(
-            pdf_df,
-            coal_counts_dir,
-            minimum_window_size,
-            maximum_window_size,
-            per_haplotype=per_haplotype,
-            sample_individal_ids=sample_individal_ids
-        )
-        variance_df.columns = variance_df.columns.astype(str)
-        variance_df.to_parquet(f"{output_path}/variance_{output_name}")
+    # Loss weights accompany the rates: w = S_hat / (dt * sum_r Phi^2), derived
+    # from the same filter and pdf, so they are written alongside them.
+    weights_df = compute_coal_rate_weights(pdf_df, minimum_window_size, maximum_window_size,
+                                           per_haplotype=per_haplotype,
+                                           sample_individal_ids=sample_individal_ids)
+    weights_df.columns = weights_df.columns.astype(str)
+    weights_df.to_parquet(f"{output_path}/weights_{output_name}")
 
     # The per-contig coalescent counts are a bulky intermediate (hundreds of GB
-    # for fine time grids) needed only to build the pdf and, when requested, the
-    # jackknife variance. Both now exist on disk, so the directory is removed to
-    # reclaim the space. It is reproducible by re-running compute_pdf.py, which
-    # recounts from the tree sequences.
+    # for fine time grids) needed only to build the pdf, which now exists on
+    # disk, so the directory is removed to reclaim the space. It is reproducible
+    # by re-running compute_pdf.py, which recounts from the tree sequences.
     if os.path.isdir(coal_counts_dir):
         print(f"removing coalescent counts directory: {coal_counts_dir}")
         shutil.rmtree(coal_counts_dir)
