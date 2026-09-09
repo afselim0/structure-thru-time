@@ -385,58 +385,13 @@ def _rates_frame(n=6, T=5, seed=14):
             pd.DataFrame(se, index=idx, columns=times))
 
 
-def test_weight_cap_binds_on_outlier_and_not_on_clean_slice():
-    sys.path.insert(
-        0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
-    )
-    from LatentSpaceEmbeddings import LatentSpaceEmbeddings
-
-    rates_df, se_df = _rates_frame()
-
-    # Clean run: uniform SEs and comparable rates, so no weight is 100x the median
-    clean = LatentSpaceEmbeddings(rates_df, se_df, N_min=1000.0, N_max=1e6,
-                                  weight_cap_factor=100.0)
-    W_clean = clean.W[:, :, 0]
-    finite = np.isfinite(W_clean)
-    median = np.nanmedian(W_clean)
-    assert np.max(W_clean[finite]) <= 100.0 * median + 1e-6
-    # and the cap should not have bound: the max is far below it
-    assert np.max(W_clean[finite]) < 100.0 * median
-
-    # Inject an outlier: one pair with a tiny SE at slice 0 -> a huge weight
-    se_outlier = se_df.copy()
-    se_outlier.iloc[0, 0] = 1e-12
-    capped = LatentSpaceEmbeddings(rates_df, se_outlier, N_min=1000.0, N_max=1e6,
-                                   weight_cap_factor=100.0)
-    W_capped = capped.W[:, :, 0]
-    finite_c = np.isfinite(W_capped)
-    median_c = np.nanmedian(W_capped)
-    assert np.max(W_capped[finite_c]) <= 100.0 * median_c * (1 + 1e-6), (
-        "the per-slice ratio cap should bind on the injected outlier"
-    )
-
-
-def test_zero_standard_error_gives_finite_weight():
-    """A confidently-zero rate (se = 0) must not produce NaN or inf weights."""
-    from LatentSpaceEmbeddings import LatentSpaceEmbeddings
-
-    rates_df, se_df = _rates_frame()
-    rates_df = rates_df.copy(); se_df = se_df.copy()
-    rates_df.iloc[0, :] = 0.0
-    se_df.iloc[0, :] = 0.0
-
-    LSE = LatentSpaceEmbeddings(rates_df, se_df, N_min=1000.0, N_max=np.inf)
-    present = ~np.isnan(LSE.R)
-    assert np.all(np.isfinite(LSE.W[present])), "zero SE must yield a finite weight"
-
-
 def test_unknown_constructor_argument_is_rejected():
     """l2_strengths is gone entirely, so it is now just an unexpected keyword."""
     from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
-    rates_df, se_df = _rates_frame()
+    rates_df, weights_df = _rates_frame()
     try:
-        LatentSpaceEmbeddings(rates_df, se_df, l2_strengths={2: 1e-3})
+        LatentSpaceEmbeddings(rates_df, weights_df, l2_strengths={2: 1e-3})
     except TypeError as err:
         assert "l2_strengths" in str(err)
     else:
@@ -447,12 +402,12 @@ def test_non_uniform_time_grid_is_rejected():
     import pandas as pd
     from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
-    rates_df, se_df = _rates_frame()
+    rates_df, weights_df = _rates_frame()
     log_times = np.geomspace(1.0, 1000.0, rates_df.shape[1])
     rates_df.columns = log_times
-    se_df.columns = log_times
+    weights_df.columns = log_times
     try:
-        LatentSpaceEmbeddings(rates_df, se_df)
+        LatentSpaceEmbeddings(rates_df, weights_df)
     except ValueError as err:
         assert "uniform" in str(err)
     else:

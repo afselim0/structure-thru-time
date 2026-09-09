@@ -78,7 +78,7 @@ def _compute_for_p(p, LSE, output_path, link, id_label, input_rates_df, true_rat
 
 
 # --- Compute embeddings over a grid of p values ---
-def scan_p(rates_df, output_path, se_df=None, true_rates_df=None, min_p=0.5, max_p=2.0, num_p=10,
+def scan_p(rates_df, output_path, weights_df=None, true_rates_df=None, min_p=0.5, max_p=2.0, num_p=10,
            N_min=1, N_max=1e7, link="inverse_distance", n_components=2, n_timepoints_emb=400,
            id_label="sample_id", n_jobs=None):
     """Compute embeddings for a grid of p values (fixed n_components), saving each as a parquet
@@ -95,14 +95,14 @@ def scan_p(rates_df, output_path, se_df=None, true_rates_df=None, min_p=0.5, max
         idx = np.round(np.linspace(0, len(unique_times) - 1, n_timepoints_emb)).astype(int)
         selected_times = [unique_times[i] for i in idx]
         rates_df = rates_df[selected_times]
-        if se_df is not None:
-            se_df.columns = se_df.columns.astype(float)
-            se_df = se_df[selected_times]
+        if weights_df is not None:
+            weights_df.columns = weights_df.columns.astype(float)
+            weights_df = weights_df[selected_times]
         print(f"Subsampled to {len(selected_times)} timepoints "
               f"(requested {n_timepoints_emb} of {len(unique_times)})")
 
     # --- Build the shared object once (R/W construction is p-independent) ---
-    LSE = LatentSpaceEmbeddings(rates_df, se_df=se_df, N_min=N_min, N_max=N_max, n_components=n_components)
+    LSE = LatentSpaceEmbeddings(rates_df, weights_df=weights_df, N_min=N_min, N_max=N_max, n_components=n_components)
     p_values = np.linspace(min_p, max_p, num_p)
 
     # --- Parallelize the per-p optimization over p ---
@@ -133,7 +133,7 @@ def main():
     parser.add_argument("--rates", required=True, help="Path to the input (estimated) rates parquet file.")
     parser.add_argument("--output_path", required=True, help="Directory to write per-p embeddings/reconstructed rates.")
     parser.add_argument("--output", required=True, help="Path to write the diagnostics csv (p, loss, r2, r2_log, spearman_rho, vs).")
-    parser.add_argument("--se_df", default=None, help="Path to the standard-errors parquet file.")
+    parser.add_argument("--weights_df", default=None, help="Path to the weights parquet file.")
     parser.add_argument("--true_rates", default=None, help="Path to ground-truth demographic rates parquet file, if available.")
     parser.add_argument("--min_p", type=float, default=0.5, help="Smallest p value.")
     parser.add_argument("--max_p", type=float, default=2.0, help="Largest p value.")
@@ -150,13 +150,13 @@ def main():
 
     id_label = "sample_id" if args.per_haplotype else "individual_id"
     rates_df = pd.read_parquet(args.rates)
-    se_df = pd.read_parquet(args.se_df) if args.se_df is not None else None
+    weights_df = pd.read_parquet(args.weights_df) if args.weights_df is not None else None
     true_rates_df = pd.read_parquet(args.true_rates) if args.true_rates is not None else None
     if true_rates_df is not None:
         true_rates_df.columns = true_rates_df.columns.astype(float)
 
     metrics_df = scan_p(
-        rates_df=rates_df, output_path=args.output_path, se_df=se_df, true_rates_df=true_rates_df,
+        rates_df=rates_df, output_path=args.output_path, weights_df=weights_df, true_rates_df=true_rates_df,
         min_p=args.min_p, max_p=args.max_p, num_p=args.num_p,
         N_min=args.N_min, N_max=args.N_max, link=args.link,
         n_components=args.n_components, n_timepoints_emb=args.n_timepoints_emb,

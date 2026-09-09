@@ -26,7 +26,6 @@ n_timepoints: 2500
 # rate estimation parameters
 min_window_size: 100
 max_window_size: 200
-compute_variance: True
 
 # Embeddings estimation parameters
 N_min: 100

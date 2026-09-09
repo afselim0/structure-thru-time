@@ -43,12 +43,14 @@ def adaptive_local_linear_filter(
 
     Returns
     -------
-    S : scipy.sparse.csr_matrix, shape (n_timepoints, n_timepoints)
+    S : np.ndarray, shape (n_timepoints, n_timepoints)
         Derivative-filter matrix.  ``rates = H @ S.T`` gives the estimated
-        hazard rate at each time point for each pair.  Returned as a sparse CSR
-        matrix because S is banded (bandwidth <= maximum window size), which
-        makes the matmul against the (n_pairs, n_T) hazard matrix much cheaper
-        than the dense O(n_pairs * n_T^2) product.
+        hazard rate at each time point for each pair.  The matrix is banded
+        (bandwidth <= maximum window size) and so is a natural sparse candidate,
+        but at production sizes the sparse form was measured only ~1.1x faster
+        than the dense matmul, which is not worth the extra type handling; it is
+        returned dense.  Callers may still pass a sparse matrix in, and both
+        entry points densify it.
     """
     minimum_num_idxs = int(minimum_window_size // time_step)
     if minimum_num_idxs % 2 == 0:
@@ -106,6 +108,94 @@ def adaptive_local_linear_filter(
     return S
 
 
+def _assert_uniform_grid(times: np.ndarray, time_step: float) -> None:
+    """The derivative filter is built on a constant bin width; enforce it.
+
+    ``adaptive_local_linear_filter`` constructs each row's local abscissa as
+    multiples of a single ``time_step``, so a non-uniform grid silently yields
+    the wrong slope rather than an error.
+    """
+    if not np.allclose(np.diff(times), time_step, rtol=1e-9):
+        raise ValueError(
+            "Time grid must be uniform; the derivative filter assumes constant "
+            f"spacing (got steps in [{np.diff(times).min():.6g}, {np.diff(times).max():.6g}])."
+        )
+
+
+def _filter_tail_sums(filter_matrix: np.ndarray, time_step: float) -> np.ndarray:
+    """Phi_a(r) = sum_{b >= r} F[a, b], with the filter's own identities checked.
+
+    Summing the estimator by parts turns the filter's action on the cumulative
+    hazard into an action on its increments, and Phi is the resulting
+    coefficient.  The tail is inclusive of b = r because H(t_b) already contains
+    bin b's increment.
+
+    Two identities every derivative filter must satisfy are free here: Phi_a(0)
+    is the full row sum, so a filter that fails to annihilate constants is
+    caught directly, and dt * sum_r Phi_a(r) is the unit derivative response.
+    The second catches boundary-row normalisation errors that the first passes
+    straight through.
+    """
+    phi = np.cumsum(filter_matrix[:, ::-1], axis=1)[:, ::-1]
+
+    if not np.allclose(phi[:, 0], 0.0, atol=1e-10):
+        raise ValueError(
+            "Filter rows must sum to zero (a derivative annihilates constants); "
+            f"max |row sum| = {np.abs(phi[:, 0]).max():.3e}."
+        )
+    unit_mass = time_step * phi.sum(axis=1)
+    if not np.allclose(unit_mass, 1.0, atol=1e-8):
+        raise ValueError(
+            "Filter must have unit derivative response (dt * sum_r Phi_a(r) == 1); "
+            f"unit mass ranges [{unit_mass.min():.6f}, {unit_mass.max():.6f}]."
+        )
+    return phi
+
+
+def _pooled_survival(
+    pdf_df: pd.DataFrame,
+    per_haplotype: bool,
+    sample_individal_ids: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """S(t) = 1 - CDF(t), pooled to individual pairs unless per_haplotype.
+
+    Pooling happens on the survival, before any non-linear step.  The pooled
+    survival is a linear statistic of the underlying data, so the four
+    haplotype pairs' shared-haplotype and shared-tree correlations are carried
+    automatically; averaging afterwards would assume independence.
+
+    The hazard of the pooled survival is the mixture hazard
+    sum_pq S_pq lambda_pq / sum_pq S_pq -- a survival-weighted mean of the four
+    haplotype-pair rates rather than their plain mean.  Rates and weights are
+    both derived from this one object so they share an estimand by construction.
+    """
+    survival_df = 1 - pdf_df.cumsum(axis=1)
+
+    # 1 - cumsum can drift slightly negative once the pdf sums marginally above
+    # 1. A negative weight would flip the sign of its loss term, turning
+    # attraction into repulsion, so the drift is caught rather than clipped
+    # blindly; a genuinely exhausted pair floors at exactly zero.
+    survival = survival_df.values
+    if np.any(survival < -1e-9):
+        raise ValueError(
+            f"Survival below zero (min {survival.min():.3e}); the PDF sums to more "
+            "than 1. Check the CDF construction before forming rates or weights."
+        )
+    survival_df = pd.DataFrame(np.clip(survival, 0.0, 1.0),
+                               index=survival_df.index, columns=survival_df.columns)
+
+    if per_haplotype:
+        return survival_df
+
+    if sample_individal_ids is None or "individual_id" not in sample_individal_ids.columns:
+        sample_ids = np.unique([s for pair in survival_df.index.values for s in pair])
+        # Two-column form expected by compute_between_individual_rates.
+        sample_individal_ids = pd.DataFrame(
+            {"sample_id": sample_ids, "individual_id": sample_ids // 2}
+        )
+    return compute_between_individual_rates(survival_df, sample_individal_ids)
+
+
 def compute_coal_rates(
     pdf_df: pd.DataFrame,
     minimum_window_size: float,
@@ -122,6 +212,15 @@ def compute_coal_rates(
     from ``minimum_window_size`` to ``maximum_window_size`` (see
     ``adaptive_local_linear_filter``).
 
+    When ``per_haplotype`` is False the four haplotype pairs of an individual
+    pair are pooled on the *survival* before the derivative is taken, so the
+    estimand is the mixture hazard sum_pq S_pq lambda_pq / sum_pq S_pq rather
+    than the plain mean of the four haplotype-pair rates.  The two agree when
+    the four survivals agree and diverge in deep time and for admixed
+    individuals; on the split demography the measured divergence is a median of
+    1.4e-5 (max 1.1e-3).  ``compute_coal_rate_weights`` pools identically, so
+    rates and weights share one estimand by construction.
+
     Parameters
     ----------
     pdf_df : pd.DataFrame
@@ -132,8 +231,9 @@ def compute_coal_rates(
     maximum_window_size : float
         Maximum local-linear bandwidth (same units as column time points).
     per_haplotype : bool
-        If True, return per-sample-pair rates.  If False, average rates over
-        all cross-individual sample pairs to return per-individual-pair rates.
+        If True, return per-sample-pair rates.  If False, pool the survivals of
+        all cross-individual sample pairs and return per-individual-pair rates
+        (the mixture hazard; see above).
     sample_individal_ids : pd.DataFrame or None
         Required when ``per_haplotype=False``.  Must have two columns, ``sample_id``
         and ``individual_id``.  If None, consecutive sample IDs are assumed to
@@ -157,19 +257,19 @@ def compute_coal_rates(
     times     = pdf_df.columns.astype(float)
     time_step = times[1] - times[0]
     n_T       = len(times)
+    _assert_uniform_grid(times, time_step)
 
     # S(t) = 1 - CDF(t) is the probability of not having coalesced by the right
-    # edge of bin t.  H(t) = -log S(t) is the cumulative hazard at that edge.
-    survival_df = 1 - pdf_df.cumsum(axis=1)
+    # edge of bin t, pooled over haplotype pairs first so that the rate and its
+    # weight share one estimand.  H(t) = -log S(t) is the cumulative hazard.
+    survival_df = _pooled_survival(pdf_df, per_haplotype, sample_individal_ids)
     H = -np.log(survival_df.values.clip(1e-16))   # (n_pairs, n_T); clip avoids -inf at S=0
 
     S = filter_matrix
     if S is None:
         S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+    S = np.asarray(S.todense()) if sparse.issparse(S) else np.asarray(S)
 
-    # rates = H @ S.T.  Compute as (S @ H.T).T so the sparse operand is on the
-    # left of the product (the efficient form for CSR) and the result is a dense
-    # ndarray of shape (n_pairs, n_T).
     rates = H @ S.T
 
     # Clip negative rates caused by numerical noise in non-monotone empirical H(t).
@@ -178,97 +278,88 @@ def compute_coal_rates(
     # positive values well above the bound (a pandas/numpy version-mismatch bug).
     rates = np.clip(rates, a_min=MIN_RATE, a_max=None)
 
-    rates_df = pd.DataFrame(rates, columns=times, index=pdf_df.index)
+    return pd.DataFrame(rates, columns=times, index=survival_df.index)
 
-    if not per_haplotype:
-        if sample_individal_ids is None or "individual_id" not in sample_individal_ids.columns:
-            sample_ids = rates_df.index.values
-            sample_ids = np.unique([item for sample_id in sample_ids for item in sample_id])
-            individual_ids = sample_ids // 2
-            # Two-column form expected by compute_between_individual_rates.
-            sample_individal_ids = pd.DataFrame(
-                {"sample_id": sample_ids, "individual_id": individual_ids}
-            )
-        rates_df = compute_between_individual_rates(rates_df, sample_individal_ids)
-    return rates_df
-
-def compute_coal_rates_variance(
+def compute_coal_rate_weights(
     pdf_df: pd.DataFrame,
-    coal_counts_dir: str,
     minimum_window_size: float,
     maximum_window_size: float,
     per_haplotype: bool = False,
-    sample_individal_ids: pd.DataFrame | None = None,   
+    sample_individal_ids: pd.DataFrame | None = None,
+    filter_matrix: sparse.spmatrix | None = None,
 ) -> pd.DataFrame:
-    """Estimate the variance of the coalescent rate estimates over time using a block-jackknife approach.
-    The genome-wide counts of coalescent events are loaded into memory once. 
-    Iterating over the count files (each for a specified contig), the counts are loaded and removed from the total counts
-    A pdf is computed by normalizing the remaining counts, and the coalescent rates are computed using the compute_coal_rates function.
-    Matrices of sums and sums of squares are accumulated over all contigs, and the variance is computed at the end.
+    """Compute the loss weights that accompany the rates from ``compute_coal_rates``.
 
-    Args:
-        pdf_df (pd.DataFrame): The probability density function computed from the genome-wide coalescent event counts.
-        coal_counts_dir (str): Directory containing the parquet files with the counts of coalescent events for each contig, and a coverage.parquet file with the total coverage for each pair and contig.
-    Returns:
-        pd.DataFrame: Dataframe with the variance of the coalescent rate estimates over time, with the same index and columns as the output of compute_coal_rates.
+    The pseudo-likelihood weight is w = lambda / Var(lambda_hat).  Propagating
+    the Poisson weight s * L(t) through the derivative filter F and summing by
+    parts gives Var(lambda_hat(t_a)) = dt * sum_r Phi_a(r)^2 lambda(t_r)/L(t_r)
+    with Phi_a(r) = sum_{b >= r} F[a,b].  Under a locally constant rate the
+    lambda cancels against the numerator, leaving
+
+        w_ij(t_a) = S_hat_ij(t_a) / (dt * sum_r Phi_a(r)^2)
+
+    up to a global constant, which is irrelevant because only relative weights
+    affect the minimiser.  The weight therefore depends on the survival alone
+    and never on the rate estimate, so a pair with no observed coalescence keeps
+    full weight instead of the 0/0 the plug-in jackknife weight produced there.
+
+    S_hat <= 1 and the filter term is fixed, so the weight is bounded above by
+    construction and needs no capping.
+
+    Parameters
+    ----------
+    pdf_df : pd.DataFrame
+        Estimated PDF of pairwise coalescent times, as passed to
+        ``compute_coal_rates``.  Index is a MultiIndex of (sample_id_1,
+        sample_id_2) pairs; columns are float time points.
+    minimum_window_size, maximum_window_size : float
+        Local-linear bandwidths, matching the rates they weight.
+    per_haplotype : bool
+        If True, return per-sample-pair weights.  If False, the four haplotype
+        pairs of an individual pair are pooled at the *survival* level before
+        the weight is formed, so the shared-haplotype and shared-tree
+        correlations are carried automatically.  Averaging the weights instead
+        would assume independence and overstate the information by up to 4x.
+    sample_individal_ids : pd.DataFrame or None
+        Two columns, ``sample_id`` and ``individual_id``.  If None, consecutive
+        sample IDs are assumed to pair into diploids, as in ``compute_coal_rates``.
+    filter_matrix : scipy.sparse.spmatrix or None
+        Precomputed filter from ``adaptive_local_linear_filter``; built
+        internally when None.  Pass the same matrix used for the rates so the
+        two share a bandwidth schedule.
+
+    Returns
+    -------
+    weights_df : pd.DataFrame
+        Weights with the same index and columns as the corresponding rates.
     """
-
-    coverage_df = pd.read_parquet(os.path.join(coal_counts_dir, "coverage.parquet"))
-    total_segments_per_pair = coverage_df.sum(axis=1).values  # Total segments for each pair across all contigs
-    full_counts_df = pdf_df*coverage_df.sum(axis=1).values[:, np.newaxis]  # Total counts across all contigs for each pair (undo the normalization to get the total counts)
-    full_counts_df.columns = full_counts_df.columns.astype(float)  # Ensure columns are float
-    full_counts_df = full_counts_df.round().astype(int)  # Ensure counts are integers
-    times     = full_counts_df.columns.astype(float)
-    n_T       = len(times)
+    times     = pdf_df.columns.astype(float)
     time_step = times[1] - times[0]
-    S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+    n_T       = len(times)
+    _assert_uniform_grid(times, time_step)
 
-    count_files = sorted(f for f in os.listdir(coal_counts_dir) if f.endswith(".npy"))
-    n_contigs = len(count_files)
-    if n_contigs<20:
-        print(f"Warning: Only {n_contigs} contig count files found in {coal_counts_dir}.  Block-jackknife variance estimates may be unstable.")
+    survival_df = _pooled_survival(pdf_df, per_haplotype, sample_individal_ids)
 
-    # Accumulators are sized off the first jackknife replicate rather than
-    # full_counts_df: when per_haplotype=False, compute_coal_rates collapses
-    # haplotype pairs into individual pairs, so the rates index/shape differs
-    # from the (haplotype-level) counts index.
-    sums = None
-    sums_of_squares = None
-    rates_index = None
-    rates_columns = None
+    S = filter_matrix
+    if S is None:
+        S = adaptive_local_linear_filter(minimum_window_size, maximum_window_size, n_T, time_step)
+    S = np.asarray(S.todense()) if sparse.issparse(S) else np.asarray(S)
 
-    for count_file in tqdm(count_files, desc="Block-jackknife over contigs"):
-        contig_counts = np.load(os.path.join(coal_counts_dir, count_file), allow_pickle=True)
-        contig_counts_df = pd.DataFrame(contig_counts, index=full_counts_df.index, columns=full_counts_df.columns)
-        contig_name = count_file.removesuffix(".npy")
-        new_total_segments_per_pair = total_segments_per_pair - coverage_df[contig_name].values  # Total segments for each pair after dropping the current contig
-        new_counts_df = full_counts_df - contig_counts_df # Subtract the current contig counts from the total counts
-        pdf_without_contig = new_counts_df / new_total_segments_per_pair[:, np.newaxis]
-        rates_without_contig = compute_coal_rates(pdf_without_contig, minimum_window_size, maximum_window_size, per_haplotype, sample_individal_ids, filter_matrix=S)
-        if sums is None:
-            rates_index = rates_without_contig.index
-            rates_columns = rates_without_contig.columns
-            sums = np.zeros((len(rates_index), n_T))
-            sums_of_squares = np.zeros((len(rates_index), n_T))
-        sums += rates_without_contig.values
-        sums_of_squares += rates_without_contig.values ** 2
+    phi = _filter_tail_sums(S, time_step)
+    phi_sq_mass = time_step * (phi ** 2).sum(axis=1)          # (n_T,)
+    if np.any(phi_sq_mass <= 0):
+        raise ValueError(
+            "A filter row has zero Phi^2 mass, so its effective bandwidth is "
+            "undefined; the derivative filter has an all-zero row."
+        )
 
-    # Delete-1-block jackknife variance:
-    # Var = (n-1)/n * sum_i (theta_(i) - mean(theta))^2
-    #     = (n-1)/n * [ sum_i theta_(i)^2 - n * mean(theta)^2 ]
-    # expressed here via the running sums/sums-of-squares accumulators
-    mean_rates = sums / n_contigs
-    variance_values = (n_contigs - 1) / n_contigs * (
-        sums_of_squares - n_contigs * mean_rates ** 2
-    )
-
-    variance_df = pd.DataFrame(
-        variance_values,
-        index=rates_index,
-        columns=rates_columns,
-    )
-
-    return variance_df
+    # B_eff is an effective bandwidth (a time), the smoother's analogue of the
+    # window s in the exact Poisson weight s * L(t). Written this way the
+    # correspondence is visible: survival stands in for the at-risk count L,
+    # effective bandwidth for s.
+    effective_bandwidth = 1.0 / phi_sq_mass
+    weights = survival_df.values * effective_bandwidth[np.newaxis, :]
+    return pd.DataFrame(weights, columns=times, index=survival_df.index)
 
 def compute_between_individual_rates(
     rates_df: pd.DataFrame,

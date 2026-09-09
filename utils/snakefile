@@ -38,7 +38,6 @@ max_window_size                   = read_config("max_window_size", default = 500
 max_time                          = read_config("max_time", default = 10000)
 n_timepoints                      = read_config("n_timepoints", default = max_time)
 per_haplotype                     = str(read_config("per_haplotype", default = "False")).lower() == "true" # If True, coalescent rates (and embeddings, plots) are per-haplotype rather than per-individual
-compute_variance                  = str(read_config("compute_variance", default = "True")).lower() == "true" # If True, pass --compute_variance to compute_coal_rates to estimate standard errors of rates
 
 # STT Parameters
 N_min                             = read_config("N_min", default = 1)
@@ -235,6 +234,7 @@ trees_ready                            = os.path.join(trees_dir, trees_ready)
 
 pdf_data_file_name                     = f"coal_pdf{PDF_TAG}.parquet"
 rates_data_file_name                   = f"rates{RATES_TAG}.parquet"
+weights_data_file_name                 = f"weights_rates{RATES_TAG}.parquet"
 rates_plot_file_name                   = f"rates{RATES_TAG}.png"
 relative_div_plot_file_name            = f"relative_div{RATES_TAG}.png"
 relative_div_plot_summary_file_name    = f"relative_div{RATES_TAG}_summary.png"
@@ -281,6 +281,7 @@ infer_finished                    = os.path.join(tree_output_path, infer_finishe
 
 pdf_data                          = os.path.join(data_output_path, pdf_data_file_name)
 rates_data                        = os.path.join(data_output_path, rates_data_file_name)
+weights_data                      = os.path.join(data_output_path, weights_data_file_name)
 rates_plot                        = os.path.join(plot_output_path, rates_plot_file_name)
 relative_div_plot                 = os.path.join(plot_output_path, relative_div_plot_file_name)
 relative_div_plot_summary         = os.path.join(plot_output_path, relative_div_plot_summary_file_name)
@@ -904,14 +905,14 @@ rule compute_rates:
         script = compute_rates_wrapper_script,
         main_script = COMPUTE_RATES_SCRIPT
     output:
-        rates_data
+        rates_data,
+        weights_data
     params:
         outdir = data_output_path,
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
         max_window_size = max_window_size,
-        per_haplotype = "--per-haplotype" if per_haplotype else "",
-        compute_variance = "--compute_variance" if compute_variance else ""
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
         mkdir -p {params.outdir}
@@ -922,8 +923,7 @@ rule compute_rates:
             --minimum_window_size {params.min_window_size} \
             --maximum_window_size {params.max_window_size} \
             --pop_labels {input.pop_labels} \
-            {params.per_haplotype} \
-            {params.compute_variance}
+            {params.per_haplotype}
         """
 
 rule plot_rates:
@@ -990,6 +990,9 @@ rule plot_relative_div:
 rule compute_embeddings:
     input:
         rates = rates_data,
+        # The weights are read by path (weights_<rates name>) rather than passed
+        # as a flag, but they are declared here so a change to them refits.
+        weights = weights_data,
         script = compute_embeddings_wrapper_script,
         main_script = COMPUTE_EMBEDDINGS_SCRIPT,
         support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
@@ -1213,15 +1216,15 @@ if admix_mode:
             script = compute_rates_wrapper_script,
             main_script = COMPUTE_RATES_SCRIPT
         output:
-            os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name)
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            os.path.join(ancestry_STT_path, "{ancestry}", "data", weights_data_file_name)
         params:
             outdir = lambda wc: ancestry_data_dir(wc.ancestry),
             output_name = rates_data_file_name,
             pdf_data = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), pdf_data_file_name),
             min_window_size = min_window_size,
             max_window_size = max_window_size,
-            per_haplotype = "--per-haplotype" if per_haplotype else "",
-            compute_variance = "--compute_variance" if compute_variance else ""
+            per_haplotype = "--per-haplotype" if per_haplotype else ""
         shell:
             """
             mkdir -p {params.outdir}
@@ -1232,8 +1235,7 @@ if admix_mode:
                 --minimum_window_size {params.min_window_size} \
                 --maximum_window_size {params.max_window_size} \
                 --pop_labels {input.pop_labels} \
-                {params.per_haplotype} \
-                {params.compute_variance}
+                {params.per_haplotype}
             """
 
     rule plot_rates_ancestry:
@@ -1298,6 +1300,7 @@ if admix_mode:
     rule compute_embeddings_ancestry:
         input:
             rates = os.path.join(ancestry_STT_path, "{ancestry}", "data", rates_data_file_name),
+            weights = os.path.join(ancestry_STT_path, "{ancestry}", "data", weights_data_file_name),
             script = compute_embeddings_wrapper_script,
             main_script = COMPUTE_EMBEDDINGS_SCRIPT,
             support_script = OPTIMIZATION_FUNCTIONS_SCRIPT
