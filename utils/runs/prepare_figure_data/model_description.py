@@ -1,7 +1,7 @@
 """
 Figure data: the schematic describing the embeddings model.
 
-Computes the true pair coalescence rates for the sawtooth (zigzag) demography,
+Computes the true pair coalescence rates for the sawtooth demography,
 embeds them through time, and derives the pairwise distances between the embedded
 samples -- the three quantities the schematic's panels draw:
   A) the rate through time
@@ -28,7 +28,7 @@ from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
 FIGURE = "model_description"
 
-DEME_FILE = os.path.join(DEMES_DIR, "zigzag.yaml")
+DEME_FILE = os.path.join(DEMES_DIR, "sawtooth.yaml")
 MAX_TIME = 40000
 DELTA_T = 10
 N_TIMEPOINTS = MAX_TIME // DELTA_T + 1

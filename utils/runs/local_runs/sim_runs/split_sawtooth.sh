@@ -1,5 +1,5 @@
 #!/bin/bash
-# CoaSTT run: sawtooth
+# CoaSTT run: split_sawtooth
 # Resource hints below are read by ../../generate_sim_results_slurm.sh when it
 # builds the job array; they are ignored by the local driver.
 # CPUS=12
@@ -11,5 +11,5 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 snakemake STT_sim \
-    --configfile ../data/configs/sim_configs/sawtooth.yaml \
+    --configfile ../data/configs/sim_configs/split_sawtooth.yaml \
     --cores all --rerun-incomplete "$@"

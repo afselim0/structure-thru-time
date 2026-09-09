@@ -1,5 +1,5 @@
-demography: split_sawtooth
-demes_file_path: ../data/demes/split_sawtooth.yaml
+demography: sawtooth
+demes_file_path: ../data/demes/sawtooth.yaml
 output_path: ../results/outputs/simulations/sawtooth/sim
 version: 1
 num_threads: 12

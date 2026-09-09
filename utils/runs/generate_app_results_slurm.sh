@@ -22,7 +22,12 @@ RUN_DIR="local_runs/app_runs"
 CONDA_ENV="${COASTT_CONDA_ENV:-/project/jnovembre/afselim/CoaSTT_env}"
 
 shopt -s nullglob
-scripts=("$RUN_DIR"/*.sh)   # nullglob: expands to nothing when the dir is empty
+# nullglob: expands to nothing when the dir is empty. *_slurm.sh are submitters
+# of their own (e.g. arg_rates_comparison_slurm.sh), not array run scripts.
+scripts=()
+for s in "$RUN_DIR"/*.sh; do
+    [[ "$s" == *_slurm.sh ]] || scripts+=("$s")
+done
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
     echo "No run scripts in $RUN_DIR — nothing to submit."
