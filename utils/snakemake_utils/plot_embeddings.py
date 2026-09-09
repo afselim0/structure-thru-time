@@ -10,6 +10,27 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from PlotEmbeddings import PlotEmbeddings
 
+
+STATIC_EXPORT_HINT = (
+    "static PNG export failed; the interactive HTML is unaffected. plotly's kaleido needs a "
+    "Chrome binary. One-time fix per user:\n"
+    "  SSL_CERT_FILE=$(python -c \"import certifi;print(certifi.where())\") "
+    "python -c \"from kaleido import get_chrome_sync; print(get_chrome_sync())\""
+)
+
+
+def save_static_png(plotter, path, **kwargs):
+    """Render one static snapshot to path; on failure print a warning and return False."""
+    try:
+        img, _ = plotter.save_static(**kwargs)
+    except Exception as e:  # ChromeNotFoundError surfaces as RuntimeError from plotly
+        print(f"WARNING: {path}: {STATIC_EXPORT_HINT}\n  ({type(e).__name__}: {str(e).strip().splitlines()[0] if str(e).strip() else ''})",
+              file=sys.stderr)
+        return False
+    img.save(path)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot embeddings")
     parser.add_argument("--input", required=True, help="Path to embeddings parquet file")
@@ -74,10 +95,13 @@ def main():
                   if args.param_label else output_basename)
     plotter.fig.update_layout(title_text=title_text)
     plotter.fig.write_html(f"{output_path}/{output_basename}.html")
-    img_v1, _ = plotter.save_static(width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
-    img_v1.save(f"{output_path}/{output_basename}_v1.png")
-    img_v2, _ = plotter.save_static(width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
-    img_v2.save(f"{output_path}/{output_basename}_v2.png")
+    # The PNG snapshots are a convenience, not a pipeline output: if static export
+    # is unavailable (kaleido needs a Chrome binary, which midway3 compute nodes
+    # lack) warn and carry on rather than failing the whole run.
+    save_static_png(plotter, f"{output_path}/{output_basename}_v1.png",
+                    width=600, height=600, scale=2, eye=dict(x=1.8, y=1.8, z=0.3), up=dict(x=0, y=0, z=1))
+    save_static_png(plotter, f"{output_path}/{output_basename}_v2.png",
+                    width=600, height=600, scale=2, eye=dict(x=-0.75, y=-1.5, z=0.3), up=dict(x=0, y=0, z=1))
 
     try:
         smooth_embeddings = pd.read_parquet(f"{args.input.replace('embeddings', 'smooth_embeddings')}")

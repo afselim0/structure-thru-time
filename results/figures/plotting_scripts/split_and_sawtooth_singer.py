@@ -1,11 +1,11 @@
 #%%
 """
 CoaSTT embeddings from simulated trees against embeddings from SINGER-inferred
-trees, for a two-population split (top row) and the same split on a sawtooth
-size history (bottom row).
+trees, for a two-population split (top row) and a single population with a
+sawtooth size history (bottom row).
 
-Data: results/figure_data/split_sawtooth_singer/, written by
-utils/runs/prepare_figure_data/split_sawtooth_singer.py -- the SINGER embeddings
+Data: results/figure_data/split_and_sawtooth_singer/, written by
+utils/runs/prepare_figure_data/split_and_sawtooth_singer.py -- the SINGER embeddings
 there are already Procrustes-aligned to the simulated-tree ones.
 """
 import matplotlib.pyplot as plt
@@ -20,11 +20,11 @@ os.chdir(os.path.dirname(__file__))
 sys.path.append("../../../src")
 from PlotEmbeddings import *
 
-FIGURE = "split_sawtooth_singer"
+FIGURE = "split_and_sawtooth_singer"
 
 # rows of the figure, and the title each row carries
-DEMOGRAPHIES = ["split", "split_sawtooth"]
-ROW_TITLES = {"split": "Split", "split_sawtooth": "Split with sawtooth $N_e$"}
+DEMOGRAPHIES = ["split", "sawtooth"]
+ROW_TITLES = {"split": "Split", "sawtooth": "Sawtooth $N_e$"}
 # columns: the tree source, named exactly as the prep script labels it
 SOURCES = ["simulated trees", "SINGER trees"]
 COLUMN_TITLES = {"simulated trees": "Simulated trees", "SINGER trees": "SINGER trees"}
@@ -96,7 +96,9 @@ for i, demography in enumerate(DEMOGRAPHIES):
         img.save(f"../app_figs_png/{filename}_{demography}_{source.split()[0]}.png")
         ax.set_axis_off()
         ax.imshow(img, aspect="equal")
-        ax.text(0.0, 1.0, PANEL_LETTERS[2 * i + j], transform=ax.transAxes,
+        # the rendered panel carries its own white margin, so the letter is placed
+        # just outside the axes to keep it clear of the top-left tick label
+        ax.text(-0.02, 1.02, PANEL_LETTERS[2 * i + j], transform=ax.transAxes,
                 fontsize=12, fontweight="bold", va="top", ha="left")
 
 # column titles sit in the strip above the top row, centred on each column
@@ -111,9 +113,11 @@ for i, demography in enumerate(DEMOGRAPHIES):
     fig.text(pos.x0 - 0.008, (pos.y0 + pos.y1) / 2, ROW_TITLES[demography],
              ha="center", va="center", rotation=90, fontsize=11)
 
-# one population key for the whole figure; the two rows share a palette per row and
-# the same population names, so a single legend covers all four panels
-populations = pop_colors.drop_duplicates("population")
+# one population key for the whole figure. Only rows with more than one population
+# need distinguishing, so the sawtooth row's single population (named "generic" in
+# its demes file, and drawn in the same red as population A) stays out of the key
+multi_pop_rows = pop_colors.groupby("demography")["population"].transform("nunique") > 1
+populations = pop_colors[multi_pop_rows].drop_duplicates("population")
 legend_handles = [Line2D([], [], color=row["color"], lw=3, label=row["population"])
                   for _, row in populations.iterrows()]
 fig.legend(handles=legend_handles, title="Population", ncol=len(legend_handles),
@@ -121,5 +125,7 @@ fig.legend(handles=legend_handles, title="Population", ncol=len(legend_handles),
            title_fontsize=10, frameon=False)
 
 fig.savefig(f"../app_figs/{filename}.pdf", bbox_inches="tight", pad_inches=0.02)
+# the same figure as a PNG, for quick viewing without a PDF reader
+fig.savefig(f"../app_figs_png/{filename}.png", bbox_inches="tight", pad_inches=0.02, dpi=300)
 print(f"Saved ../app_figs/{filename}.pdf")
 # %%

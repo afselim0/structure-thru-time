@@ -98,5 +98,7 @@ fig.legend(handles=source_handles + group_handles, loc="lower center",
 
 fig.tight_layout(rect=(0, 0.06, 1, 1))
 filename = os.path.basename(__file__).split(".")[0]
-fig.savefig(f"../sim_figs/{filename}.pdf", dpi=400)
+fig.savefig(f"../app_figs/{filename}.pdf", dpi=400)
+fig.savefig(f"../app_figs_png/{filename}.png", dpi=300)
+print(f"Saved ../app_figs/{filename}.pdf and ../app_figs_png/{filename}.png")
 # %%

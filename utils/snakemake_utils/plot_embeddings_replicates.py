@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.io as pio
 import matplotlib.patches as mpatches
-from PIL import Image
+from PIL import Image, ImageDraw
 from scipy.linalg import svd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
@@ -27,9 +27,18 @@ def _render_to_pil(plotter, eye, width=500, height=500, scale=2):
         showlegend=False,
         margin=dict(l=0, r=0, t=0, b=0),
     )
-    img_bytes = pio.to_image(
-        plotter.fig, format="png", width=width, height=height, scale=scale
-    )
+    try:
+        img_bytes = pio.to_image(
+            plotter.fig, format="png", width=width, height=height, scale=scale
+        )
+    except Exception as e:  # kaleido needs a Chrome binary; compute nodes may lack one
+        print(f"WARNING: static export failed ({type(e).__name__}); drawing a placeholder panel. "
+              "One-time fix per user: SSL_CERT_FILE=$(python -c \"import certifi;print(certifi.where())\") "
+              "python -c \"from kaleido import get_chrome_sync; print(get_chrome_sync())\"",
+              file=sys.stderr)
+        img = Image.new("RGB", (width * scale, height * scale), (235, 235, 235))
+        ImageDraw.Draw(img).text((10, 10), "static export unavailable\n(no Chrome for kaleido)", fill=(80, 80, 80))
+        return img
     return Image.open(io.BytesIO(img_bytes))
 
 

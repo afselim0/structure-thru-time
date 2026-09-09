@@ -1,92 +1,94 @@
-# log files
+# ---------------------------------------------------------------------------
+# Editors, caches, job logs
+# ---------------------------------------------------------------------------
 *.pyc
 *.DS_Store
-job_logs/
 *.ipynb
+job_logs/
 *.err
 *.out
+*.log
+*.snakemake*
 
-## Output files
+# ---------------------------------------------------------------------------
+# Run outputs
+# ---------------------------------------------------------------------------
+results/outputs/
+results/figures/sim_figs_png/
+results/figures/app_figs_png/
+finished_sim.txt
+finished_infer.txt
+
+# Per-run colour/label tables written next to the outputs.
+pop_colors.csv
+pop_labels.csv
+
+# ---------------------------------------------------------------------------
+# Data formats
+#
+# Blanket rules by extension. Anything re-included below is an exception that
+# the manuscript depends on.
+# ---------------------------------------------------------------------------
 *.parquet
 *.html
 *.pdf
 *.txt
-*.log
 *.mp4
-results/outputs/
-results/figures/sim_figs_png/
-results/figures/app_figs_png/
+*.zip
 
-# Manuscript figures are tracked despite the blanket *.pdf rule above.
-# The directory must be re-included before the files within it can be.
+# Tree sequences and tree-inference intermediates
+*.trees
+*.hap
+*.map
+*.mut
+*.sample
+*.anc
+*.vcf
+
+# ---------------------------------------------------------------------------
+# Exceptions: manuscript figures
+#
+# Tracked despite the blanket *.pdf rule. A directory must be re-included
+# before the files within it can be.
+# ---------------------------------------------------------------------------
 !results/figures/sim_figs/
 !results/figures/sim_figs/*.pdf
 !results/figures/app_figs/
 !results/figures/app_figs/*.pdf
 
-# Prepared figure data (results/figure_data/) is the provenance of the manuscript
-# figures, so the small tables are tracked despite the blanket *.parquet rule.
-# The directories must be re-included before the files within them can be.
+# ---------------------------------------------------------------------------
+# Exceptions: prepared figure data
+#
+# results/figure_data/ is the provenance of the manuscript figures, so the
+# small label, colour and parameter tables are tracked. The large numeric
+# tables are .parquet and stay ignored: they are regenerable from
+# results/outputs/ by the matching script in utils/runs/prepare_figure_data/.
+# ---------------------------------------------------------------------------
 !results/figure_data/
 !results/figure_data/**/
 !results/figure_data/README.md
 !results/figure_data/**/*.csv
-!results/figure_data/**/*.parquet
 !results/figure_data/**/*.yaml
 
-# ...except the handful of large tables, which are regenerable from
-# results/outputs/ by the matching script in utils/runs/prepare_figure_data/ and
-# are too big to keep in the repo (20-40 MB each). Keep this list in step with
-# what those scripts write.
-results/figure_data/SS_examples/SS_1d_embeddings.parquet
-results/figure_data/SS_examples/SS_2d_embeddings.parquet
-results/figure_data/complex_4_pops/estimated_rates.parquet
-results/figure_data/complex_4_pops/reconstructed_rates.parquet
-results/figure_data/complex_4_pops_migration/embeddings.parquet
-results/figure_data/double_admix_GNN_RFmix/GNN_input_rates.parquet
-results/figure_data/double_admix_GNN_RFmix/GNN_reconstructed_rates.parquet
-results/figure_data/double_admix_GNN_RFmix/RFmix_input_rates.parquet
-results/figure_data/double_admix_GNN_RFmix/RFmix_reconstructed_rates.parquet
-results/figure_data/double_admix_true/input_rates_WG.parquet
-results/figure_data/double_admix_true/reconstructed_rates_WG.parquet
-results/figure_data/badmix_ancestry/GNN_embeddings.parquet
-results/figure_data/badmix_ancestry/RFmix_embeddings.parquet
-results/figure_data/model_description/distances.parquet
-results/figure_data/two_pop_migration/embeddings.parquet
-
-pop_colors.csv
-pop_labels.csv
-# ...but the copies under results/figure_data/ are figure inputs, not run outputs,
-# and the figures cannot be drawn without them.
-!results/figure_data/**/pop_colors.csv
-!results/figure_data/**/pop_labels.csv
-
-## Tests
+# ---------------------------------------------------------------------------
+# Scratch, tests, local-only data
+# ---------------------------------------------------------------------------
 tests/
-*old*
-.misc/
 results/.tests
+.misc/
 local_data/
-data/configs/sim_test_configs/
-data/configs/app_test_configs/
-
-## Tree inference
-*.hap
-*.map
-*.mut
-*.sample
-*.trees
-*.anc
-*.vcf
-*.zip
-
-*.snakemake*
-finished_sim.txt
-finished_infer.txt
-
-*(jnovembre@uchicago.edu)*
+*old*
 /sandbox
 /docs/plans
+data/configs/sim_test_configs/
+data/configs/app_test_configs/
+*(jnovembre@uchicago.edu)*
+
+# ---------------------------------------------------------------------------
+# Agent / tooling config
+# ---------------------------------------------------------------------------
 CLAUDE.md
 SKILL.md
 settings.json
+# ...but the project's own skills are shared with the repo.
+!/.claude/skills/**

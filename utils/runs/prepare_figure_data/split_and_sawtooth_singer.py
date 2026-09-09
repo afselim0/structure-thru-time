@@ -3,7 +3,7 @@ Figure data: CoaSTT embeddings on simulated versus SINGER-inferred trees, for tw
 demographies.
 
 A 2x2 comparison. The rows are the two demographies (a clean two-population split,
-and the same split on a sawtooth population-size history); the columns are the two
+and a single population with a sawtooth size history); the columns are the two
 tree sources, the simulated tree sequences and the ones SINGER (+POLEGON) inferred
 from sequence data simulated on them.
 
@@ -11,7 +11,7 @@ Within a row the two embeddings are only defined up to a rotation/reflection, so
 SINGER embedding is Procrustes-aligned to the simulated-tree one here; the plotting
 script draws the frames it is given.
 
-Tables written to results/figure_data/split_sawtooth_singer/:
+Tables written to results/figure_data/split_and_sawtooth_singer/:
 
   embeddings.parquet  long form, individual_id, time, X1, X2, demography, source
                       ("simulated trees" / "SINGER trees"), already aligned
@@ -34,13 +34,13 @@ from _common import (CONFIGS_DIR, OUTPUTS_DIR, add_src_to_path, find_output_file
 add_src_to_path()
 from OptimizationFunctions import procrustes_align_trajectories_df
 
-FIGURE = "split_sawtooth_singer"
+FIGURE = "split_and_sawtooth_singer"
 
 # one row of the figure per entry: the run directory holding the sim/ and singer/
 # subdirectories, and the config the embedding and plotting parameters come from
 DEMOGRAPHIES = {
     "split": os.path.join(OUTPUTS_DIR, "simulations", "split"),
-    "split_sawtooth": os.path.join(OUTPUTS_DIR, "simulations", "split_sawtooth"),
+    "sawtooth": os.path.join(OUTPUTS_DIR, "simulations", "sawtooth"),
 }
 # label used in the tables and drawn in the column titles
 SOURCES = {"sim": "simulated trees", "singer": "SINGER trees"}
