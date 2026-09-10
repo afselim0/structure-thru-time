@@ -205,7 +205,6 @@ class LatentSpaceEmbeddings:
                                         gtol_factor:         float = GTOL_FACTOR,
                                         maxcor:              int   = MAXCOR_TIMEPOINT,
                                         solver:              str   = "newton",
-                                        extrapolate_warm_start: bool = True,
                                         tol_factor:          float = TOL_FACTOR_NEWTON,
                                         limit_blas_threads:  bool  = True):
         """Stage 1: sequential, unpenalized coordinate descent over time points.
@@ -225,8 +224,6 @@ class LatentSpaceEmbeddings:
             maxcor: L-BFGS memory, solver="lbfgs" only.
             solver: "newton" (default) for damped Newton on the exact Hessian, or
                 "lbfgs" for the previous scipy L-BFGS-B path.
-            extrapolate_warm_start: Start each slice at 2 X(t+1) - X(t+2) rather than
-                X(t+1), with a fallback when that has the higher loss.
             tol_factor: Per-slice tolerance scale, solver="newton" only.
             limit_blas_threads: If True (default), pin BLAS to one thread for the
                 duration of the sweep.  The Newton path does dense linear algebra per
@@ -254,7 +251,6 @@ class LatentSpaceEmbeddings:
                 return_covariances     = compute_uncertainty,
                 exact_hessian          = exact_hessian,
                 solver                 = solver,
-                extrapolate_warm_start = extrapolate_warm_start,
                 tol_factor             = tol_factor,
             )
 

@@ -1197,7 +1197,6 @@ def coordinate_descent_over_time(
     return_covariances: bool = False,
     exact_hessian: bool = True,
     solver: str = "newton",
-    extrapolate_warm_start: bool = True,
     tol_factor: float = TOL_FACTOR_NEWTON,
 ) -> tuple:
     """Single-pass coordinate descent over timepoints (default: backward).
@@ -1241,14 +1240,6 @@ def coordinate_descent_over_time(
             unavailable, so exact_hessian=False falls back to the exact one.
         solver: "newton" (default) for damped Newton on the exact Hessian, or "lbfgs"
             for the previous scipy L-BFGS-B path.
-        extrapolate_warm_start: If True (default), start each slice at the linear
-            extrapolation ``2 X(t+1) - X(t+2)`` rather than at ``X(t+1)``, falling back
-            to the plain warm start for the first two slices and whenever the
-            extrapolated point has the higher loss.  This was the single largest
-            smoothness gain measured (motion_top5 0.254 -> 0.098 with Newton, 0.254 ->
-            0.152 with L-BFGS) and helps both solvers, but it costs a little per-slice
-            fit and overlaps with what the stage-2 smoothing penalty does explicitly,
-            so it is switchable.
         tol_factor: Multiplier on the random-configuration gradient scale that sets each
             slice's tolerance, solver="newton" only (see ``_newton_slice_tolerance``).
 
@@ -1275,14 +1266,13 @@ def coordinate_descent_over_time(
         print(
             f"Sequential (per-slice) stage: damped Newton (exact Hessian, ldl_flip), "
             f"tol=max(tol_factor*|grad| at a random config, {GRAD_FLOOR_EPS:g}*|loss|) "
-            f"with tol_factor={tol_factor:g}, max_iter={newton_max_iter}, "
-            f"extrapolated warm start={extrapolate_warm_start}"
+            f"with tol_factor={tol_factor:g}, max_iter={newton_max_iter}"
         )
     else:
         print(
             f"Sequential (per-slice) stage: L-BFGS-B, ftol={target_precision:g}, "
             f"gtol=gtol_factor*max|grad_init| with gtol_factor={gtol_factor:g}, "
-            f"maxcor={maxcor}, extrapolated warm start={extrapolate_warm_start}"
+            f"maxcor={maxcor}"
         )
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
@@ -1295,8 +1285,6 @@ def coordinate_descent_over_time(
     time_order = (range(n_timepoints) if direction == "forward"
                   else range(n_timepoints - 1, -1, -1))
     prev_t_idx = None
-    prev2_t_idx = None
-    n_extrapolated = 0
 
     for step, t_idx in enumerate(tqdm(time_order)):
         extant_mask = sampled_by_time[:, t_idx]
@@ -1317,34 +1305,6 @@ def coordinate_descent_over_time(
         W_t = np.asarray(W[:, :, t_idx][np.ix_(extant_idx, extant_idx)], dtype=np.float64)
 
         problem_t = {"R": R_t + 1.0 / N_max, "W": W_t, "link": link}
-
-        # --- Extrapolate the warm start along time: 2 X(t+1) - X(t+2) ---
-        # The sweep currently starts each slice where the configuration was one step ago,
-        # which is systematically behind a smoothly drifting trajectory; the first-order
-        # Taylor step projects the last observed velocity forward.  Extrapolation happens
-        # here, before the solve, on the already Procrustes-aligned previous solutions.
-        # Two guards: no t+2 yet for the first two slices, and local linearity in time
-        # breaks exactly at splits, bottleneck edges and admixture pulses -- the features
-        # the method exists to detect -- so fall back whenever the extrapolated point has
-        # the higher loss (one extra loss evaluation per slice).
-        if extrapolate_warm_start and prev2_t_idx is not None:
-            usable = extant_mask & sampled_by_time[:, prev_t_idx] & sampled_by_time[:, prev2_t_idx]
-            if np.any(usable):
-                X_cand = X_t.copy()
-                extrap_in_extant = np.isin(extant_idx, np.where(usable)[0])
-                cand_rows = np.where(usable)[0]
-                X_cand[extrap_in_extant, :] = (
-                    2.0 * X[cand_rows, :, prev_t_idx] - X[cand_rows, :, prev2_t_idx]
-                )
-                loss_cand, _ = compute_loss_gradient(
-                    X_cand.ravel(), X_cand.shape, problem_t
-                )
-                loss_plain, _ = compute_loss_gradient(
-                    X_t.ravel(), X_t.shape, problem_t
-                )
-                if np.isfinite(loss_cand) and loss_cand <= loss_plain:
-                    X_t = X_cand
-                    n_extrapolated += 1
 
         # --- Loss before ---
         loss_t_before, _ = compute_loss_gradient(X_t.ravel(), X_t.shape, problem_t)
@@ -1415,11 +1375,7 @@ def coordinate_descent_over_time(
         loss_after.append(loss_t_after)
         n_iters.append(n_iter)
         messages.append(message)
-        prev2_t_idx, prev_t_idx = prev_t_idx, t_idx
-
-    if extrapolate_warm_start:
-        print(f"  extrapolated warm start accepted on {n_extrapolated} of "
-              f"{n_timepoints} slices")
+        prev_t_idx = t_idx
 
     loss_df = pd.DataFrame({
         "step":           range(1, n_timepoints + 1),
