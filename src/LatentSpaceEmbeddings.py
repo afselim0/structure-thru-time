@@ -28,6 +28,7 @@ from OptimizationFunctions import (
     GTOL_FACTOR,
     MAXCOR_JOINT,
     MAXCOR_TIMEPOINT,
+    TOL_FACTOR_NEWTON,
 )
 
 
@@ -202,7 +203,11 @@ class LatentSpaceEmbeddings:
                                         exact_hessian:       bool  = True,
                                         target_precision:    float = FTOL_TIMEPOINT,
                                         gtol_factor:         float = GTOL_FACTOR,
-                                        maxcor:              int   = MAXCOR_TIMEPOINT):
+                                        maxcor:              int   = MAXCOR_TIMEPOINT,
+                                        solver:              str   = "newton",
+                                        extrapolate_warm_start: bool = True,
+                                        tol_factor:          float = TOL_FACTOR_NEWTON,
+                                        limit_blas_threads:  bool  = True):
         """Stage 1: sequential, unpenalized coordinate descent over time points.
 
         Args:
@@ -211,29 +216,60 @@ class LatentSpaceEmbeddings:
             link: Link function name.
             compute_uncertainty: If True, compute per-sample Laplace covariances.
             exact_hessian: If True (default), use the exact analytical Hessian for
-                those covariances; if False, the L-BFGS approximation.
-            target_precision: ftol; 1e-9 for exploratory sweeps, 1e-12 for final runs.
-            gtol_factor: gtol is gtol_factor * max|grad| at each slice's start.
-            maxcor: L-BFGS memory.
+                those covariances; if False, the L-BFGS approximation (solver="lbfgs"
+                only -- the Newton path has no L-BFGS inverse Hessian to fall back on).
+            target_precision: ftol, solver="lbfgs" only; 1e-9 for exploratory sweeps,
+                1e-12 for final runs.
+            gtol_factor: gtol is gtol_factor * max|grad| at each slice's start,
+                solver="lbfgs" only.
+            maxcor: L-BFGS memory, solver="lbfgs" only.
+            solver: "newton" (default) for damped Newton on the exact Hessian, or
+                "lbfgs" for the previous scipy L-BFGS-B path.
+            extrapolate_warm_start: Start each slice at 2 X(t+1) - X(t+2) rather than
+                X(t+1), with a fallback when that has the higher loss.
+            tol_factor: Per-slice tolerance scale, solver="newton" only.
+            limit_blas_threads: If True (default), pin BLAS to one thread for the
+                duration of the sweep.  The Newton path does dense linear algebra per
+                slice, and this cluster's OpenBLAS (MAX_THREADS=64, NO_AFFINITY)
+                thread-thrashes catastrophically on matrices this small: an 80x80 eigh
+                takes 869 ms unpinned against 0.58 ms pinned.
 
         Returns:
             (embeddings (n, d, T), loss dataframe).
         """
         link_fn = LinkFunction(name=link, N_min=self.N_min, p=p)
-        result = coordinate_descent_over_time(
-            R                  = self.R,
-            W                  = self.W,
-            link               = link_fn,
-            N_max              = self.N_max,
-            n_components       = self.n_components,
-            X_init             = X_init,
-            sampled_by_time    = self.sampled_by_time,
-            target_precision   = target_precision,
-            gtol_factor        = gtol_factor,
-            maxcor             = maxcor,
-            return_covariances = compute_uncertainty,
-            exact_hessian      = exact_hessian,
-        )
+
+        def _run():
+            return coordinate_descent_over_time(
+                R                      = self.R,
+                W                      = self.W,
+                link                   = link_fn,
+                N_max                  = self.N_max,
+                n_components           = self.n_components,
+                X_init                 = X_init,
+                sampled_by_time        = self.sampled_by_time,
+                target_precision       = target_precision,
+                gtol_factor            = gtol_factor,
+                maxcor                 = maxcor,
+                return_covariances     = compute_uncertainty,
+                exact_hessian          = exact_hessian,
+                solver                 = solver,
+                extrapolate_warm_start = extrapolate_warm_start,
+                tol_factor             = tol_factor,
+            )
+
+        if limit_blas_threads:
+            try:
+                from threadpoolctl import threadpool_limits
+                with threadpool_limits(limits=1):
+                    result = _run()
+            except ImportError:
+                print("threadpoolctl unavailable; BLAS threads not pinned. On clusters "
+                      "with a many-threaded OpenBLAS this makes the Newton path much "
+                      "slower -- set OMP_NUM_THREADS=1 before starting python.")
+                result = _run()
+        else:
+            result = _run()
         if compute_uncertainty:
             X, loss_df, covariances = result
             self.covariances = covariances

@@ -176,6 +176,195 @@ def test_hessian_null_space_is_translation():
         assert np.linalg.norm(H @ v) < 1e-8 * scale
 
 
+def test_ldl_flip_is_positive_definite_and_descent():
+    """L |D| L^T has the right inertia, so the direction always goes downhill.
+
+    LDL is a congruence, so by Sylvester's law of inertia flipping the negative
+    eigenvalues of D's 1x1/2x2 blocks yields a positive definite matrix -- which is what
+    makes ``ldl_flip`` usable on an indefinite Hessian without any diagonal shift.
+    """
+    for seed in (4, 5, 6):
+        X, R, W, _, link = _make_problem(n=10, T=1, seed=seed)
+        X_t, R_t, W_t = X[:, :, 0], R[:, :, 0], W[:, :, 0]
+        H = O.compute_exact_hessian(X_t, R_t, W_t, link=link)
+        problem = {"R": R_t, "W": W_t, "link": link}
+        _, grad = O.compute_loss_gradient(X_t.ravel(), X_t.shape, problem)
+
+        for method in ("ldl_flip", "eigh_floor"):
+            direction = O.modified_newton_direction(H, grad, method=method)
+            slope = float(np.dot(grad, direction))
+            assert np.all(np.isfinite(direction)), f"{method}: non-finite direction"
+            assert slope < 0, f"{method}: ascent direction, g.p = {slope:.3e} (seed {seed})"
+
+
+def test_ldl_flip_reconstructs_a_positive_definite_matrix():
+    """Rebuild L |D| L^T explicitly and check its eigenvalues are all positive."""
+    from scipy.linalg import ldl
+
+    X, R, W, _, link = _make_problem(n=8, T=1, seed=4)
+    H = O.compute_exact_hessian(X[:, :, 0], R[:, :, 0], W[:, :, 0], link=link)
+    eig_H = np.linalg.eigvalsh(H)
+    assert np.sum(eig_H < -1e-12 * np.max(np.abs(eig_H))) > 0, (
+        "test needs an indefinite Hessian to be meaningful"
+    )
+
+    lu, d_blocks, perm = ldl(H, lower=True)
+    N = H.shape[0]
+    dm = np.asarray(d_blocks, dtype=float)
+    D_abs = np.zeros((N, N))
+    i = 0
+    while i < N:
+        if (i + 1 < N) and (dm[i + 1, i] != 0.0 or dm[i, i + 1] != 0.0):
+            w, V = np.linalg.eigh(dm[i:i + 2, i:i + 2])
+            D_abs[i:i + 2, i:i + 2] = (V * np.abs(w)) @ V.T
+            i += 2
+        else:
+            D_abs[i, i] = abs(dm[i, i])
+            i += 1
+
+    L = lu[perm, :]
+    B = L @ D_abs @ L.T                       # = |H| in the Gould et al. (2000) sense
+    eig_B = np.linalg.eigvalsh(B)
+    # Positive definite up to round-off in the reconstruction (the factorisation itself is
+    # exact in inertia; forming L |D| L^T explicitly is not).
+    assert eig_B.min() > -1e-12 * eig_B.max(), (
+        f"L |D| L^T is not positive definite: min eig {eig_B.min():.3e} "
+        f"against max {eig_B.max():.3e}"
+    )
+    # Note that L |D| L^T is *not* |H|: it has the right inertia (all-positive) but not
+    # the same eigenvalues, so its spectrum is deliberately not compared to H's.  See
+    # modified_newton_direction's docstring -- the direction has cos ~ 0.4-0.6 with the
+    # exact |H|^-1 g, which costs nothing empirically but is an approximation.
+    assert eig_B.shape == eig_H.shape
+
+
+def test_laplacian_gradient_identity():
+    """g+ + g- == g, and the Laplacian of g applied to X reproduces the gradient.
+
+    This is the structural identity the Newton machinery relies on: the gradient is
+    ``L X`` with ``L = diag(sum_j g_ij) - G``, with no factor of 2 (see the module
+    docstring's sign/factor convention).
+    """
+    X, R, W, _, link = _make_problem(n=9, T=1, seed=11)
+    X_t, R_t, W_t = X[:, :, 0], R[:, :, 0], W[:, :, 0]
+    mask = O.default_valid_mask(R_t)
+
+    D_t = O.compute_distances(X_t)
+    f_t, f_prime_t = link.evaluate(D_t, derivatives=1)
+    G = O.compute_gradient_weights(D_t, f_t, f_prime_t, R_t, W_t, mask, link.eps)
+
+    # Split into attractive (g+) and repulsive (g-) parts and check they sum to g.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d_safe = np.maximum(D_t, link.eps)
+        g_minus = np.where(mask, W_t * f_prime_t / d_safe, 0.0)
+        g_plus = np.where(mask, -(R_t / f_t) * g_minus, 0.0)
+    assert np.allclose(g_plus + g_minus, G, rtol=1e-10, atol=1e-14), "g+ + g- != g"
+    assert np.all(g_plus >= -1e-300), "g+ has negative entries"
+
+    # L X == grad, with L the Laplacian of G.
+    L = np.diag(G.sum(axis=1)) - G
+    problem = {"R": R_t, "W": W_t, "link": link}
+    _, grad_ref = O.compute_loss_gradient(X_t.ravel(), X_t.shape, problem)
+    assert np.allclose(L @ X_t, grad_ref.reshape(X_t.shape), rtol=1e-8, atol=1e-10), \
+        "Laplacian gradient != compute_loss_gradient"
+
+
+def _structured_problem(n=12, d=2, seed=1, N_min=1000.0, p=1.0, noise=40.0):
+    """A slice whose rates are generated *from* a latent configuration.
+
+    ``_make_problem`` draws rates as independent noise, so no embedding explains them and
+    the loss has no well-conditioned minimum -- the solver drives pairs to near-zero
+    distance, where the link's curvature diverges.  That is fine for checking gradients
+    and Hessians pointwise, but it is not a fair convergence test.  The real pipeline
+    fits rates that do come from structure, which is what this builds.
+    """
+    rng = np.random.default_rng(seed)
+    link = O.LinkFunction("inverse_distance", N_min=N_min, p=p)
+    X_true = rng.normal(scale=800.0, size=(n, d))
+    R = link.f(O.compute_distances(X_true))
+    np.fill_diagonal(R, np.nan)
+    W = np.full((n, n), 1e6)
+    np.fill_diagonal(W, np.nan)
+    X0 = X_true + rng.normal(scale=noise, size=(n, d))
+    return X0, R, W, link
+
+
+def test_newton_slice_reduces_loss_and_reaches_tolerance():
+    """The Newton slice solver converges, monotonically, on a structured problem."""
+    X0, R_t, W_t, link = _structured_problem(seed=1)
+    problem = {"R": R_t, "W": W_t, "link": link}
+    f0, _ = O.compute_loss_gradient(X0.ravel(), X0.shape, problem)
+
+    X_opt, loss, n_iter, message = O.optimize_timepoint_newton(
+        X0, R_t, W_t, link=link, N_max=np.inf, max_iter=400,
+    )
+    assert np.all(np.isfinite(X_opt))
+    assert loss <= f0 + 1e-9 * abs(f0), f"loss increased: {f0:.8g} -> {loss:.8g}"
+
+    _, g = O.compute_loss_gradient(X_opt.ravel(), X_opt.shape, problem)
+    tol = O._newton_slice_tolerance(X0, problem, O.TOL_FACTOR_NEWTON)
+    assert np.max(np.abs(g)) <= tol, (
+        f"|grad| {np.max(np.abs(g)):.3e} above tolerance {tol:.3e} after "
+        f"{n_iter} iterations ({message})"
+    )
+    assert "converged" in message, message
+
+
+def test_newton_beats_lbfgs_on_an_ill_conditioned_slice():
+    """The reason for the change: L-BFGS stalls where Newton converges.
+
+    Not a benchmark -- just a guard that the Newton path really does reach a far deeper
+    gradient than the L-BFGS path it replaces, on a slice with the conditioning that
+    motivated it (p=2 puts curvature ~ d^-2, which is minute at these distances).
+    """
+    X0, R_t, W_t, link = _structured_problem(seed=2, N_min=1.0, p=2.0)
+    problem = {"R": R_t, "W": W_t, "link": link}
+
+    X_n, _, _, _ = O.optimize_timepoint_newton(
+        X0, R_t, W_t, link=link, N_max=np.inf, max_iter=400
+    )
+    X_l, _, _, _ = O.optimize_timepoint(
+        X0, R_t, W_t, link=link, N_max=np.inf
+    )
+    _, g_n = O.compute_loss_gradient(X_n.ravel(), X_n.shape, problem)
+    _, g_l = O.compute_loss_gradient(X_l.ravel(), X_l.shape, problem)
+    gn, gl = np.max(np.abs(g_n)), np.max(np.abs(g_l))
+    assert gn < gl, f"Newton |grad| {gn:.3e} not below L-BFGS {gl:.3e}"
+
+
+def test_newton_slice_tolerance_ignores_the_warm_start():
+    """The tolerance must not tighten just because the slice starts near its optimum.
+
+    That dependence is what ``_resolve_gtol`` has, and it is the mechanism that
+    entrenched the per-slice residual: a slice beginning close to its optimum was
+    permitted to stop close to where it began, handing the remainder to the next slice.
+    """
+    X0, R_t, W_t, link = _structured_problem(seed=3)
+    problem = {"R": R_t, "W": W_t, "link": link}
+    X_opt, _, _, _ = O.optimize_timepoint_newton(
+        X0, R_t, W_t, link=link, N_max=np.inf, max_iter=400
+    )
+
+    # The old rule keys off the gradient at the starting point, which collapses by many
+    # orders of magnitude once the start is already converged.
+    _, g_cold = O.compute_loss_gradient(X0.ravel(), X0.shape, problem)
+    _, g_warm = O.compute_loss_gradient(X_opt.ravel(), X_opt.shape, problem)
+    old_cold = O._resolve_gtol(g_cold, O.GTOL_FACTOR)
+    old_warm = O._resolve_gtol(g_warm, O.GTOL_FACTOR)
+    assert old_warm < 1e-6 * old_cold, (
+        f"expected the old rule to collapse at a converged start: "
+        f"{old_cold:.3e} -> {old_warm:.3e}"
+    )
+
+    # The new rule anchors to a random configuration at the same spatial scale instead,
+    # so it barely moves between the two starting points.
+    tol_cold = O._newton_slice_tolerance(X0, problem, O.TOL_FACTOR_NEWTON, seed=0)
+    tol_warm = O._newton_slice_tolerance(X_opt, problem, O.TOL_FACTOR_NEWTON, seed=0)
+    assert 1e-2 < tol_warm / tol_cold < 1e2, (
+        f"tolerance moved with the warm start: {tol_cold:.3e} -> {tol_warm:.3e}"
+    )
+
+
 def test_hessian_rejects_3d_input():
     X, R, W, _, link = _make_problem(seed=7)
     try:
