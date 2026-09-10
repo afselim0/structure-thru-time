@@ -59,7 +59,7 @@ def render_panel(demography, source, scale=4):
     plotter.init_plot(min_time=float(param(demography, "min_time")),
                       max_time=float(param(demography, "max_time")),
                       time_scale=param(demography, "time_scale"),
-                      xy_lims=float(param(demography, "embeddings_plot_lims")))
+                      xy_lims=float(param(demography, "xy_lims")))
     plotter.add_sample_trajectories()
     return plotter.save_static(**RENDER_KW, scale=scale)
 

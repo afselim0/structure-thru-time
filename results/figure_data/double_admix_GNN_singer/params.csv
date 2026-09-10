@@ -1,0 +1,7 @@
+parameter,value
+min_time,50
+max_time,5000
+xy_lims,1000000.0
+N_max,1000000
+time_scale,log
+method,GNN

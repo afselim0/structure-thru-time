@@ -19,11 +19,15 @@ Tables written to results/figure_data/split_and_sawtooth_singer/:
   pop_colors.csv      demography, population, color (taken from the sim run, so a
                       row's two panels share one palette)
   params.csv          demography, parameter, value -- the plotting constants
-                      (min_time, max_time, time_scale, xy_lims, d/N_min/N_max/p)
+                      (min_time, max_time, time_scale, xy_lims, d/N_min/N_max/p).
+                      xy_lims is set from the data here, not from the config's
+                      embeddings_plot_lims: embedded distances scale as 1/rate^p,
+                      so a limit chosen for one p is stale as soon as p changes.
 """
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -47,6 +51,9 @@ SOURCES = {"sim": "simulated trees", "singer": "SINGER trees"}
 REFERENCE_SOURCE = "sim"
 
 D = 2  # every run in this figure is a 2D embedding
+# the xy limit of a row: the largest radius over both tree sources, padded and
+# rounded up to two significant digits, so the row's two panels share one frame
+XY_PAD = 1.05
 
 
 def config_for(demography):
@@ -61,6 +68,14 @@ def read_embeddings(run_dir, source, config):
     return pd.read_parquet(find_output_file(
         data_dir, "embeddings", d=D, Nmin=config["N_min"], Nmax=config["N_max"],
         p=config["p"]))
+
+
+def xy_limit(frames):
+    """Padded, rounded-up radius of the largest embedded position in any frame."""
+    radius = max(float(np.hypot(df["X1"], df["X2"]).max()) for df in frames)
+    padded = radius * XY_PAD
+    magnitude = 10 ** np.floor(np.log10(padded) - 1)
+    return float(np.ceil(padded / magnitude) * magnitude)
 
 
 def read_labels(run_dir, source):
@@ -86,10 +101,12 @@ def main():
         # the SINGER frame is arbitrary up to an orthogonal transform, so put it in
         # the simulated-tree frame before it is drawn beside it
         reference = raw[REFERENCE_SOURCE]
+        aligned = {}
         for source, label in SOURCES.items():
             df = (reference if source == REFERENCE_SOURCE
                   else procrustes_align_trajectories_df(
                       reference, raw[source], allow_reflections=True))
+            aligned[source] = df
             embedding_frames.append(
                 df.assign(demography=demography, source=label))
 
@@ -99,11 +116,12 @@ def main():
         label_frames.append(pop_labels.assign(demography=demography))
         color_frames.append(pop_colors.assign(demography=demography))
 
-        for key in ("min_time", "max_time", "time_scale", "N_min", "N_max", "p",
-                    "embeddings_plot_lims"):
+        for key in ("min_time", "max_time", "time_scale", "N_min", "N_max", "p"):
             param_rows.append({"demography": demography, "parameter": key,
                                "value": config[key]})
         param_rows.append({"demography": demography, "parameter": "d", "value": D})
+        param_rows.append({"demography": demography, "parameter": "xy_lims",
+                           "value": xy_limit(aligned.values())})
 
     embeddings = pd.concat(embedding_frames, ignore_index=True)
     written = [
