@@ -1,0 +1,87 @@
+# singer-snakemake configuration for the HGDP sample sets.
+#
+# NOT YET TUNED. Everything below the input/polarisation block is at the upstream example's
+# defaults; chunking, MCMC length and the mutation/recombination rates all want revisiting
+# against a pilot run before this is used in anger.
+#
+# Run from the singer-snakemake clone:
+#   cd ../singer-snakemake
+#   snakemake --configfile ../human_data/singer_config.yaml --cores all
+#
+# `input-dir` is a placeholder pointing at one set. Point it at whichever of
+# SingerSnakemake_SampleSets/<set>/input you mean to run, or override on the command line with
+# --config input-dir=...
+
+input-dir: "../human_data/SingerSnakemake_SampleSets/AFRICA/input"
+output-dir: "../human_data/results/AFRICA"
+chromosomes: null           # null => glob every {chrom}.vcf.gz in input-dir
+
+mutation-rate: 1.25e-8      # per base per generation
+recombination-rate: 1.0e-8  # ignored: a per-chromosome hapmap is supplied
+
+# Ancestral state.
+#
+# `polarised` is IGNORED whenever a <chrom>.ancestral.fa.gz is present, which it always is
+# here -- chunk_chromosomes.py only consults the flag when that file is absent. It is set
+# false for clarity about what the data are, not because it takes effect.
+polarised: false
+
+# `remove-unpolarised` is undocumented (absent from the upstream example config, read via
+# config.get with a False default). Keeping it false is what retains sites whose ancestral
+# state is unknown -- they are handed to SINGER's own per-site polarisation instead of being
+# discarded. Note it only has any effect when `polarised` is ALSO true, so this is belt and
+# braces against a future change to that default.
+remove-unpolarised: false
+
+stratify-by: "population"   # column in <chrom>.meta.csv used for the population table
+# For the ALL set consider "region" instead: 54 populations give ~1,400 cross-coalescence
+# pairs, against 21 for the 7 regions.
+
+random-seed: 1
+
+# --- discretization options ---
+max-chunk-size: 1.0e6
+min-chunk-size: 0.1e6
+min-gap-size: 1.0e6
+max-missing: 0.75
+min-sites: 500
+min-branch-length: 1.0e-7
+
+# --- missing-genotype imputation (see README.md "No blanket drop of missing genotypes") ---
+#
+# All four keys are UNDOCUMENTED: none appears in the upstream example config, and each is read
+# via `config.get(key, default)` in the Snakefile. They are set explicitly here because three of
+# the four defaults are wrong for us and one of them is actively dangerous.
+#
+# max-masked-samples is LOAD-BEARING. chunk_chromosomes.py:220 does
+#   samplemask_inaccessible = samplemask_intervals[samplemask_coverage > max_masked_samples]
+#   for (a, b) in samplemask_inaccessible: bitmask[a:b] = True     # True == INACCESSIBLE
+# so at its default of 0, ANY position covered by even one masked sample is marked globally
+# inaccessible -- silently deleting the very sites the mask exists to rescue. It must exceed the
+# largest per-site masked-sample count in any chr{N}.sample.mask.bed. make_sample_masks.py prints
+# that maximum, verify_sets.py asserts on it, and scripts/test_max_masked_samples.py proves both
+# branches. Our threshold caps it at 10% of samples (<= 23 for the largest set), so 999 is safe
+# for every set.
+max-masked-samples: 999
+impute-sample-masks: true      # fill masked genotypes by binomial draw from observed frequency
+delete-imputed-intervals: true # clip imputed ancestry back out of the output tree sequence
+skip-node-masks: false         # keep imputed spans out of POLEGON dating
+
+# --- SINGER options ---
+singer-mcmc-samples: 100
+singer-mcmc-thin: 100
+singer-mcmc-burnin: 0.5
+singer-mcmc-resumes: 1000
+singer-skip-failures: true
+
+# --- POLEGON options ---
+polegon-mcmc-samples: 100
+polegon-mcmc-thin: 10
+polegon-mcmc-burnin: 0.5
+polegon-scaling-reps: 5
+polegon-max-step: 10.0
+
+# --- summary statistics ---
+stats-time-grid: [1, 7, 25]
+stats-window-size: 5.0e4
+paircoal-reweight: false

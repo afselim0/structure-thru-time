@@ -1,0 +1,377 @@
+# Resolved versions, download manifest and recorded decisions for the HGDP preparation.
+# Written by hand alongside download.sh; the manifest is what a successful run produced on
+# 2026-09-11 and is what a re-run should reproduce.
+
+build: GRCh38
+prepared: 2026-09-11
+
+sources:
+  hgdp_statphase:
+    description: HGDP 929 diverse genomes, statistically phased (Bergstrom et al. 2020)
+    url: https://ngs.sanger.ac.uk/production/hgdp/hgdp_wgs.20190516/statphase/
+    files:
+      hgdp_wgs.20190516.statphase.autosomes.vcf.gz:
+        bytes: 6318706296
+        sha256: b325dafddc575f440c607d9f85e81a5a1a01d623e9cb0c8cd48077a6f8f07f89
+      hgdp_wgs.20190516.statphase.autosomes.vcf.gz.tbi:
+        bytes: 2466051
+        sha256: 56bc698ebbac2f481b71abc9682e8530fa90b48d58e0d4d28239a1ab66631b3e
+    verified:
+      samples: 929
+      records: 64946303
+      indels: 0          # SNP-only callset; `-v snps` is kept as a cheap guard
+    note: >
+      Sanger publishes no checksums, so integrity is established by agreement between the
+      bgzip index and the data (bcftools index -n) plus the sample count.
+
+  accessibility_mask:
+    url: https://ngs.sanger.ac.uk/production/hgdp/hgdp_wgs.20190516/accessibility-mask/
+    files:
+      hgdp_wgs.20190516.mask.bed:
+        bytes: 96669815
+        sha256: 86ee22f945397074414cad1ebadd77c326720c441744e1a112bf87afea11ef0b
+    polarity: positive     # intervals are ACCESSIBLE; we store the complement
+    published_accessible_bp: 2252286208
+
+  metadata:
+    url: https://ngs.sanger.ac.uk/production/hgdp/hgdp_wgs.20190516/metadata/hgdp_wgs.20190516.metadata.txt
+    files:
+      hgdp_wgs.20190516.metadata.txt:
+        bytes: 109538
+        sha256: da83551d80ae3ac189db620534a61a0534c052dfceedaba5b84613bb1b083e78
+    columns_used: [sample, population, region, longitude, latitude, coverage]
+    note: >
+      The sample identifier column is named `sample`, not `sample_id`; it is renamed on the
+      way into resources/hgdp/metadata.tsv so downstream code sees one spelling.
+
+  ancestral_alleles:
+    description: Ensembl EPO 6-primate ancestral alleles
+    release: 113
+    url: https://ftp.ensembl.org/pub/release-113/fasta/ancestral_alleles/homo_sapiens_ancestor_GRCh38.tar.gz
+    mirror: https://ftp.ebi.ac.uk/pub/ensembl/release-113/fasta/ancestral_alleles/homo_sapiens_ancestor_GRCh38.tar.gz
+    files:
+      homo_sapiens_ancestor_GRCh38.tar.gz:
+        bytes: 862180990
+        sha256: 0cf6ba15f27ad01b612ecd9af3c7c71c44e15eb0ac6a6a257700c08104c7f826
+    note: >
+      Release 113 is pinned deliberately. Ensembl is mid-migration to a new platform, so the
+      `current_*` symlinks are unstable; 113 is also the release used across comparable human
+      ARG work.
+
+  recombination_map:
+    description: deCODE 2019 sex-averaged genetic map (Halldorsson et al. 2019, Data S3)
+    doi: 10.1126/science.aau1043
+    files:
+      aau1043_datas3.gz:
+        bytes: 26904065
+        sha256: 0a610ae794d1061558031dbeb6ff1e6d5857908b9e626ce333b4f7126d1d12af
+    download: manual
+    note: >
+      science.org serves its supplements behind bot protection and returns HTTP 403 to curl
+      on every known URL, including with a browser User-Agent, so this file must be fetched
+      by hand through a browser. download.sh keeps the fetch line commented out and fails
+      with instructions if the file is absent. The published file has 7 comment lines AND a
+      column-header row, both of which the parser skips.
+
+derived:
+  chrom_sizes:
+    source: ancestral FASTA record lengths
+    note: >
+      The single source of truth. The mask complement and the hapmap terminal row are both
+      built against it, which is what makes the three-way exact-equality check pass.
+    agrees_with_vcf_index: true
+
+  hapmap:
+    format: 4-column HapMap (Chromosome, Position(bp), Rate(cM/Mb), Map(cM))
+    position_from: deCODE `End`
+    cumulative_cm_from: deCODE `cM`      # already the value AT `End`, so no shift
+    rate_column: shifted down one row
+    rate_note: >
+      read_hapmap ignores the rate column entirely (rates are differenced from the cumulative
+      map), but deCODE's cMperMb is backward-looking while read_hapmap's semantics are
+      forward-looking, so the column is shifted to be correct under either reading.
+    leading_row: position 1 at 0 cM
+    leading_row_note: >
+      The deCODE map starts inside the chromosome (chr1 at 1,431,813), so read_hapmap marks
+      the leading interval as missing data and gives it a NaN rate. Expect exactly one skipped
+      chunk per chromosome start in the SINGER logs.
+    terminal_row: extended to chrom.sizes carrying the final cM forward
+    measured_total_cm: {chr1: 267.8, chr21: 62.9, chr22: 70.8}
+    measured_cm_per_mb: {chr1: 1.08, chr21: 1.35, chr22: 1.39}
+
+  mask:
+    stored_as: INACCESSIBLE intervals (the complement of the published mask)
+    reason: >
+      chunk_chromosomes.py sets `bitmask[a:b] = True` for every interval read, and True means
+      inaccessible. Storing the published polarity would invert the analysis silently.
+    split_per_chromosome: true
+    split_reason: >
+      The reader uses `usecols=[1, 2]` and ignores the chromosome column, so a genome-wide BED
+      would be read as one chromosome's intervals.
+    measured_accessible_fraction:
+      autosomes_total: 0.7411
+      range: [0.4808, 0.8209]
+      lowest: chr22
+      lowest_reason: >
+        The entire acrocentric p-arm (0-10,661,594) is unmappable satellite/rDNA. chr21 and
+        chr15 show the same structure. This is biology, not inverted polarity.
+
+# End-to-end dry run of singer-snakemake's own input handling (its read_single_fasta,
+# RateMap.read_hapmap, mask bitmask and filter chain, imported from the clone) against
+# OCEANIA/chr22 on 2026-09-11. Every assertion in chunk_chromosomes.py's input section passed.
+validation_oceania_chr22:
+  variants_in_vcf: 139383
+  samples: 28
+  sequence_length: 50818468          # ancestral FASTA == hapmap == chrom.sizes
+  ancestral_states_at_variants:      # after np.char.upper
+    A: 20345
+    C: 35701
+    G: 36321
+    T: 20127
+    N: 1241                          # -> unpolarised, retained
+    "-": 6656                        # -> unpolarised, retained
+    ".": 18992                       # -> unpolarised, retained
+  polarised: 111570                  # 80.0%
+  allele_flips: 27801                # ancestral matched ALT; REF/ALT swapped
+  mask_inaccessible_fraction: 0.5192 # agrees with the 48.08% accessible measured separately
+  filters:
+    non_segregating: 4245
+    non_biallelic: 323
+    missing_genotype: 36351
+    inaccessible: 58780
+  retained: 70985                    # 50.9%
+
+sample_sets:
+  regional:
+    rule: every sample in the region
+    sizes:
+      AFRICA: 104
+      EUROPE: 155
+      CENTRAL_SOUTH_ASIA: 197
+      EAST_ASIA: 223
+      OCEANIA: 28
+      AMERICA: 61
+      MIDDLE_EAST: 161
+  ALL:
+    rule: the 4 highest-coverage samples from each of the 54 populations
+    tie_break: sample id
+    size: 216
+    reason: >
+      SINGER's cost is quadratic in sample count, so all 929 is prohibitive; an unweighted
+      subsample would be dominated by the densely sampled regions (EAST_ASIA 223 vs OCEANIA
+      28). Every population has at least 4 samples, so the quota is always met exactly.
+
+known_issues:
+  sample_mask_site_count_gap:
+    status: open, not a blocker
+    summary: >
+      The number of sites masked in chr{N}.sample.mask.bed exceeds the number the workflow
+      reports rescuing by roughly 8,200 on OCEANIA/chr22 (13,750 masked vs the retained-site
+      delta). Filed as a cleanup ticket 2026-09-11, deliberately NOT chased further.
+    hypothesis: >
+      Masks are being written at positions that fall in INACCESSIBLE sequence.
+      make_sample_masks.py streams the whole chromosome and does not consult
+      resources/grch38/mask/chr{N}.mask.bed, so a site missing <=10% of its alleles inside a
+      masked region still gets mask lines. Those sites are dropped at `filter_accessible`
+      regardless of whether we mask them, so the OUTPUT IS ALREADY CORRECT -- the cost is disk
+      and a little parse time, not a wrong answer. This is consistent with the arithmetic: on
+      chr22 only ~52% of sequence is accessible, and missingness concentrates in the
+      inaccessible acrocentric p-arm.
+    one_line_test: >
+      bedtools intersect -a SingerSnakemake_SampleSets/<SET>/input/chr22.sample.mask.bed
+      -b resources/grch38/mask/chr22.mask.bed -u | wc -l
+      (nonzero => masks are being written at inaccessible positions, confirming the hypothesis)
+    when_to_fix: >
+      Only when deciding whether to regenerate the 3.8 GB of masks, and that decision comes
+      after we have seen tree sequences. Fixing it means intersecting against the accessibility
+      mask inside make_sample_masks.py, which would shrink the BEDs but change no result.
+
+decisions:
+  filter_txt:
+    used: false
+    reason: >
+      Sites removed by the HGDP quality filters before phasing are not recoverable from the
+      statphase VCF (it contains only sites that survived), and recovering them would mean
+      streaming ~250 GB of full-callset VCFs. When the file is absent the workflow still
+      derives `filtered_positions` from our own VCF -- multiallelic sites and sites with
+      missing genotypes -- which for these subsets is much the larger effect (see
+      sample_mask_bed above: tens of percent, against a sub-percent correction for non-PASS).
+    prior_measurement_unverified: >
+      The planning note recorded non-PASS SNPs as 0.46% of accessible SNPs on chr21. That was
+      NOT re-measured here -- it needs the full callset, which is not downloaded -- so treat
+      it as indicative rather than established.
+  omit_txt:
+    used: false
+    reason: >
+      Considered for CpG sites and rejected: `adj_mu` has no term for omitted variants (there
+      is an explicit FIXME in chunk_chromosomes.py noting the bias is only acceptable when
+      omitted variants are few), and CpG transitions are 15-25% of human SNVs.
+  sample_mask_bed:
+    used: true
+    changed: 2026-09-11
+    rule: >
+      Sites missing <=10% of their alleles are marked in chr{N}.sample.mask.bed and imputed by
+      singer-snakemake via binomial draw from the observed allele frequency at that site. Sites
+      missing more are left missing, dropped by `filter_nonmissing`, and added to
+      `filtered_positions` automatically, which scales `adj_mu`. Measured over accessible
+      sequence the dropped tail is only 0.6-2.4% of sites, so nearly all of the previous loss
+      is recovered.
+    denominator: >
+      Alleles (missing haplotypes / 2n), matching how `filter_nonmissing` counts. There are no
+      half-missing genotypes in this callset -- the only missing form is `./.`, verified by
+      enumerating every distinct GT string and across five set/chromosome combinations plus the
+      raw 929-sample source -- so the allele and sample denominators coincide, the
+      `max-masked-samples` guard (which counts samples) stays coherent, and imputation can
+      never overwrite an observed allele. make_sample_masks.py aborts if one is ever found.
+    max_masked_samples_is_load_bearing: >
+      `max-masked-samples` defaults to 0. chunk_chromosomes.py:220 marks every interval with
+      coverage > that value as globally INACCESSIBLE, so at the default every masked position
+      is deleted -- silently, and precisely the sites the mask exists to rescue. Measured on
+      OCEANIA/chr22 alone the default would discard 13,750 bp across 13,612 intervals.
+      singer_config.yaml sets it to 999; verify_sets.py asserts it exceeds the observed
+      maximum, and scripts/test_max_masked_samples.py proves both branches permanently.
+    measured_sizing: >
+      Built for all 8 sets 2026-09-11 (SLURM array 58698877, 51s-10min per set). Per-set
+      totals over all 22 autosomes, whole chromosomes: BED lines / max masked samples at any
+      one site. The max tracks floor(0.10 * n) almost exactly, which is the threshold binding
+      as designed and confirms `max-masked-samples: 999` has large headroom for every set.
+
+        OCEANIA            n=28     801,797 lines   max  2
+        AMERICA            n=61   2,553,605 lines   max  6
+        AFRICA             n=104  14,984,758 lines  max 10
+        EUROPE             n=155  12,399,262 lines  max 15
+        MIDDLE_EAST        n=161  16,632,656 lines  max 16
+        CENTRAL_SOUTH_ASIA n=197  22,096,261 lines  max 19
+        ALL                n=216  24,903,475 lines  max 21
+        EAST_ASIA          n=223  23,950,072 lines  max 22
+
+      Total 118,321,886 lines, ~3.8 GB on disk. Higher than the planning estimate of 10-20M
+      lines per large set; the masks are gitignored along with the rest of the built inputs.
+    measured_costs: >
+      All three cost centres measured 2026-09-11; none is a bottleneck.
+
+      parse_sample_bedmask: 0.02s on OCEANIA/chr22 (17k lines), 2.7s on EAST_ASIA/chr1
+      (1,976,422 lines). interval_coverage on the latter: 0.4s.
+
+      Imputation block (chunk_chromosomes.py:249-263, one full-chromosome boolean array per
+      haplotype): 0.6s for 56 haplotypes on chr22; ~25s extrapolated for all 446 haplotypes on
+      EAST_ASIA/chr1 (248 Mb). Runs once per chromosome, not per replicate.
+
+      remove_partial_ancestry (utils.py, via merge_chunks.py:241): 0.04s per 1 Mb chunk at full
+      EAST_ASIA scale (446 haplotypes, 14,230 intervals, 9k edges), 0.08s at 5x edge density.
+      x100 replicates x ~40 chunks = ~0.09 h per chromosome. This was expected to be the
+      bottleneck because it runs PER REPLICATE and is two nested Python loops, but the
+      np.searchsorted prefilter means most edges never enter the inner loop. The
+      `delete-imputed-intervals: false` escape hatch is therefore NOT needed.
+
+    smoke_test_oceania_chr22: >
+      Verification step 4, the real workflow end to end (snakemake chunk_chromosomes, isolated
+      workdir, 2026-09-11). singer-snakemake's own log confirms every claim:
+
+        Parsed 28 per-sample interval masks
+        Dropping 0 intervals (0 bp) with more than 999 missing samples
+        Imputing <N> variants in sample mask for haplotype <h>   [all 56, correctly paired]
+        Removed 22601 sites with missing data                    [was 36351 without masks]
+        Calculating statistics with remaining 76521 variants     [was 70985]
+
+      So the BED convention, the diploid haplotype duplication, and the trap avoidance are all
+      confirmed against the real consumer rather than a replay. 13,750 sites rescued on chr22
+      alone, +7.8% retained. chr22.nodemask.p persisted with 56 haplotypes / 33,940 intervals in
+      1-based coordinates, ready for the pruning and dating-exclusion stages.
+
+    statistical_property: >
+      A binomial draw is unbiased in expectation: expected AC after imputation is
+      AC_obs * 2n/(2n-m), the unbiased estimate of what complete data would have given. It
+      broadens the SFS through added variance rather than shifting it. Majority-allele fill --
+      what the earlier .misc/human_data attempt used -- DOES shift toward the major allele,
+      which is the substantive reason to prefer this. The assumption is MCAR-within-site, since
+      the frequency is estimated from the non-missing calls at that site; missingness here is
+      site-driven rather than genotype-driven, which makes that plausible. Neither approach can
+      manufacture haplotype sharing, the mechanism by which panel imputation would inject false
+      coalescent structure into what CoaSTT measures.
+    superseded_reason: >
+      SUPERSEDED 2026-09-11 -- recorded for history, no longer the operating decision.
+
+      The original position was: a substantial minority of subset-polymorphic sites carry at
+      least one missing genotype, `filter_nonmissing` has zero tolerance so they are dropped,
+      and that loss is exactly corrected in the per-chunk mutation rate (they enter
+      `filtered_positions`, which scales `adj_mu`), whereas frequency-based imputation error
+      would propagate invisibly into topology -- so accept the drop.
+
+      What changed: the correction argument still holds, but it was weighed against the wrong
+      cost. Genome-wide missingness turned out to run 6.4%-41.3% depending on the set, so for
+      the larger sets "accept the drop" meant discarding over 40% of usable sites, and the
+      spread ran along the n axis -- making between-set comparisons carry a confound. The
+      "propagates invisibly into topology" objection is also answered rather than merely
+      traded away: the .sample.mask.bed route means imputed ancestry is tracked, clipped out of
+      the output tree sequence by `remove_partial_ancestry`, and excluded from POLEGON dating,
+      so it informs topology without persisting as if it were observed data.
+    measured_genomewide_accessible:
+      # Fraction of sites with >=1 missing GT among those accessible and segregating in the
+      # subset -- i.e. the sites the workflow actually reaches `filter_nonmissing` with.
+      # Pooled over all 22 autosomes, measured 2026-09-11 from the built input VCFs.
+      # Ordered by the fraction, NOT by n -- see set_size_is_not_the_only_driver below.
+      OCEANIA_n28: 0.0642              #   412,743 / 6,432,096 sites
+      AMERICA_n61: 0.1234              #   838,408 / 6,796,174
+      ALL_n216: 0.1924                 # 4,735,836 / 24,614,020
+      AFRICA_n104: 0.2373              # 4,909,356 / 20,685,196
+      EUROPE_n155: 0.2793              # 3,382,473 / 12,109,546
+      MIDDLE_EAST_n161: 0.2807         # 4,396,642 / 15,661,551
+      CENTRAL_SOUTH_ASIA_n197: 0.3525  # 5,654,629 / 16,043,315
+      EAST_ASIA_n223: 0.4132           # 5,901,853 / 14,281,851
+    set_size_is_not_the_only_driver: >
+      The fraction is a per-site union over samples, so it rises with n -- but n does not
+      order these sets. EAST_ASIA (n=223, 41.32%) is the highest while ALL (n=216, 19.24%) is
+      less than half that at almost the same sample count, and AFRICA (n=104, 23.73%) exceeds
+      ALL with half the samples.
+
+      The denominator is what separates them. ALL is 4 samples from each of 54 populations, so
+      it spans maximal diversity and has by far the most segregating sites (24.6M) -- many of
+      them rare variants private to one population and called in few samples, which dilutes
+      the fraction. The regional sets concentrate many samples within a few closely related
+      populations: EAST_ASIA has 223 samples but only 14.3M segregating sites, so the same
+      missing calls fall on a much smaller base. Read this as a property of (set size x
+      diversity), never of the dataset, and always say which set.
+    per_chromosome_variability: >
+      Do NOT quote a single chromosome as a dataset figure. chr22 runs 35-45% high against
+      genome-wide (OCEANIA 8.40% vs 6.42%, AFRICA 33.58% vs 23.73%, ALL 27.07% vs 19.24%),
+      and chr19 is similarly elevated; the large chromosomes cluster tightly (OCEANIA: chr1
+      6.13%, chr2 5.74%, chr9 6.47%, chr15 6.15%, chr21 6.33%). chr22 is gene-dense and
+      repeat-rich, and its acrocentric p-arm skews what survives masking.
+    monomorphic_note: >
+      `bcftools view -a -c 1` during subsetting already drops sites monomorphic in the set, so
+      these are post-monomorphic figures. Applying allel's `is_segregating()` on top (what
+      chunk_chromosomes.py uses) removes only a small residue -- 2,792 / 1,040 / 101 sites for
+      OCEANIA / AFRICA / ALL -- and moves the fraction by at most 0.21 points. That residue is
+      sites whose only ALT carriers are the missing samples: `-c 1` counts non-missing
+      genotypes only, so they survive it but are non-segregating to `is_segregating()`. It
+      shrinks sharply with n, since all ALT carriers being missing gets less likely.
+    measured_note: >
+      The planning figure of 12.9-18.3% is consistent with these numbers, not contradicted by
+      them: it was genome-wide and on the same >=1-missing-GT basis, and it brackets ALL
+      (19.24%) while sitting near OCEANIA (6.42%) and AFRICA (23.73%) at the ends of the
+      set-size range. An earlier claim in this file that it was "too low" came from quoting
+      chr22 alone, which runs 35-45% high; that claim was wrong and has been removed.
+
+      Two denominators to keep straight. Restrict to ACCESSIBLE sequence: the unrestricted
+      figure for AFRICA chr22 is 49.67%, misleading because much of that missingness sits
+      where the accessibility mask drops sites anyway. And pool chromosomes rather than
+      extrapolating from one.
+
+      Cross-checked against the earlier attempt in .misc/human_data on 2026-09-11: its
+      panel/hgdp/chr22.vcf.gz and our resources/hgdp/statphase/chr22.bcf hold the identical
+      978,269 sites at identical positions, and its per-set VCFs carry the same sample counts
+      (28 / 104 / 216). Its delivered VCFs measure 0.00% missing under this metric because
+      that pipeline imputed the residue (major-allele fill, 9,893 / 206,193 / 516,234
+      genotypes); we do not impute, so our sites carry missingness through to
+      filter_nonmissing.
+  genetic_map_choice:
+    chosen: deCODE 2019 sex-averaged (Halldorsson et al.)
+    rejected:
+      - stdpopsim DeCodeSexAveraged_GRCh38   # Kong et al. 2010, lifted over
+      - Palsson et al. 2024                  # 1 Mb resolution, NCO map
+  tskit_fork:
+    used: false
+    note: >
+      singer-snakemake's requirements.txt pins nspope/tskit@nsp-paircoal-partial-missing.
+      CoaSTT_env uses stock tskit 1.0.3 instead; see README.md for what that costs.
