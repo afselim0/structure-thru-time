@@ -1,0 +1,69 @@
+# SLURM profile for singer-snakemake on the SHARED caslake partition.
+#
+#   snakemake ... --profile caslake_profile
+#
+# caslake is 190 nodes x 48 CPU / 184 GB (3.84 GB per CPU), MaxTime unlimited, and shared with
+# the rest of the cluster. On a shared partition the scheduler favours small, cheap requests:
+# a 1-CPU job asking 4 GB backfills into gaps that a 16-CPU or 64 GB job waits hours for. Every
+# rule in this workflow is single-threaded (none declares `threads`), so asking for one CPU
+# each is not a compromise -- it is what the work actually is.
+#
+# The per-rule resources below are sized from a COMPLETED ALL (n=216, 2 Mb chunks, chr21) run
+# -- measured, not guessed. On a shared partition the scheduler favours small requests: a job
+# asking 8 GB / 10 h backfills into gaps that a 14 GB / 36 h job waits behind, and every rule
+# here is single-threaded (none declares `threads`), so one CPU each is what the work is.
+#
+#     rule                 n    median        max        requested here
+#     run_singer          16    3.8 h  3.7 GB  5.8 h  5.4 GB    10 h,  8 GB
+#     run_polegon        256    0.7 min  313 MB  1.2 min 346 MB   30 min, 1 GB
+#     chunk_chromosomes    1    ~2 min   ~35 MB (chr22)           4 h,   8 GB
+#
+# Two notes on the sizing:
+#
+#  * run_singer's 10 h / 8 GB is ~1.7x the observed maximum on both axes. Chunks are a FIXED
+#    2 Mb, so a chunk from chr1 should cost about what a chunk from chr21 costs -- the per-chunk
+#    figures do not scale with chromosome length. The headroom covers chunks with unusually high
+#    variant density, not longer chromosomes.
+#  * chunk_chromosomes keeps 8 GB despite measuring ~35 MB on chr22: it builds a
+#    full-chromosome numpy <U1 array from the ancestral FASTA plus the whole genotype matrix,
+#    and chr1 is 5x longer than chr22. This is the one rule whose cost DOES scale with
+#    chromosome length, so it keeps generous memory.
+
+executor: slurm
+jobs: 500                      # caslake has 9120 CPUs; 500 concurrent single-CPU jobs is polite
+max-jobs-per-second: 5
+max-status-checks-per-second: 0.5
+latency-wait: 60               # shared filesystem under load can lag
+keep-going: true               # one failed chunk should not stop the rest
+rerun-incomplete: true
+printshellcmds: true
+
+default-resources:
+    slurm_account: pi-jnovembre
+    slurm_partition: caslake
+    cpus_per_task: 1
+    mem_mb: 2000
+    runtime: 240
+
+set-resources:
+    chunk_chromosomes:
+        mem_mb: 8000
+        runtime: 240
+    run_singer:
+        mem_mb: 8000           # observed max 5.4 GB
+        runtime: 600           # 10 h; observed max 5.8 h. Well under the 36 h QOS ceiling,
+                               # which means it backfills instead of waiting for a long slot.
+    run_polegon:
+        mem_mb: 1000           # observed max 346 MB
+        runtime: 30            # observed max 1.2 min
+    merge_chunks:
+        mem_mb: 8000
+        runtime: 720
+    observed_tree_statistics:
+        mem_mb: 4000
+    expected_tree_statistics:
+        mem_mb: 4000
+    coalescence_rates:
+        mem_mb: 4000
+    diagnostics:
+        mem_mb: 4000
