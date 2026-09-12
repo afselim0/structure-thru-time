@@ -1,0 +1,1443 @@
+# Resolved versions, inventory findings and recorded decisions for the chimpanzee preparation.
+# The sibling of data/human_data/prep.yaml. Numbers here were measured on 2026-09-11 against
+# the copied VCF unless a different source is named.
+
+build: panTro6          # GCA_002880755.3 / GCF_002880755.1, "Clint_PTRv2"
+prepared: 2026-09-11
+status: >
+  COMPLETE, 2026-09-11. All 23 autosomes built and verified (14/14 checks each);
+  44,346,959 sites in SingerSnakemake_Input/. Ready for singer-snakemake.
+  (Earlier note, kept for history: chr21 PILOT COMPLETE.) One chromosome runs end to end: bonobo removal, mask,
+  recombination map, ancestral FASTA and the assembled input directory all built and
+  verified, 13/13 checks passing, and singer-snakemake's own input handling dry-runs clean
+  against it. Scaling to the remaining 22 autosomes is the next step, plus phasing -- the
+  pilot VCF is NOT yet phased (the switch-error work used chimp_args' existing SHAPEIT5
+  output on arm-split VCFs, not these whole-chromosome ones).
+
+environment:
+  tools_installed: 2026-09-11
+  versions:
+    beagle: 5.4_29Oct24.c8e
+    whatshap: 2.8
+    ucsc-liftover: 482
+    ucsc-bigbedtobed: 482
+    genmap: 1.3.0
+    openjdk: 25.0.2
+  pins_intact: true      # msprime 1.4.2, tskit 1.0.3, bcftools 1.24, numpy, python 3.12 all unmoved
+  environment_yml_updated: true
+  beagle_invocation:
+    use: java -jar $CONDA_PREFIX/share/beagle-5.4_29Oct24.c8e-0/beagle.jar
+    not: the bare `beagle` shim
+    reason: >
+      The bioconda shim resolved to a tcl interpreter in this environment and failed looking
+      for init.tcl under a garbled prefix (/project/jnovembre/afselim/CoaSTT/lib, note the
+      missing _env). Invoking the jar directly works and is what the scripts should do.
+
+  session_memory_limit:
+    bytes: 8589934592        # 8 GiB, per-session cgroup
+    discovered_via: >
+      A Beagle run with -Xmx48g was OOM-killed. The kernel log shows
+      `oom-kill constraint=CONSTRAINT_MEMCG ... task=java`, i.e. the SESSION cgroup, not the
+      node -- the node itself has 251 GB with ~114 GB free and 64 CPUs.
+    consequence: >
+      Interactive work on this login node must fit in 8 GiB. Anything larger has to run under
+      SLURM, where the limit is the job's --mem rather than the session's. Do not size the
+      SLURM profile from what fits interactively.
+    beagle_cannot_run_interactively: >
+      MEASURED, not assumed: -Xmx48g and -Xmx6g were BOTH OOM-killed (exit 137), the second
+      at 4.1 GB RSS and still climbing, because the JVM's off-heap overhead sits on top of
+      the heap. Beagle on a 592k-marker arm needs a SLURM job; scripts/ must not offer an
+      interactive path. A killed Beagle still writes a 567-byte header-only VCF and a .tbi,
+      so any wrapper MUST assert on record count -- exit status alone is not enough, and an
+      unchecked file would be silently scored as if it were phased output.
+    ru_maxrss_units: >
+      ru_maxrss is in KILOBYTES on Linux. An earlier probe here divided by 1024**2 and
+      reported a "1 MiB peak" for a process that had just allocated a 0.84 GiB array. Any
+      memory figure in this file that looks implausibly small is that bug, not a measurement.
+
+install_history:
+  tool_install:
+    status: DONE -- installed by the user on 2026-09-11; versions under `environment` above.
+    dry_run_result: >
+      Clean. 29 packages, all pure additions -- zero upgrades, zero downgrades, zero
+      removals, which the post-install check confirmed.
+    solver_note: >
+      The base conda at /software/bin/miniconda3 is too old to have --solver and its classic
+      solver was OOM-killed attempting this solve. Use mamba 2.5.0 from
+      /project/jnovembre/afselim/miniforge3/bin instead, which solved it in seconds. Worth
+      knowing for the next time this environment is modified.
+
+sources:
+  raw_vcf:
+    description: >
+      Published_Pan joint callset, 54 chimpanzees + 7 bonobos called against panTro6 with
+      GATK HaplotypeCaller -> GenomicsDBImport -> GenotypeGVCFs. Raw and unfiltered.
+    origin: /project/jnovembre/afselim/chimp_args/data/vcfs/Pan_troglodytes__Pan.pop.geno.snps.raw.reheader_Published_Pan.vcf.gz
+    copied_to: resources/vcf/full.vcf.gz
+    bytes: 28644895987
+    verified:
+      byte_identical_to_origin: true    # cmp against the source
+      index_records: 77053919           # bcftools index -n on the copy
+      samples: 61
+    note: >
+      Copied rather than read in place so the preparation does not depend on another
+      project's tree. The origin is a working directory belonging to a separate pipeline
+      (see `related_work` below) and is treated as read-only.
+
+  metadata:
+    origin: /project/jnovembre/afselim/chimp_args/data/metadata/sample_data.csv
+    copied_to: resources/samples/sample_data.csv
+    rows: 61
+    columns_used: [Sample_ID_vcf, Taxon, Species, Subspecies_PCA, Population_PCA, Mean_coverage]
+    verified:
+      reconciles_with_vcf: true   # every VCF sample present, no extras, no ID mismatches
+      species_split: {troglodytes: 54, paniscus: 7}
+
+  recombination_map:
+    description: Nigeria-Cameroon chimpanzee (P. t. ellioti) LD-based map, n=10
+    repo: https://github.com/lstevison/great-ape-recombination
+    path_in_repo: "Final Chimp Map/chr{N}-map.hg18.txt.filtered.gz"
+    fetched: [chr21]              # pilot only so far
+    files_available: 24           # chr1, chr2A, chr2B, chr3..chr22 -- matches our autosome set
+    column_note: >
+      The species coordinate columns are labelled `Gorgor3-start/end/midpoint`. This is a
+      copy-paste artifact from the gorilla map in the same repository and does NOT indicate
+      the assembly; the file is the chimp map.
+    units: >
+      Coordinates are MEGABASES AS DECIMALS (chr21 spans 0.565679 .. 32.691746), not bp.
+      Multiply by 1e6 and round before use.
+    fetched_all: 23            # chr1, chr2A, chr2B, chr3..chr22 -- matches our autosome set
+    measured_across_all_23:
+      rows: 8497640
+      mapped_length_mb: 2429.5
+      length_weighted_mean_rho_per_kb: 0.80044
+      global_scalar_to_1.1_cM_per_Mb: 1.37424
+      global_scalar_to_1.2_cM_per_Mb: 1.49917
+      scalar_note: >
+        §5 requires ONE global scalar across all chromosomes, never per chromosome: small
+        chromosomes genuinely have higher cM/Mb because of the obligate crossover, and
+        per-chromosome scaling would erase that. The measured per-chromosome means bear this
+        out -- chr21 is highest at 1.1658 rho/kb and chr22 next at 1.0094, against 0.72-0.74
+        for the largest (chr1, chr3, chr4, chr6). Normalising per chromosome would flatten
+        exactly this real signal.
+      filter_column:
+        values: {"0": 8495205, "2": 2407, "1": 28}
+        present_on: [chr1, chr2A, chr2B, chr3, chr4, chr7, chr9, chr10, chr12, chr13,
+                     chr16, chr19, chr20]
+        meaning: >
+          filter != 0 marks rows whose rho/kb, L95 and U95 are the literal string "na" --
+          intervals where no rate was estimated. It is NOT a quality flag on an estimated
+          rate. They must be treated as gaps and filled with the genome-average rate (§5
+          step 4), never parsed as numeric. The measured global mean below already excludes
+          them.
+        note: >
+          The plan states filter is all-zero; that holds for chr21 only, which is why a
+          chr21-only pilot would not surface this. Genome-wide 2,435 rows (0.03%) are
+          non-zero. Negligible in volume, but a parser doing float(rho) without guarding
+          would raise on every one of them.
+      orientation_column:
+        values: {plus: 7865670, minus1: 631970}
+        token_note: >
+          The minus token is spelled `minus1`, not `minus` as the plan predicts, and it is
+          not rare -- 7.4% of rows genome-wide. A parser testing for the literal string
+          "minus" would silently treat every one as plus. chr21 is all-plus, so a chr21-only
+          pilot would never surface this.
+        coordinate_direction_measured: >
+          On minus1 rows the SPECIES columns (used here) are always ascending: 0 of 132,482
+          sampled rows had end < start. The HG18 columns are the ones that run backwards
+          (132,479 of 132,482 have end < start). So §5's warning that "minus-orientation
+          blocks need coordinate reversal during liftover" applies to the hg18 coordinates,
+          not the species ones. Lifting via the species columns needs no reversal; the
+          via-human route does. An earlier note in this file implied the species coordinates
+          were at risk, which the measurement contradicts.
+
+  liftover_chains:
+    resolved: 2026-09-11
+    finding: >
+      There is NO direct chain into panTro6 from any earlier chimp assembly except panTro5.
+      UCSC publishes panTro2To{PanTro3,PanTro4,PanTro5} but no panTro2ToPanTro6, so §5's
+      "try direct chimp->panTro6 first" is not available as written.
+    available_into_pantro6:
+      panTro5ToPanTro6.over.chain.gz: https://hgdownload.soe.ucsc.edu/goldenPath/panTro5/liftOver/
+      hg38ToPanTro6.over.chain.gz: https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/
+      hg19ToPanTro6.over.chain.gz: https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/
+    route_for_ancestral_fasta:      # §6
+      path: hg38 -> panTro6
+      chain: hg38ToPanTro6.over.chain.gz
+      note: >
+        SUPERSEDES the panTro5 -> panTro6 route, which existed only to place EPO ancestral
+        bases and is retired with the EPO decision. Projecting hg38 into panTro6 produces a
+        sequence that is natively panTro6-length, so the §6 exact-length assertion is
+        satisfied by construction rather than by a liftover that has to be checked: no 4.92%
+        length deltas to reconcile and no ~1.7% unlifted loss. Positions with no hg38
+        alignment are filled with N and fall through to unpolarised, which the bundled SINGER
+        binary handles per site.
+      retired:
+        panTro5ToPanTro6.over.chain.gz: >
+          Downloaded and verified, no longer on the active path. Kept on disk and recorded
+          here so the EPO route can be reproduced if the decision is ever revisited.
+    route_for_recombination_map:    # §5
+      path: hg18 -> hg38 -> panTro6
+      chains: [hg18ToHg38.over.chain.gz, hg38ToPanTro6.over.chain.gz]
+      rationale: >
+        The map carries native hg18 columns because it was built with reciprocal hg18
+        liftover, so passing through human is native to its construction rather than a
+        detour. With no panTro2ToPanTro6 chain, the alternative would be a three-step
+        panTro2 -> panTro5 -> panTro6, which compounds more error than the two-step human
+        route and starts from the species columns' original assembly, which is not recorded
+        in the file.
+      unresolved: >
+        The source assembly of the species columns is still not established -- the header
+        labels them Gorgor3 (a copy-paste artifact) and the README does not say. Both routes
+        should be run on one chromosome and compared, as §5 requires, before committing.
+
+  ancestral_state:
+    description: >
+      ACTIVE SOURCE. Human (hg38) reference bases projected into panTro6 coordinates as the
+      outgroup ancestral state. See decisions.ancestral for why this replaced the EPO
+      alignment.
+    reference: /project/jnovembre/afselim/chimp_args/data/reference/hg38.fa
+    chain: resources/raw/hg38ToPanTro6.over.chain.gz
+    chain_url: https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToPanTro6.over.chain.gz
+    divergence: ~6 My to the human-chimp ancestor
+    lowercase_handling: >
+      No masking. Lowercase in hg38 is RepeatMasker soft-masking, not a confidence
+      encoding, so there is nothing to mask on the EPO rationale; sequence is uppercased and
+      used. Repeat-driven error is handled by the accessibility mask (§4) instead, which is
+      where it belongs.
+
+  ancestral_alleles_RETIRED:
+    status: >
+      NOT USED. Retired 2026-09-11 when the human outgroup was adopted; kept because
+      "why wasn't the Ensembl chimp ancestral sequence used?" is a reasonable question with a
+      measured answer (decisions.ancestral.asymmetry_test).
+    description: Ensembl EPO primate ancestral sequence for chimpanzee
+    release: 113
+    url: https://ftp.ensembl.org/pub/release-113/fasta/ancestral_alleles/pan_troglodytes_ancestor_Pan_tro_3.0.tar.gz
+    bytes: 872447725
+    assembly: Pan_tro_3.0 (panTro5)   # NOT panTro6 -- see decisions.ancestral
+    local_copy_available: /project/jnovembre/afselim/chimp_args/data/reference/ancestral_panTro5.fa
+    local_copy_note: >
+      Already extracted, UCSC-named (chr1, chr2A, ...) and indexed. Case composition on a
+      sampled record: ~3.9M uppercase (EPO high-confidence) against ~152k lowercase
+      (low-confidence), plus '-', '.' and 'N'.
+
+# --------------------------------------------------------------------------------------
+# §0 inventory. Run against the copy; every number below is measured, not assumed.
+# --------------------------------------------------------------------------------------
+inventory:
+  variant_only: true
+  variant_only_evidence: >
+    23,657 records in a 1 Mb chr21 window, of which 0 have ALT=".". There are no reference
+    blocks, so this is a variant-only callset.
+  variant_only_consequence: >
+    BRANCHES §4. A depth/callability component for the accessibility mask is NOT possible:
+    depth can only be assessed where something was called, and the regions that matter most
+    are those where nothing was. The mask must be reference-derived only (assembly gaps,
+    RepeatMasker, mappability). This is a real weakening relative to the human prep and must
+    be stated plainly in the README.
+
+  format_fields: [GT, AD, DP, GQ, PL, PGT, PID, PS, MIN_DP, RGQ, SB]
+  info_fields_present_for_gatk_filters: [QD, FS, SOR, MQ, MQRankSum, ReadPosRankSum]
+  info_fields_other: [AC, AF, AN, BaseQRankSum, DP, END, ExcessHet, InbreedingCoeff,
+                      MLEAC, MLEAF, RAW_MQandDP, NS, MAF]
+
+  contigs:
+    total_in_header: 4344
+    naming: GenBank accession      # e.g. CM009238.2, NOT chr1
+    rename_map_written: resources/panTro6/accession_to_chrom.txt
+    autosomal_sequences: 23
+    autosomal_note: >
+      chr1, chr2A, chr2B, chr3..chr22 = 23 sequences, not 24. chr2A and chr2B REPLACE the
+      human chr2; there is no separate chr2. The plan's "(24 sequences)" is an overcount.
+    autosomal_bp: 2654688569
+
+  mnps:
+    measured: 2026-09-11
+    question: >
+      A biallelic same-length record such as REF=CA ALT=AA types as an MNP, would pass
+      filter_biallelic, and would then be modelled as one mutation when it is really two.
+      The magnitude had to be established before deciding whether to care.
+    biallelic_mnps:
+      chr21_full_contig: 0   # 839,756 records
+      chr22_full_contig: 0   # 805,015 records
+      chr19_full_contig: 0   # 1,350,940 records
+      chr15_full_contig: 0   # 1,784,864 records
+      chr1_20mb_window: 0    # 395,640 records, large metacentric
+      chr3_20mb_window: 0    # 447,207 records
+    method: >
+      Two independent checks agree. `bcftools view -v mnps` returns 0 across four FULL
+      contigs (chr21, chr22, chr19, chr15 -- 4,780,575 records) and two 20 Mb windows on the
+      large metacentrics chr1 and chr3, so the result is not an artifact of chromosome type
+      or of windowing. Separately, a direct REF/ALT scan over all 839,756 chr21 records
+      finds no biallelic record with len(REF) == len(ALT) > 1; the only biallelic length
+      pattern present is 1->1 (773,892 records).
+    conclusion: >
+      Nil. No action needed. Records like REF=CA ALT=AA,*,C do exist (chr21:459 is one) but
+      they are MULTIALLELIC, so they type as mixed rather than mnp and filter_biallelic
+      catches them -- which is also why they reach filtered_positions and get the mu
+      correction.
+
+  indels:
+    pure_indel_records: 0
+    mixed_records_chr21: 19138
+    finding: >
+      The filename says `snps.raw` and there are indeed no pure-indel and no symbolic/other
+      records. But `-v indels` still matches 19,138 chr21 records, because MULTIALLELIC
+      records mix a SNP ALT with an indel ALT at the same position (e.g. REF=CA
+      ALT=AA,*,C). bcftools counts such a record under both types.
+    consequence: >
+      The plan's `-V indels` would DROP those records entirely, discarding real SNP alleles.
+      Use `-m2 -M2 -v snps` instead. On chr21 that keeps 773,892 of 839,756 records (92.16%).
+      The 65,864 dropped multiallelic records are a REPRESENTATION loss, not a quality
+      failure, so per §2's rules they do NOT belong in filter.txt.
+
+  genotypes_already_phased:
+    fraction_phased_separator: ~0.027      # '|' vs '/' over a sampled window
+    source: GATK read-backed phasing (PGT/PID), not statistical phasing
+    pgt_values_observed: ["0|1", "1|0", "1|1"]
+    pgt_note: >
+      GATK's header claims PGT "will always be heterozygous". It is not: homozygous 1|1
+      values occur. Any consumer must reject them explicitly rather than trusting the header.
+
+  samples:
+    total: 61
+    chimpanzees: 54
+    bonobos: 7
+    bonobo_ids: [SAMN01920505, SAMN01920507, SAMN01920508, SAMN01920509, SAMN01920510,
+                 SAMN01920512, SAMN01920515]
+    bonobo_note: >
+      Six are Pan_paniscus and one is labelled captive_Bonobo; all seven carry
+      Species=paniscus, which is the column used to exclude them.
+    subspecies_among_chimps:
+      schweinfurthii: 19
+      troglodytes: 15
+      verus: 14
+      ellioti: 5
+      "verus x troglodytes": 1
+    hybrid_retained:
+      sample: SAMN01920541
+      taxon: Pan_troglodytes_hybrid (verus x troglodytes, population "W x C")
+      status: RETAINED. 54 chimpanzees, not 53.
+      considered_and_reversed: >
+        Dropping it was considered and the instruction was withdrawn on 2026-09-11. It was
+        never actually removed from any built artifact -- it is in chimps.txt, in the chr21
+        VCF and in chr21.meta.csv throughout. Only the per-subspecies SUMMARY STATISTICS
+        excluded it (the EPO asymmetry test and the switch-error stratification), which is a
+        different thing from excluding it from the data.
+      why_retained: >
+        It is the panel's only verus x troglodytes individual, so keeping it means the ARGs
+        retain whatever admixture signal exists between those two subspecies. Dropping it
+        would remove that signal artificially rather than measure it.
+      handling: >
+        It gets its own meta.csv subspecies value, "verus x troglodytes", so
+        stratify-by: subspecies produces a ONE-SAMPLE stratum. That is accepted, not worked
+        around: every cross-coalescence pair involving that stratum is noise and must be
+        ignored in the plots. The subspecies label therefore does NOT cleanly partition the
+        panel, contrary to the plan's assumption -- but the right response is to document the
+        consequence, not to delete the sample.
+    coverage:
+      min: 15.5
+      median: 26.0
+      max: 62.6
+      note: >
+        A >4x spread across samples. Relevant to §2: a genome-wide median-based depth
+        threshold is the right choice precisely because the panel is this uneven.
+
+# --------------------------------------------------------------------------------------
+# Phasing go/no-go. The plan's §3 validation, run for the first time.
+# --------------------------------------------------------------------------------------
+switch_error:
+  measured: 2026-09-11
+  script: scripts/switch_error_pgt.py
+  chromosome_arm: chr22q
+  method: >
+    GATK PGT/PID read-backed phase blocks are the only independent phase truth available --
+    there are no trios. Within a PID block the PGT orientations are fixed by the reads. Every
+    consecutive pair of heterozygous sites sharing a PID gives one orientation test; the rate
+    is the fraction of such pairs where the statistical phasing disagrees.
+  judged_phasing: >
+    SHAPEIT5 phase_common --hmm-ne 10000, no reference panel, no genetic map, as produced by
+    the chimp_args pipeline. This is NOT Beagle. A Beagle rebuild per the plan would need its
+    own measurement.
+  results_chr22q:
+    ALL:        {n: 54, pairs: 186171, switches: 7883, rate: 0.0423}
+    ellioti:    {n: 5,  pairs: 14960,  switches: 1056, rate: 0.0706}
+    troglodytes: {n: 15, pairs: 68397, switches: 3653, rate: 0.0534}
+    verus:      {n: 14, pairs: 28766,  switches: 988,  rate: 0.0343}
+    schweinfurthii: {n: 19, pairs: 72491, switches: 2144, rate: 0.0296}
+    "verus x troglodytes": {n: 1, pairs: 1557, switches: 42, rate: 0.0270}
+  results_chr21q:
+    ALL:        {n: 54, pairs: 206133, switches: 8310, rate: 0.0403}
+    ellioti:    {n: 5,  pairs: 18309,  switches: 1007, rate: 0.0550}
+    troglodytes: {n: 15, pairs: 71878, switches: 3820, rate: 0.0531}
+    verus:      {n: 14, pairs: 31391,  switches: 1149, rate: 0.0366}
+    schweinfurthii: {n: 19, pairs: 79593, switches: 2225, rate: 0.0280}
+    "verus x troglodytes": {n: 1, pairs: 4962, switches: 109, rate: 0.0220}
+  reproducibility: >
+    Two independent arms agree closely: 4.23% (chr22q) against 4.03% (chr21q) overall, and
+    the per-subspecies ordering is identical on both. troglodytes (5.34/5.31%) and
+    schweinfurthii (2.96/2.80%) are near-identical across arms; only ellioti moves much
+    (7.06/5.50%), which is what the smallest group's sampling noise predicts.
+  interpretation: >
+    ellioti is worst on both arms, which is what n=5 predicts: with only 10 conditioning
+    haplotypes there is little to phase against. schweinfurthii, the largest group at n=19,
+    is best on both. The ordering tracks sample size rather than data quality, which is the
+    expected signature and is an argument against splitting the panel by subspecies for
+    phasing.
+    Note troglodytes (n=15) is worse than verus (n=14) on both arms despite the near-equal
+    sample sizes, so size is not the only factor -- verus is the least diverse subspecies
+    (mean pi 0.00077 against 0.00186 for central in chimp_args' QC), and lower heterozygosity
+    means fewer opportunities to switch.
+  caveats: >
+    This is a SHORT-RANGE switch rate. Read-backed blocks are local, so the statistic says
+    nothing about long-range switches, which are typically worse and are not bounded by this
+    measurement. Both arms measured are small and acrocentric; they are not necessarily
+    representative of the large metacentric chromosomes.
+
+  phaser_comparison:
+    measured: 2026-09-11
+    arm: chr21q          # same arm, same samples, same metric, same PGT/PID truth track
+    results:
+      shapeit5_ne10000: {ALL: 0.0403, ellioti: 0.0550, troglodytes: 0.0531, verus: 0.0366,
+                         schweinfurthii: 0.0280}
+      beagle_5.4_nomap: {ALL: 0.0466, ellioti: 0.0606, troglodytes: 0.0597, verus: 0.0480,
+                         schweinfurthii: 0.0324}
+    finding: >
+      SHAPEIT5 beats Beagle 5.4 on this panel: 4.03% against 4.66% overall, and SHAPEIT5 is
+      better in EVERY subspecies. The largest gap is in verus (3.66% against 4.80%).
+    consequence: >
+      The plan's §3 recommendation of Beagle was an explicit prior about small-panel
+      behaviour ("at n=50 the map is not the limiting factor, and panel size dominates").
+      It is now settled by measurement in the opposite direction, so the build should use
+      SHAPEIT5 unless a later experiment overturns this. Note Beagle ran without a genetic
+      map (defaulting to 1 cM/Mb) and SHAPEIT5 likewise, so the comparison is like-for-like;
+      supplying the §5 map once it exists could move both.
+    beagle_operational_note: >
+      Beagle finished chr21q in 44 s on 8 cores under SLURM with 32 GB, against SHAPEIT5's
+      388 s on 8 cores. So Beagle is roughly 9x faster and loses on accuracy; speed is not
+      the binding constraint at 23 chromosomes, so this does not change the recommendation.
+
+  hmm_ne_sweep:
+    measured: 2026-09-11
+    arm: chr21q
+    rationale: >
+      SHAPEIT5's --hmm-ne default of 15,000 is a human value and chimp_args used 10,000
+      following De Manuel et al. 2016. Central chimpanzee Ne estimates are higher, so 25,000
+      and 30,000 were tried.
+    results:
+      ne10000: {ALL: 0.0403, ellioti: 0.0550, troglodytes: 0.0531, verus: 0.0366,
+                schweinfurthii: 0.0280}
+      ne25000: {ALL: 0.0397, ellioti: 0.0555, troglodytes: 0.0541, verus: 0.0342,
+                schweinfurthii: 0.0264}
+      ne30000: {ALL: 0.0400, ellioti: 0.0549, troglodytes: 0.0542, verus: 0.0342,
+                schweinfurthii: 0.0273}
+    finding: >
+      Switch error is INSENSITIVE to --hmm-ne over 10,000-30,000 on this panel. The three
+      settings give 4.03%, 3.97% and 4.00% -- a 0.06-point total spread, and non-monotonic
+      (25,000 is nominally best, 30,000 slightly worse again). For comparison, the SAME
+      setting on a different arm moves the rate by 0.20 points (4.23% on chr22q against
+      4.03% on chr21q), so the arm-to-arm variation is more than three times the entire
+      parameter range's effect.
+    per_subspecies_note: >
+      The per-subspecies moves are also inconsistent in sign: schweinfurthii improves
+      (2.80 -> 2.64 -> 2.73%) and verus improves then plateaus (3.66 -> 3.42 -> 3.42%), but
+      troglodytes gets slightly worse (5.31 -> 5.41 -> 5.42%) and ellioti is flat within
+      noise (5.50 -> 5.55 -> 5.49%). Nothing here is a consistent direction of effect.
+    decision: >
+      Leave --hmm-ne at a defensible literature value rather than tuning it on this
+      statistic. chimp_args used 10,000 following De Manuel et al. 2016, which is as good a
+      justification as any and is what the measured evidence supports keeping: there is no
+      gain to capture. Do NOT report a "best" Ne from this sweep -- the differences are
+      inside the noise floor that the arm-to-arm comparison establishes.
+    caveat: >
+      This tests only short-range switch error via PGT/PID blocks. --hmm-ne governs the
+      coalescent prior in SHAPEIT5's HMM, which plausibly matters more for LONG-range phase
+      than for the local orientation this metric can see. Insensitivity here is not evidence
+      of insensitivity overall.
+
+# --------------------------------------------------------------------------------------
+# chr21 pilot. One chromosome end to end before scaling to 23.
+# --------------------------------------------------------------------------------------
+chr21_pilot:
+  started: 2026-09-11
+  status: COMPLETE -- 14/14 checks pass, scripts/verify_inputs.py exits 0
+  inputs_built: SingerSnakemake_Input/chr21.{vcf.gz,vcf.gz.tbi,mask.bed,hapmap,ancestral.fa.gz,meta.csv}
+
+  unphased_input_near_miss:
+    what_happened: >
+      chr21 passed 13/13 checks while the shipped VCF was 91.79% UNPHASED. SHAPEIT5 had run
+      and work/phased/chr21.vcf.gz was correct, but it was never promoted into
+      SingerSnakemake_Input/, which still held the pre-phase subset.
+    why_nothing_caught_it: >
+      The verifier asserted structure only -- length, polarity, positions, sample order. An
+      unphased VCF has the right length, the right positions, the right samples and the
+      right metadata; it is simply the wrong file. SINGER consumes haplotypes, so this would
+      have produced confident nonsense rather than an error.
+    fix: >
+      scripts/verify_inputs.py now asserts that no sampled genotype contains '/'. Confirmed
+      to fail on the pre-phase file (458,953 of 500,000 sampled genotypes unphased, exit 1)
+      and to pass after promotion.
+    lesson: >
+      Every other check in the suite guards a property the WORKFLOW asserts. This one guards
+      a property only the SCIENCE asserts, which is exactly why it was the one missing.
+    phased_file_contents:
+      records: 650877                  # equals the biallelic count in the subset exactly
+      dropped_multiallelic: 30811      # SHAPEIT5 phases biallelic sites only, by design
+      unphased_genotypes: 0
+      sample_order: preserved
+      mu_correction_intact: >
+        The 30,811 dropped multiallelics still reach filtered_positions through the
+        workflow's own filter_biallelic, so adj_mu is unaffected by the drop.
+
+  scale_out_ordering:
+    note: >
+      chr21 structurally cannot exercise three of the source map's traps: it has zero minus1
+      rows, zero na-rho rows and only 4 synteny blocks. chr12 (100,476 minus1 rows, 311 na
+      rows) and chr19 (404 na rows) were built next, specifically to exercise those branches
+      before a 23-chromosome run.
+    measured_cM_per_Mb: {chr12: 1.109, chr19: 1.284, chr21: 1.614}
+    confirms_global_scalar: >
+      The three land in inverse order of chromosome length, which is the obligate-crossover
+      signal §5 requires the single global scalar to preserve; per-chromosome normalisation
+      would have forced them all to the target and erased it. Each carries exactly one NaN
+      interval, the expected leading gap before the map's first lifted coordinate.
+
+  bonobo_removal:            # §1
+    records_before: 839756
+    records_after: 681688
+    dropped_bonobo_only: 158068     # 18.82%
+    samples_retained: 54
+    sanity: >
+      18.8% is a plausible share of chr21 variation being bonobo-private, and a figure this
+      large is itself the check that the exclusion worked -- an implausibly small number
+      would have meant the bonobos were never actually dropped. These sites were never
+      segregating among chimps, so they are NOT lost sites and must not enter filter.txt.
+
+  filter_accounting:         # §2
+    records_segregating: 681688
+    strictly_biallelic_snps: 638154
+    multiallelic_m3plus: 30811
+    workflow_will_drop: 43534        # 6.39%, into filtered_positions
+    note: >
+      Nothing for us to write at prep time. chunk_chromosomes.py concatenates
+      positions[filter_segregating & ~filter_biallelic] and
+      positions[filter_segregating & ~filter_nonmissing] into filtered_positions itself, so
+      the mu correction covers these 6.39% automatically. A prep-time filter.txt would only
+      be needed for sites absent from our VCF entirely, and there are none now that
+      pre-filtering is dropped.
+
+  recombination_map:         # §5
+    route: hg18 -> hg38 -> panTro6
+    intervals_in: 130569
+    after_leg1_hg18_to_hg38: 130563     # 6 lost
+    after_leg2_hg38_to_panTro6: 128332  # 2,231 lost
+    retained_pct: 98.3
+    all_on_target_contig: true          # 128,332 / 128,332 landed on chr21
+    chr21_specifics: {minus1_rows: 0, na_rho_rows: 0, synteny_blocks: 4}
+    chr21_caveat: >
+      chr21 has no minus1 rows and no na-rho rows, so the pilot does NOT exercise either
+      code path. Both are implemented and both must be re-checked on a chromosome that has
+      them (chr19 has the most na rows at 404; minus1 is 7.4% of rows genome-wide).
+    built: resources/panTro6/hapmap/chr21.hapmap
+    verification:
+      read_hapmap_sequence_length: 33232379
+      chrom_sizes_chr21: 33232379
+      exact_equality: PASS
+      positions_strictly_increasing: PASS
+      cumulative_cm_non_decreasing: PASS
+      negative_rates: none
+      nan_intervals: 1
+      nan_explanation: >
+        The single NaN is the leading interval from position 1 to the map's first lifted
+        coordinate (1,015,168), which read_hapmap marks as missing data. Expect SINGER to
+        skip one chunk at the chromosome start -- the same behaviour documented for the
+        human prep.
+    measured:
+      total_map_length_cM: 53.65
+      mean_cM_per_Mb: 1.614
+      chr21_mean_rho_per_kb: 1.1747
+      genome_wide_mean_rho_per_kb: 0.80044
+      global_scalar_applied: 1.37424
+    why_chr21_exceeds_the_target: >
+      1.614 cM/Mb sits ABOVE the 1.1-1.2 genome-wide target and that is correct, not a
+      calibration error. chr21's own mean rho/kb is 1.1747 against the genome-wide 0.80044,
+      i.e. 1.47x, because small chromosomes carry a higher crossover density per Mb (the
+      obligate crossover). §5 requires ONE global scalar precisely so this real signal
+      survives; normalising per chromosome would flatten every chromosome to the target and
+      erase it.
+
+  mask:                      # §4
+    repeat_track_union_chr21: 28849987      # 86.81% of the chromosome
+    gap_track_chr21: 180762                 # 0.54%
+    policy_finding: >
+      A blanket RepeatMasker exclusion is the WRONG primary signal and was rejected. The
+      union really is 86.81% -- the track's rows overlap heavily (their lengths sum to
+      208.9% of the chromosome, since annotations are nested and fragmented) but the
+      bitmask union is computed correctly. Masking that much would leave ~12.65% accessible
+      against the human prep's 74.11%, which is not a defensible accessibility mask: Alu,
+      MIR and L2 elements are roughly half of any primate genome and most of that sequence
+      is uniquely mappable and callable. The human mask excludes on MAPPABILITY and DEPTH,
+      not on repeat annotation.
+    operative_signal: >
+      genmap mappability, unioned with assembly gaps. Repeat annotation is at most a
+      cross-check on the mappability track, not an input to the mask.
+    mappability_parameterisation:
+      status: UNRESOLVED -- k=100 e=2 is degenerate and was rejected
+      k100_e2_result:
+        accessible_fraction: 0.9785
+        distribution: >
+          97.85% of chr21 sits at EXACTLY mappability 1.0. The next largest bins are 0.5
+          (0.72%) and 0.0 (0.55%, i.e. assembly N).
+        threshold_sweep: >
+          Every threshold from <0.1 to <1.0 yields an accessible fraction between 97.85%
+          and 99.03%. There is NO threshold on this track that produces a useful mask --
+          the distribution is degenerate, not merely mis-thresholded. Masking 2.15% against
+          the human prep's 26% inaccessible would mean the mask does nothing, which is the
+          failure the plan explicitly warns about ("an accessible fraction near 95% means
+          the mask is doing nothing").
+        diagnosis: >
+          A 100-mer allowing 2 mismatches is near-unique almost everywhere on a good PacBio
+          assembly, so the criterion is far too permissive for an accessibility mask.
+          Published masks use shorter k-mers and exact matching.
+      retry_result:
+        k50_e0_accessible: 0.9729
+        k36_e0_accessible: 0.9497
+        conclusion: >
+          RESOLVED, and the answer is that no k-mer parameterisation gets near the human
+          figure. The strictest sane setting (k=36, exact matching) still leaves 94.97% of
+          chr21 accessible, and dropping the threshold below 1.0 only raises that. This is
+          what a good PacBio assembly looks like under any uniqueness criterion; it is not a
+          thresholding failure.
+      the_comparison_was_wrong: >
+        Expecting ~74% was my error, and it is worth stating plainly so it is not retried.
+        The HGDP mask is mappability PLUS depth PLUS excess-heterozygosity filtering. This
+        mask can only ever have the mappability component, because the depth component is
+        impossible on a variant-only callset (see inventory.variant_only_consequence). So a
+        one-component mask was being compared against a three-component one. A
+        reference-derived mask landing near 95% is the MEASURED COST of the variant-only
+        callset, not a defect to iterate away.
+      chosen: k=36, e=0, threshold < 1.0, unioned with assembly gaps
+    threshold_recorded_explicitly: >
+      genmap emits 1/(occurrence count), so `< 1.0` means "this k-mer occurs more than once
+      anywhere in the assembly" -- the strictest available criterion, not a permissive one.
+      Requiring `< 0.5` instead (i.e. 3+ occurrences) would RAISE the accessible fraction to
+      96.44%, so the threshold is not what keeps this mask small; the assembly's uniqueness
+      is.
+    repeatmasker_deliberately_dropped:
+      plan_said: gaps UNION RepeatMasker UNION mappability
+      built: gaps UNION mappability UNION excess-het regions
+      measured_repeatmasker_union_chr21: 0.8681      # 86.81% of the chromosome
+      reason: >
+        DEVIATION FROM THE PLAN, recorded rather than silent. RepeatMasker covers 86.81% of
+        chr21, so including it would leave ~12.65% accessible. That is not a defensible
+        accessibility mask: Alu, MIR and L2 elements are roughly half of any primate genome
+        and most of that sequence is uniquely mappable and therefore callable. Unique
+        36-mers are the OPERATIONAL criterion -- what matters is whether a read can be
+        placed, not whether the sequence is annotated as repetitive -- and the mappability
+        track already captures the repeats that actually defeat placement.
+      cross_check: >
+        The assembly-gap track added exactly 0 bp on top of mappability, which is the same
+        point in miniature: runs of N have no unique k-mers, so mappability had already
+        excluded them. Repeat annotation and mappability overlap heavily where it matters
+        and diverge where it does not.
+      revisit_if: >
+        If inferred ARGs show excess apparent recurrent mutation or implausible local
+        diversity in repeat-dense regions, add RepeatMasker back for the satellite and
+        low-complexity classes specifically, not as a blanket union.
+      chosen_reason: >
+        The strictest of the parameterisations tested, so it masks the most; among tracks
+        that all say roughly the same thing, prefer the one that errs toward exclusion.
+    data_driven_flags:
+      measured_on: chr21, 681,688 segregating sites among the 54 chimps
+      excess_het_sites: 4097            # 0.601%, any subspecies >90% heterozygous at n>=4
+      sites_with_any_missing_gt: 89702  # 13.16%
+      sites_with_25pct_missing: 9719    # 1.43%
+      excess_het_used_in_mask: true
+      excess_het_padding_bp: 50
+      excess_het_rationale: >
+        Computed WITHIN subspecies, never pooled: the panel is deeply structured (Fst ~0.3
+        between verus and the rest) and pooling produces heterozygote DEFICIT by the Wahlund
+        effect, so a pooled excess-het test is mis-calibrated in the wrong direction. A site
+        where an entire subspecies is >90% heterozygous is collapsed-paralog evidence about
+        the REGION, so the flag is padded +/-50 bp rather than applied per site.
+      missingness_deliberately_excluded_from_mask: >
+        Missingness is NOT a mask input, and adding it would be actively harmful. The
+        workflow strips inaccessible positions OUT of filtered_positions
+        (`filtered_positions = filtered_positions[~bitmask[...]]`), so masking a
+        missing-genotype site would REMOVE it from the mutation-rate correction rather than
+        add information. Those 13.16% of sites are already handled: filter_nonmissing drops
+        them and they enter filtered_positions, which scales adj_mu.
+      gap_track_redundant: >
+        The assembly-gap track added exactly 0 bp to the union -- all 180,762 gap bases were
+        already non-unique at k=36, since runs of N have no k-mers at all. The track is kept
+        in the build for explicitness and because it is not guaranteed to be redundant on
+        every chromosome, but it contributes nothing on chr21.
+      note_on_read_length: >
+        The plan says to compute mappability "at the read length used for calling". That
+        instruction is what produced k=100, and it is misleading here: the point of a
+        mappability track is not to simulate the aligner but to identify sequence where
+        unique placement is doubtful, which wants a stricter criterion than the actual read
+        length implies.
+
+  verification:
+    script: scripts/verify_inputs.py
+    behaviour_confirmed: >
+      Exits 1 on failure when run unpiped, and correctly caught both outstanding gaps on
+      chr21 (mask accessible fraction 0.9785 outside the [0.15, 0.95] band, and the missing
+      ancestral FASTA), while passing all five hapmap assertions. NB piping it to `tail`
+      masks the exit status -- run it unpiped when using it as a gate.
+    chr21_status: >
+      8/9 passing. All five hapmap assertions pass including the exact-length gate, and the
+      mask now passes the accessible-fraction band at 0.9430. The sole remaining failure is
+      the ancestral FASTA, which is still being built (§6).
+    band_rebased: >
+      The accessible-fraction band was widened from the human prep's [0.15, 0.95] to
+      [0.50, 0.99]. The check exists to catch INVERTED POLARITY, not to enforce a retention
+      target, and a one-component reference-derived mask legitimately retains ~94% here. An
+      inverted mask would land near 5%, far below the floor, so the check still does its
+      job.
+    depth_component: >
+      IMPOSSIBLE here -- the callset is variant-only. See inventory.variant_only_consequence.
+    built: resources/panTro6/mask/chr21.mask.bed
+    composition:
+      non_unique_36mers: 1670731        # 5.03%
+      assembly_gaps_added: 0            # already covered -- runs of N have no k-mers
+      excess_het_regions_added: 222889  # 4,097 sites padded +/-50 bp
+      total_inaccessible: 1893620       # 5.70%
+      accessible: 31338759              # 94.30%
+      intervals_written: 77141
+    polarity_selfcheck: >
+      The written file re-reads through np.loadtxt(usecols=[1,2]) to exactly the same
+      union it was built from, which is the read path chunk_chromosomes.py uses.
+    accession_naming_trap: >
+      The UCSC hub tracks are keyed by RefSeq accession (chr21 = NC_036900.1), not chrN and
+      not the GenBank accession the VCF uses (CM009259.2). Three naming schemes are in play
+      for the same chromosome. A filter on the wrong one matches nothing and silently
+      reports 100% accessible, which is what happened on the first attempt here.
+
+  ancestral:                 # §6 -- BUILT
+    status: BUILT and verified. resources/panTro6/ancestral/chr21.ancestral.fa.gz
+    method: >
+      Parse the panTro6->hg38 chain directly (scripts/build_ancestral_fasta.py) rather than
+      shelling out to liftOver. Chosen for two reasons: the chain nets in panTro6
+      coordinates, the space being filled, so every panTro6 base is covered at most once by
+      CONSTRUCTION rather than by policy; and liftOver's BED output silently drops the
+      strand column unless the input carries six, which would leave minus-strand bases
+      uncomplemented with no error raised.
+    measured:
+      aligned_blocks: 56303
+      projected_bases: 32560486        # 97.98%
+      left_as_N: 671938                # 2.02% -> unpolarised, retained
+      multiply_covered_set_to_N: 0
+      plus_strand_identity: 0.9856
+      minus_strand_identity: 0.9806
+    multiple_coverage: >
+      Zero conflicts, which is what netting in the target coordinate system buys. The
+      conflict policy (multiply-covered panTro6 positions set to N, counted) is kept anyway:
+      it costs nothing, and if a future chain does double-cover a base, that base is
+      paralogous and an outgroup call there is a coin flip, so N -> unpolarised is the right
+      answer rather than letting the last chain processed win.
+
+    the_strand_gate:
+      what: >
+        Identity between the projected human base and the panTro6 reference, computed
+        SEPARATELY for plus- and minus-strand blocks, asserted at >= 0.90. Human-chimp
+        divergence is ~1.2%, so both classes must land near 0.98.
+      why_per_strand: >
+        DECISIVE. Minus-strand blocks are only 127,571 of 32.56M projected bases (0.4%), so
+        a pooled identity read 0.983 even while the minus branch was completely wrong. Only
+        the per-strand split made the bug visible.
+      caught_a_real_bug:
+        first_run: {plus: 0.9856, minus: 0.2938}
+        after_fix: {plus: 0.9856, minus: 0.9806}
+        signature: >
+          7,169 of 20,000 sampled mismatches were complementary pairs (A<->T, C<->G), which
+          is the fingerprint of a strand error rather than of genuine divergence.
+      the_bug: >
+        The chain header conversion qSize - qEnd was applied ONCE per chain and the cursor
+        then walked forward. That is correct only for the FIRST block of each chain and
+        drifts thereafter. The fix tracks the q cursor in the chain's own reverse-complement
+        space and converts PER BLOCK: forward_start = qSize - (q_cursor + size). Validated
+        against large real blocks before the code was changed -- mean identity 0.9581 on
+        eight blocks of 283-945 bp, against ~0.29 under the broken conversion.
+      assertion_not_report: >
+        The check returns non-zero and writes NO FASTA on failure, so a bad build cannot be
+        mistaken for a good one. This matters because the failure is silent by construction:
+        a wrongly-stranded FASTA has exactly the right length and passes every structural
+        check.
+
+    no_lowercase_masking: >
+      Lowercase in hg38 is RepeatMasker soft-masking, not a confidence encoding. The
+      lowercase->N step was an EPO-specific mitigation and has no counterpart here;
+      repeat-driven error is handled by the accessibility mask instead. Sequence is
+      uppercased and used.
+    exact_length_by_construction: >
+      The output is a panTro6-length array filled in place, so the §6/§8 exact-equality
+      assertion (hapmap.sequence_length == ancestral FASTA length == chrom.sizes) holds by
+      construction rather than by a liftover that has to be reconciled afterwards.
+
+memory_sizing:
+  measured: 2026-09-11
+  measured_on: chr1q arm (1,760,457 variants, 54 samples, 100.8 Mb)
+  read_time_s: 157
+  decomposition_gib:
+    calldata_GT: 0.18
+    read_vcf_overhead: 0.55      # parser temporaries beyond the GT array
+    peak_after_read_vcf: 0.73
+    ancestral_U1_array: 0.84
+    two_bool_bitmasks: 0.42
+    peak_total: 1.98
+  key_insight: >
+    The VCF is NOT the dominant cost. calldata/GT is only 0.18 GiB; the expensive structures
+    are PER-BASE and scale with chromosome length rather than variant count -- numpy's 'U1'
+    dtype is 4 bytes per base (UCS-4), so the ancestral array alone is 4x the chromosome
+    length in bytes, plus two boolean bitmasks at 1 byte per base each.
+  projected_whole_chromosome_gib:
+    chr1: 2.20      # 224.2 Mb, ~3.92M variants
+    chr3: 2.00
+    chr4: 1.94
+    chr2B: 1.50
+    chr21: 0.80
+  projection_basis: >
+    Variant density 17.5/kb measured on chr1q, applied to full chromosome lengths; per-base
+    terms computed exactly from chrom.sizes. These are projections, not measurements -- no
+    whole-chromosome VCF exists yet.
+  slurm_recommendation: >
+    8 GB per task covers the largest chromosome with ~3.6x headroom on the projection. Do not
+    size from what fits interactively: the login session is capped at an 8 GiB cgroup, which
+    is a session limit and not a statement about the workload.
+
+# --------------------------------------------------------------------------------------
+# Related prior work. Not a dependency; used for cross-checking measured numbers.
+# --------------------------------------------------------------------------------------
+related_work:
+  path: /project/jnovembre/afselim/chimp_args
+  description: >
+    A separate, complete ARG-inference pipeline on this same VCF: bonobo removal, arm
+    splitting at lifted T2T centromeres, GATK hard filters, depth window, CpG removal,
+    SHAPEIT5 phasing, ancestral annotation, tsinfer/tsdate ARGs and a QC suite.
+  treated_as: read-only reference
+  read_only_reason: >
+    An editor swapfile owned by another user (kitchensjn) was present in that tree on
+    2026-09-11, so someone else is actively working there.
+  useful_cross_checks:
+    filter_fraction_genomewide: 0.1263      # 48,678,231 in -> 42,530,516 kept (87.37%)
+    filter_fraction_note: >
+      Sits inside the plan's 5-20% expectation for §2, but is NOT directly comparable: that
+      chain also removes CpG islands and uses a per-sample FORMAT/DP window, neither of which
+      the plan specifies.
+    depth_window: {per_sample_min_dp: 8, per_sample_max_dp: 64, basis: mean FORMAT/DP}
+    depth_basis_warning: >
+      INFO/DP in this callset counts pre-filter reads over all 61 originally-called samples
+      and runs ~8x the summed per-sample depth (median ~10,800 against a per-sample median of
+      24x). An 8-64 window applied to INFO/DP would reject almost every site. Any depth
+      filter must be built on FORMAT/DP.
+
+# --------------------------------------------------------------------------------------
+# Decisions. Confirmed with the user on 2026-09-11 before any of them was acted on.
+# --------------------------------------------------------------------------------------
+decisions:
+  build_basis:
+    chosen: rebuild from raw per the plan
+    rejected: [adapter over chimp_args, rebuild reusing chimp_args decisions]
+    consequence: >
+      data/chimp_data/ is self-contained and mirrors data/human_data/ in structure. Numbers
+      from chimp_args are used only to cross-check, never consumed as inputs.
+
+  contig_unit:
+    chosen: 23 whole autosomes (chr1, chr2A, chr2B, chr3..chr22)
+    rejected: 40 chromosome arms
+    consequence: >
+      The centromere is NOT cut out as chimp_args does. It will instead appear as
+      inaccessible intervals in mask.bed, which is what the workflow expects and keeps one
+      coordinate system per chromosome.
+
+  ancestral:
+    chosen: human outgroup (hg38 projected into panTro6 via hg38ToPanTro6.over.chain.gz)
+    chosen_on: 2026-09-11, after the asymmetry measurement below
+    originally_chosen: Ensembl EPO, lowercase -> N
+    rejected: [Ensembl EPO with or without lowercase masking,
+               omit FASTA and set polarised false]
+    reversal: >
+      The EPO decision below was sound on what was known at the time and is kept in full,
+      along with the contrary evidence that was already on record. It was overturned by
+      direct measurement, not by re-argument.
+    why_the_masking_result_was_decisive: >
+      The test discriminates between two explanations of the per-subspecies asymmetry. If it
+      were UNCERTAINTY in ancestral reconstruction, it would concentrate in EPO's
+      low-confidence (lowercase) calls, and masking them to N would reduce it. It rose
+      instead, 8.17x -> 13.24x, because the 41,099 masked sites were disproportionately ones
+      at which verus was NOT fixed-derived. The low-confidence calls were DILUTING the bias;
+      the bias itself lives in the high-confidence calls.
+      That is systematic reference bias, not uncertainty: EPO's chimpanzee ancestor is
+      inferred against a western-chimpanzee reference assembly, so sites where that reference
+      is itself derived are called ancestral with high confidence. No confidence filter can
+      remove it, because confidence is not the axis the bias runs along.
+    the_trade_accepted: >
+      The human outgroup buys a near-zero SYSTEMATIC error at the cost of a higher RANDOM
+      one: the human-chimp split is ~6 My against ~2 My to the Pan ancestor, so there are
+      more multiple hits and more sites polarised backwards by chance.
+      For a joint ARG spanning four subspecies that is the right direction. Random
+      mispolarisation inflates apparent old mutations roughly uniformly across the tree and
+      is absorbed into a slightly distorted global time axis. Systematic mispolarisation
+      manufactures between-subspecies demographic differences that do not exist -- one clade
+      gets systematically longer terminal branches -- which is precisely the signal CoaSTT
+      reads. A uniform distortion is recoverable; an invented structural difference is not.
+    supporting_evidence: >
+      chimp_args measured mean derived allele frequency under the human outgroup at
+      0.1250-0.1261 across subspecies -- flat, which is what an unbiased outgroup should
+      give -- against EPO's 5.3x fixed-derived asymmetry. It also retained 97.6% of chr22q
+      sites against EPO's 80.9%.
+    rationale_for_lowercase_masking: >
+      The workflow applies np.char.upper(), which for humans correctly promotes EPO
+      low-confidence calls to usable. Here it would be wrong: the EPO sister species is
+      bonobo, so the chimp ancestor node is only ~2 Mya and incomplete lineage sorting is
+      substantial. Masking lowercase to N means only high-confidence calls polarise.
+    contrary_evidence_on_record: >
+      chimp_args MEASURED an EPO western-chimpanzee reference bias and rejected EPO for a
+      human outgroup: under EPO, western chimpanzees show 3.33% of sites fixed-derived
+      against 0.63% (eastern) and 0.30% (central), a 5.3x asymmetry, and EPO retained 80.9%
+      of chr22q sites against 97.6% for the human outgroup. The EPO choice here is
+      deliberate and overrides that finding; it should be revisited if polarisation-sensitive
+      statistics look wrong.
+    asymmetry_test:
+      measured: 2026-09-11
+      status: FAILED -- the lowercase->N decision is NOT validated by measurement
+      method: >
+        chr21 variant positions lifted panTro6 -> panTro5 with the local
+        panTro6ToPanTro5 chain (588,529 of 592,296 lifted; 580,367 onto panTro5 chr21,
+        ascending, 3,767 "deleted in new"). EPO ancestral base read at each, then the
+        fraction of polarised sites at which each subspecies is FIXED DERIVED, computed
+        twice: once under the workflow's np.char.upper, once with lowercase masked to N.
+        The hybrid is excluded.
+      ancestral_base_case_at_lifted_sites: {upper: 521014, lower: 41099, N: 18254}
+      result_np_char_upper:      # what the workflow does by default
+        polarised_sites: 561885
+        fixed_derived_pct: {verus: 3.79, ellioti: 2.10, schweinfurthii: 0.93, troglodytes: 0.46}
+        asymmetry_max_over_min: 8.17
+      result_lowercase_masked:   # the plan's §6 decision
+        polarised_sites: 520856
+        fixed_derived_pct: {verus: 4.08, ellioti: 1.93, schweinfurthii: 0.75, troglodytes: 0.31}
+        asymmetry_max_over_min: 13.24
+      finding: >
+        Masking lowercase to N makes the per-subspecies asymmetry WORSE, not better:
+        8.17x -> 13.24x. verus rises (3.79 -> 4.08%) while troglodytes falls
+        (0.46 -> 0.31%). Dropping the 41,099 low-confidence sites removes 7.3% of polarised
+        sites, but those sites were disproportionately ones at which verus was NOT fixed
+        derived, so masking strips the diluting sites and CONCENTRATES the bias.
+      why_it_matters: >
+        This is the western-chimpanzee reference bias chimp_args measured independently (it
+        reported 3.33 / 0.63 / 0.30% for western / eastern / central; we measure 3.79 / 0.93
+        / 0.46% on chr21, the same pattern and ordering). It is a systematic PER-SUBSPECIES
+        bias inside a single joint ARG, which is worse than a uniform mispolarisation rate:
+        it does not average out, it lengthens one clade's terminal branches relative to
+        another's.
+      consequence: >
+        The stated rationale for lowercase->N was that it would leave only high-confidence
+        calls polarising and so reduce ILS-driven error. Measurement contradicts that.
+        RESOLVED 2026-09-11: the human outgroup was adopted instead. See
+        decisions.ancestral for the reasoning. This block and the EPO rationale are kept
+        deliberately -- "why wasn't the Ensembl chimp ancestral sequence used?" has a
+        measured answer and should not have to be re-derived.
+      caveat: >
+        One chromosome, and "fixed derived" is a coarse statistic that partly tracks genuine
+        diversity differences -- verus is the least diverse subspecies (pi 0.00077 against
+        0.00186 for central), so some asymmetry is expected under ANY correct polarisation.
+        The relevant evidence is not the absolute level but that masking moved it the wrong
+        way, which diversity differences cannot explain.
+
+    blocking_problem:
+      issue: EPO is panTro5 (Pan_tro_3.0); the data is panTro6.
+      measured_length_deltas:
+        genome_wide_pct: 4.92
+        worst: {chr5: 14.18, chr22: 12.24, chr17: 8.66, chr19: 8.07}
+        best: {chr21: 0.64, chr1: 1.93}
+      consequence: >
+        §6 asserts EXACT equality between the ancestral FASTA length, the hapmap
+        sequence_length and chrom.sizes. panTro5 records differ from panTro6 on every
+        chromosome, so a liftover is mandatory, not optional.
+      chain_coverage_measured:
+        chain: /project/jnovembre/afselim/chimp_args/data/reference/panTro6ToPanTro5.over.chain
+        genome_wide_pct: 98.3
+        per_chromosome_range: [96.1, 99.1]   # chr19 lowest, chr6 highest
+        chr5_pct: 98.8
+        chr22_pct: 97.7
+      chain_coverage_interpretation: >
+        The large LENGTH deltas do not imply missing alignable sequence. chr5 (14.18% longer
+        in panTro5) and chr22 (12.24%) are among the better-covered chromosomes in the chain
+        at 98.8% and 97.7%, so the extra panTro5 length is unplaced or padding sequence
+        rather than structural reorganisation. An earlier note in this file called those
+        deltas evidence of reorganisation and predicted the §6 fallback would be needed;
+        the chain measurement contradicts that and it has been removed. Expect to lose
+        roughly 1.7% of positions to unlifted sequence, which falls through to unpolarised
+        and is retained rather than dropped.
+
+  phaser:
+    chosen: SHAPEIT5 phase_common
+    parameters: {hmm_ne: 10000, reference_panel: none, genetic_map: none}
+    rejected: Beagle 5.4
+    chosen_on: 2026-09-11, on measurement
+    reason: >
+      SHAPEIT5 gives 4.03% switch error against Beagle's 4.66% on the identical arm, with the
+      identical metric and truth track, and is better in EVERY subspecies (the widest gap is
+      verus, 3.66% against 4.80%).
+    what_this_overturns: >
+      The plan recommended Beagle on a prior about PBWT conditioning degrading at small n,
+      drawn from SHAPEIT4 and Eagle2 behaviour. phase_common evidently does not share that
+      failure mode at n=54, so the prior does not transfer. Rejected on evidence, not
+      assumed away.
+    hmm_ne_justification: >
+      Kept at 10,000 (De Manuel et al. 2016) because the sweep found NO effect to tune: 4.03%
+      / 3.97% / 4.00% at 10,000 / 25,000 / 30,000 is a 0.06-point spread and non-monotonic,
+      against a 0.20-point swing for the same setting between arms. Do not report a "best"
+      Ne from this; the differences sit inside the noise floor.
+    speed_note: >
+      Beagle is ~9x faster (44 s against 388 s on chr21q, 8 cores). Not the binding
+      constraint at 23 chromosomes, so it does not change the choice.
+    caveat: >
+      Both results rest on a SHORT-RANGE truth track: GATK PGT/PID read-backed blocks are
+      local by construction. The ranking is trustworthy for local accuracy; neither result
+      bounds long-range switch error, and --hmm-ne governs the coalescent prior in SHAPEIT5's
+      HMM, which plausibly matters more for long-range phase than for the local orientation
+      this metric can see.
+
+  phasing_validation:
+    chosen: run the PGT/PID switch-error check in parallel with building inputs
+    rejected: [run it first and block on it, skip it]
+    status: done for chr22q -- see `switch_error` above
+
+  indel_handling:
+    chosen: no pre-filtering at all -- hand the raw records to the workflow
+    superseded: "bcftools view -m2 -M2 -v snps"
+    also_rejected: "-V indels"
+    reason: >
+      pure_indel_records is 0, so EVERY indel-bearing record is multiallelic. The workflow's
+      own `filter_biallelic` therefore catches all of them, drops them, AND adds them to
+      `filtered_positions`, which is what scales adj_mu. Pre-filtering would remove the same
+      records but outside the workflow's accounting, so the mutation-rate correction would
+      never see them. Doing nothing is both simpler and more correct, and it stops us
+      maintaining a second definition of "biallelic SNP" in parallel with the workflow's.
+    verified_mechanism: >
+      chunk_chromosomes.py calls `genotypes.count_alleles()` BARE, with no max_allele, so the
+      counts array widens to the largest allele index actually present in calldata/GT.
+      `filter_biallelic = counts[:, 2:].sum(axis=1) == 0` then catches any record with a
+      third allele. Confirmed by construction: allel.read_vcf with its default
+      numbers={'ALT': 3} truncates variants/ALT to 3 columns BUT PRESERVES allele index 4 in
+      calldata/GT (measured -- index 4 present, not coerced to -1). So a 5-allele record
+      still trips filter_biallelic rather than filter_nonmissing, and still reaches
+      filtered_positions.
+
+  filter_txt:
+    used: true
+    status: APPLIED 2026-09-11. scripts/filter_sites.py
+    gap_that_was_missed: >
+      An earlier version of this file and the README claimed filter.txt was used while NO
+      site-quality filtering had in fact been applied -- FILTER was "." for all 681,688 chr21
+      sites and no filter.txt existed. The error was treating the workflow's own
+      filter_biallelic / filter_nonmissing handling as if it stood in for the plan's GATK
+      hard filters. It does not: one removes REPRESENTATION artifacts (multiallelic, missing
+      genotypes), the other removes BAD CALLS. A raw unfiltered callset was staged for SINGER.
+    filters_applied:
+      gatk_hard:
+        expression: "QD<2.0 || FS>60.0 || MQ<40.0 || SOR>3.0 || ReadPosRankSum<-8.0 || MQRankSum<-12.5"
+        thresholds: GATK Best Practices, human-tuned, NOT re-derived for chimpanzee
+        chr21_sites: 32576        # 4.78%
+        per_criterion_independent:
+          QD_lt_2: 19832
+          SOR_gt_3: 10610
+          MQ_lt_40: 6817
+          FS_gt_60: 3859
+          MQRankSum_lt_neg12.5: 3
+          ReadPosRankSum_lt_neg8: 0
+        inert_criteria: >
+          ReadPosRankSum removes 0 sites and MQRankSum removes 3, so four of the six criteria
+          do all the work on this callset. Worth knowing before anyone tunes them.
+      allelic_imbalance:
+        rule: pooled alt fraction across heterozygous genotypes outside [0.25, 0.75]
+        basis: FORMAT/AD, summed over het calls per site
+        chr21_sites: 42959        # 6.30%
+        distribution_is_healthy: >
+          Median alt fraction 0.4964, mean 0.4834, against a 0.5 expectation; p1-p99 spans
+          0.116-0.750. The filter therefore cuts genuine outliers rather than the bulk.
+    chr21_totals:
+      input: 681688
+      union_removed: 60345        # 8.85%
+      overlap_gatk_and_ai: 15190
+      kept: 621343
+      written_to_filter_txt: 43497
+      removed_but_masked: 16848
+    overlap_interpretation: >
+      About a third of the allelic-imbalance failures are also GATK failures, which is the
+      expected signature of both detecting the same collapsed-paralogue mode. Allelic
+      imbalance still contributes ~28k sites the GATK criteria miss, so it is not redundant.
+    what_goes_in_filter_txt: >
+      Accessible removed positions only. Sites in masked regions are excluded because the
+      workflow strips them from filtered_positions anyway; multiallelic sites are excluded
+      because the workflow routes those into filtered_positions itself and recording them
+      here would double-count.
+    verified:
+      filter_txt_positions_in_vcf: 0        # the §8 invariant
+      filter_txt_subset_of_removed: true
+      all_filter_txt_entries_accessible: true
+    silent_bug_caught_by_assertion: >
+      The first run reported all filters applied but kept 681,688 of 681,688 sites -- a
+      complete no-op. Cause: it read work/filtered/chr21.raw.vcf.gz, which still carries the
+      GenBank accession CM009259.2, so a bcftools target file keyed on "chr21" matched
+      nothing and bcftools reported no error. The script now reads the RENAMED VCF and
+      asserts the contig name matches before building the exclusion list.
+
+# --------------------------------------------------------------------------------------
+# Resource sizing and interpretation measurements.
+# --------------------------------------------------------------------------------------
+switch_error_in_context:
+  measured: 2026-09-11
+  question: >
+    A switch-error rate expressed as a fraction of adjacent heterozygous pairs is not
+    interpretable on its own. The quantity that matters is how often phase is wrong relative
+    to how often the marginal tree changes: a switch inside a region already spanned by many
+    distinct trees perturbs far less than one that spans a single tree.
+  het_density_per_kb: {chr22q: 1.395, chr21q: 1.546}
+  switches_per_kb: {chr22q: 0.0590, chr21q: 0.0623}
+  one_switch_per_kb: {chr22q: 16.9, chr21q: 16.1}
+  marginal_tree_change:
+    method: >
+      msprime.sim_ancestry, 108 haplotypes, 5 Mb, r=1e-8, Ne=37,917 implied by pi=0.00182
+      (chimp_args QC pooled) and mu=1.2e-8 via pi = 4*Ne*mu.
+    trees_per_kb: 6.845
+    one_tree_change_per_kb: 0.146
+  ratio: >
+    Switches are 0.86-0.91% as frequent as marginal tree transitions. One switch every ~16 kb
+    falls inside a stretch already spanned by roughly 115 distinct trees.
+  conclusion: >
+    Phase error is noise at this scale, not a dominant error term. It does not gate the
+    build.
+  caveat: >
+    The tree-change figure comes from a panmictic constant-Ne simulation. The real panel is
+    four structured subspecies, which lengthens deep branches and would if anything raise
+    tree density further, so this ratio is conservative in the direction that matters.
+
+# --------------------------------------------------------------------------------------
+# chr21 end-to-end dry run of singer-snakemake's OWN input handling, 2026-09-11.
+# Its read_single_fasta, RateMap.read_hapmap, mask bitmask and filter chain imported from
+# the clone and run against SingerSnakemake_Input/. Every assertion in the input section of
+# chunk_chromosomes.py passed.
+# --------------------------------------------------------------------------------------
+validation_chr21:
+  variants_in_vcf: 681688
+  samples: 54
+  sequence_length: 33232379          # ancestral FASTA == hapmap == chrom.sizes
+  mask_intervals: 77141
+  mask_inaccessible_fraction: 0.0570
+  ancestral_states_at_variants:
+    C: 183943
+    G: 183785
+    T: 149081
+    A: 146465
+    N: 18414                         # -> unpolarised, retained
+  polarised: 629033                  # 92.3%
+  allele_flips: 76371                # ancestral matched ALT; REF/ALT swapped
+  filters:
+    non_segregating: 85
+    non_biallelic: 30811
+    missing_genotype: 89702
+    inaccessible: 51936
+  retained: 538253                   # 79.0%
+  filtered_positions: 91426          # feeds adj_mu
+  note: >
+    Retention is far higher than the human prep's 50.9% on OCEANIA/chr22, and the reason is
+    the mask: 5.70% inaccessible here against 51.92% there. That is the mappability-only
+    mask doing less work, not the chimpanzee data being cleaner. See
+    chr21_pilot.mask.the_comparison_was_wrong.
+
+# --------------------------------------------------------------------------------------
+# Map-parser de-risking, 2026-09-11. chr21 exercises NEITHER the minus1 orientation path
+# nor the na-rho path, so the pilot alone was not evidence the parser generalises.
+# --------------------------------------------------------------------------------------
+hapmap_parser_validation:
+  script: scripts/build_hapmap.py
+  chromosomes_built: [chr21, chr12, chr19]
+  chr12:
+    why: the only chromosome carrying BOTH paths in quantity
+    source_rows: 391667
+    minus1_rows: 100476           # 25.7% of rows -- the minus1 path, heavily exercised
+    na_rows: 311                  # the gap-fill path
+    lifted_pct: 98.2
+    usable_intervals: 384233
+    total_cM: 145.31
+    cM_per_Mb: 1.109
+  chr19:
+    why: most na rows of any chromosome
+    source_rows: 132537
+    minus1_rows: 0
+    na_rows: 404
+    lifted_pct: 96.5
+    usable_intervals: 127576
+    total_cM: 72.86
+    cM_per_Mb: 1.284
+  chr21:
+    note: exercises neither path (0 minus1, 0 na); kept as the pilot reference
+    cM_per_Mb: 1.614
+  assertions: >
+    All three pass the exact-length gate (read_hapmap sequence_length == chrom.sizes),
+    cumulative cM monotonically non-decreasing, positions strictly increasing, and exactly
+    one NaN interval each -- the leading interval before the map's first lifted coordinate,
+    which read_hapmap marks as missing data and SINGER skips.
+  rate_ordering_is_the_physical_check: >
+    chr12 (131.0 Mb) 1.109 < chr19 (56.7 Mb) 1.284 < chr21 (33.2 Mb) 1.614 cM/Mb. Smaller
+    chromosomes give higher cM/Mb because of the obligate crossover, and that ordering
+    SURVIVES the normalisation -- which is the point of using ONE global scalar. Normalising
+    per chromosome would have flattened all three to ~1.1 and erased a real signal.
+  conclusion: >
+    The parser generalises. Both paths that chr21 could not test are now exercised on real
+    data and produce maps that pass every assertion.
+
+# --------------------------------------------------------------------------------------
+# PRE-REGISTERED interpretation thresholds for the whole-chromosome phasing validation.
+# Written 2026-09-11 BEFORE the chr21 whole-chromosome switch-error number existed, so the
+# verdict cannot become a judgement call after the fact.
+# --------------------------------------------------------------------------------------
+phasing_validation_prereg:
+  question: >
+    Does the 4.03% switch error measured on chimp_args' ARM-SPLIT SHAPEIT5 output transfer
+    to this build's WHOLE-CHROMOSOME VCFs? The arm-split build never phases across the
+    centromere; this one does.
+  measurement: >
+    One measurement, chr21, this build's VCF, same PGT/PID gate and same script. NOT to be
+    repeated on a second arm to "confirm" -- two arms already agree at 4.03%/4.23% on the
+    arm-split build, so a second measurement here adds nothing and invites fishing.
+  noise_floor: >
+    Arm-to-arm variation at fixed settings was 4.03% (chr21q) against 4.23% (chr22q), so
+    +/- 0.5 percentage points is noise.
+  bands:
+    transfers:      "<= 4.5%   -- the number transfers; validation done; scale to 23."
+    investigate:    "4.5-5.5%  -- borderline; report before scaling."
+    worth_understanding: "5.5-7%  -- worth investigating before scaling."
+    meaningfully_worse:  "> 7%   -- whole-chromosome build is materially worse than
+                                   arm-split; understand the cause before committing."
+  most_likely_cause_if_worse: >
+    The centromere. chimp_args split into arms specifically to avoid phasing across it, and
+    that is the one structural difference between the two builds.
+  the_fix_if_so_is_NOT_arm_splitting: >
+    Adopting arm splitting was deliberately rejected -- it would mean two coordinate systems
+    for the same data. The right response would instead be to let the centromere appear as
+    INACCESSIBLE in mask.bed, which it already does via the mappability track, and accept
+    that phase across it is poor. SINGER sees very few sites there regardless, so the cost
+    of poor phase in that region is small.
+  on_a_bad_number: >
+    Report the value and the per-subspecies breakdown. Do NOT start a fix.
+
+# --------------------------------------------------------------------------------------
+# Whole-chromosome phasing validation (task A) and the large-chromosome ancestral gate.
+# Both 2026-09-11. Thresholds in phasing_validation_prereg were written BEFORE this number.
+# --------------------------------------------------------------------------------------
+phasing_validation_result:
+  measured_on: chr21, this build's whole-chromosome VCF, SHAPEIT5 phase_common --hmm-ne 10000
+  switch_error_ALL: 0.0432
+  per_subspecies:
+    ellioti: 0.0574          # n=5
+    troglodytes: 0.0545      # n=15
+    verus: 0.0420            # n=14
+    schweinfurthii: 0.0317   # n=19
+    "verus x troglodytes": 0.0217   # n=1, noise
+  pairs_tested: 225016
+  verdict: >
+    TRANSFERS. 4.32% against the arm-split build's 4.03% (chr21q) and 4.23% (chr22q) -- a
+    0.09-point move from the chr22q figure and 0.29 from chr21q, both inside the +/- 0.5
+    point noise floor the pre-registration fixed in advance. Lands in the "<= 4.5%
+    transfers" band.
+  centromere_concern_not_realised: >
+    The worry was that whole-chromosome phasing crosses the centromere, which chimp_args
+    avoided by splitting into arms. At 4.32% there is no measurable penalty, so the
+    mask-based treatment (centromere already inaccessible via the mappability track) is
+    sufficient and arm splitting stays rejected.
+  per_subspecies_ordering_unchanged: >
+    ellioti worst, schweinfurthii best, same rank order as both arm-split measurements. The
+    rate still tracks sample size rather than data quality.
+
+phasing_assertion_bug:
+  what_happened: >
+    The SLURM job reported FAILED, but SHAPEIT5 succeeded in 75 s and wrote valid output.
+    The failure was MY guard asserting "SHAPEIT5 phases every input site", which is false.
+  measured_truth: >
+    SHAPEIT5 emits exactly the BIALLELIC records -- of any type, not just SNPs. On chr21 the
+    output position set equals `bcftools view -m2 -M2` exactly: 650,877 records, dropping
+    all 30,811 multiallelics and nothing else. The 12,723 difference from `-m2 -M2 -v snps`
+    is biallelic spanning deletions (`*`) and small indels, which SHAPEIT5 keeps.
+  why_it_is_benign: >
+    Those multiallelics would be dropped by the workflow's own filter_biallelic anyway, AND
+    added to filtered_positions for the mu correction. The correction needs them present in
+    the VCF the workflow reads, so the phased output must be merged back rather than
+    replacing the input -- see the assembly step.
+  corrected_invariant: >
+    scripts/phase_chr.sbatch now asserts output count == `-m2 -M2` count, and that zero
+    genotypes remain unphased. Both measured, not assumed.
+
+ancestral_gate_large_chromosome:
+  chromosome: chr1
+  why: >
+    chr21, chr12 and chr19 are small or mid-sized. Large metacentrics have more structural
+    complexity in the chain, and the per-strand gate had only been exercised on 127,571
+    minus-strand bases (chr21).
+  aligned_blocks: 323711
+  plus_strand_identity: 0.9877
+  minus_strand_identity: 0.9785
+  minus_strand_bases: 3258295      # 25x the chr21 exposure
+  projected: 0.9695
+  left_as_N: 0.0305
+  multiply_covered: 0
+  verdict: >
+    Gate holds at scale. Both strand classes sit at the ~1.2% divergence expectation, and
+    multiple coverage is still zero, confirming that netting in panTro6 coordinates gives
+    single coverage by construction rather than by luck on a small chromosome.
+
+# --------------------------------------------------------------------------------------
+# Pipeline ORDER: filter before phase. Established 2026-09-11, with the cost of getting it
+# wrong measured rather than argued.
+# --------------------------------------------------------------------------------------
+pipeline_order:
+  order: raw -> rename -> site filters -> filter.txt -> SHAPEIT5 phase -> merge multiallelics -> assemble
+  why_filtering_must_precede_phasing:
+    mechanical_reason: >
+      SHAPEIT5 emits GT ONLY. Measured on the phased chr21: the header carries
+      `##FORMAT=<ID=GT>` and nothing else -- AD, DP, GQ, PGT, PID, PL and PS are all
+      stripped. The depth filter needs FORMAT/DP and the allelic-imbalance filter needs
+      FORMAT/AD, so both are IMPOSSIBLE to compute after phasing, not merely inadvisable.
+      Only the GATK filters would survive, since they read INFO fields.
+    quality_reason_measured: >
+      Phasing on unfiltered data degrades the haplotypes around bad sites. Measured directly
+      on chr21 with the same PGT/PID gate and the same samples:
+        phase-then-filter (wrong order): 4.32%
+        filter-then-phase (correct)    : 3.59%
+      A 17% relative reduction, well outside the +/- 0.5 point noise floor, and BETTER in
+      every subspecies. It also beats the arm-split baseline (4.03% / 4.23%) that was the
+      transfer target.
+  switch_error_filtered_then_phased:
+    ALL: 0.0359
+    ellioti: 0.0541          # n=5
+    troglodytes: 0.0507      # n=15
+    verus: 0.0255            # n=14
+    schweinfurthii: 0.0232   # n=19
+    "verus x troglodytes": 0.0183   # n=1, noise
+    pairs_tested: 192010
+  per_subspecies_deltas: >
+    verus improved most (4.20 -> 2.55%) and schweinfurthii next (3.17 -> 2.32%), while
+    troglodytes and ellioti moved least (-0.38 and -0.33 points). Every group improved, so
+    this is not a re-ranking, it is a uniform gain.
+  what_was_wrong_before: >
+    The chr21 input assembled earlier had phased an UNFILTERED VCF, so all 63,820
+    quality-failing sites went through phasing. The 4.32% figure was therefore measured on a
+    degraded input. The corrected build supersedes it.
+
+site_filters:
+  script: scripts/filter_sites.py
+  runs_on: the unphased, renamed VCF (work/filtered/<chrom>.renamed.vcf.gz)
+  chr21:
+    input_sites: 681688
+    gatk_hard: 32576              # 4.78%
+    allelic_imbalance: 42959      # 6.30%, pooled alt fraction at hets outside [0.25, 0.75]
+    depth: 10006                  # 1.47%
+    union_removed: 63820          # 9.36%
+    sum_of_parts: 85541
+    overlap: 21721                # 25% of the summed total
+    kept: 617868
+    written_to_filter_txt: 45304
+  depth_filter:
+    basis: summed FORMAT/DP across the 54 samples
+    median: 1310                  # 24.3x per sample, consistent with the 26x metadata mean
+    band: [328, 2620]             # 0.25x to 2x the median
+    why_median_not_mean: >
+      The mean is pulled up by exactly the collapsed-paralogue pileups the high cut targets,
+      so a mean-based threshold is set too permissively by the contamination it is meant to
+      catch.
+    why_not_INFO_DP: >
+      MEASURED on this callset: INFO/DP runs 8.66x the summed FORMAT/DP, because it counts
+      pre-filter reads over all 61 ORIGINALLY-called samples (bonobos included). Applying the
+      plan's multiples to INFO/DP would reject almost every site.
+    tail_shape: >
+      p95 = 1513 against p99 = 2839 -- the jump between them is the collapsed-paralogue
+      signature the high cut is aimed at.
+  overlap_interpretation: >
+    Three independent criteria converging on 21,721 shared sites is the reassuring result:
+    they are detecting the same underlying failure mode (collapsed paralogues and
+    mismapping) rather than each removing arbitrary variation.
+
+# --------------------------------------------------------------------------------------
+# Genome-wide build, 2026-09-11. All 23 autosomes.
+# --------------------------------------------------------------------------------------
+genome_build:
+  chromosomes: 23
+  input_sites_after_bonobo_removal: 49368272
+  site_filters:
+    gatk_hard: 2699496            # 5.47%
+    allelic_imbalance: 3304436    # 6.69%
+    depth: 813363                 # 1.65%
+    union_removed: 5021313        # 10.17%
+    kept: 44346959
+  filter_txt_positions: 2729120   # accessible removals only
+  phased_biallelic: 42608875
+  multiallelic_merged_back: 1038084
+  assembled_total: 44346959
+  accessible_fraction_range: [0.790, 0.907]   # chr19 lowest, chr13 highest
+  verification: 14/14 on every chromosome
+  bugs_found_and_fixed:
+    chr2A_chr2B_zero_lift: >
+      The Stevison map names human chr2 as the hg18 contig for BOTH chr2A and chr2B (human
+      has one chr2; chimpanzee split it). build_hapmap.py was writing the chimpanzee name
+      into the liftOver BED, so 0% of intervals lifted. Now it uses the contig the map
+      itself names, and raises if zero intervals ever survive again.
+    filter_sites_required_the_mask: >
+      filter_sites.py read mask.bed to restrict filter.txt to accessible positions, but the
+      mask depends on genmap which runs in parallel. 22 of 23 tasks crashed AFTER computing
+      the filters correctly. The restriction is an optimisation, not a correctness
+      requirement, so it now records everything when the mask is absent and
+      restrict_filter_txt.py trims afterwards.
+    verify_phasing_check_too_strict: >
+      The "all genotypes phased" check failed on all 23 because the deliberately merged-back
+      multiallelic records are unphased by design. Confirmed by direct test: 0 unphased
+      biallelic genotypes, all 17,070 unphased genotypes on multiallelic records. The check
+      is now restricted to biallelic records -- as written it would have failed every
+      correctly-built chromosome.
+  accessible_fraction_note: >
+    79-91% per chromosome, below chr21's pilot figure of 94.30%. The pilot built its genmap
+    index on chr21 ALONE, so a k-mer occurring twice on different chromosomes looked unique.
+    The whole-genome index sees those duplicates, so the mask correctly does more work.
+
+# --------------------------------------------------------------------------------------
+# Results layout, 2026-09-11. Parallels data/human_data/ minus the per-set level.
+# --------------------------------------------------------------------------------------
+results_layout:
+  singer_snakemake_outputs: results/singer-snakemake_outputs/<chrom>/
+  coastt_input: results/ts_chunks/
+  no_per_set_level: >
+    The human side is results/<SET>/{singer-snakemake_outputs,ts_chunks} because it has eight
+    sample sets. The chimpanzee panel is one set, so that level is dropped rather than
+    carried as a directory with a single child.
+  ts_chunks:
+    flat: true
+    reason: >
+      CountCoalEvents globs *.trees and turns each filename into a contig id
+      (src/CountCoalEvents.py:141-151), so every chromosome's chunks go in ONE directory with
+      no subdirectories.
+    filename: "<chrom>_<start>_<end>.trees"
+    chr_prefix_kept: >
+      Deliberate. A contig id starting with a digit is awkward in Python and pandas, and
+      chr2A / chr2B are not numbers at all.
+    replicate: highest index in <chrom>/trees/<chrom>.<rep>.tsz -- the most burnt-in draw
+    implementation: >
+      ../human_data/scripts/extract_ts_chunks.py, imported rather than duplicated: its
+      --singer-output / --out-dir interface carries no per-set assumption. Driver is
+      scripts/extract_chunks.sh.
+  verification_on_smoke_output:
+    kept_chunks_in_chunks_p: 34      # of 37 intervals: 3 skipped, 0 nan
+    files_written: 34
+    intervals_match_exactly: true
+    non_overlapping: true
+    loads_with_tskit: true
+    samples_per_chunk: 108           # 54 diploids
+    populations_per_chunk: 5
+    sequence_length_per_chunk: 33232380   # FULL chromosome, by design
+    all_sites_inside_named_interval: true
+    countcoalevents_ingest: >
+      CountCoalEvents(ts_dir=...) discovered all 34 contigs and parsed the ids from the
+      filenames, so the directory is consumable as built.
