@@ -71,6 +71,45 @@ pop_labels.csv
 !results/figure_data/**/*.yaml
 
 # ---------------------------------------------------------------------------
+# Human data preparation (data/human_data/)
+#
+# The scripts, drivers and recorded decisions are tracked; the data they fetch
+# and derive is not. resources/ alone is ~15 GB (a 6.3 GB source VCF, the
+# per-chromosome BCFs, and ~700 MB of ancestral FASTA), and every byte of it is
+# reproducible with `bash download.sh` -- bar the deCODE map, which science.org
+# blocks and a human must place at resources/raw/aau1043_datas3.gz by hand.
+# ---------------------------------------------------------------------------
+data/human_data/resources/
+data/human_data/SingerSnakemake_SampleSets/
+data/human_data/results/
+data/human_data/logs/
+data/human_data/.scratch/
+
+# Snakemake per-run state: each set gets its own workdir (they race on .snakemake/iocache
+# otherwise), but that state is regenerable and shouldn't be tracked. The launcher, the SLURM
+# profile and the per-set configs under runs/ ARE tracked -- the README tells people to run them.
+data/human_data/runs/work/
+
+# Tracked despite the blanket rules above.
+!data/human_data/README.md
+!data/human_data/prep.yaml
+!data/human_data/singer_config.yaml
+
+# Chimpanzee data preparation (data/chimp_data/). Same shape as the human block above:
+# everything derived or downloaded is ignored, and only the documentation and the scripts
+# that rebuild it are tracked. resources/vcf/ holds a ~28 GB copy of the raw callset.
+data/chimp_data/resources/
+data/chimp_data/work/
+data/chimp_data/SingerSnakemake_Input/
+data/chimp_data/results/
+data/chimp_data/logs/
+
+# Tracked despite the blanket rules above.
+!data/chimp_data/README.md
+!data/chimp_data/prep.yaml
+!data/chimp_data/singer_config.yaml
+
+# ---------------------------------------------------------------------------
 # Scratch, tests, local-only data
 # ---------------------------------------------------------------------------
 tests/

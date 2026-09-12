@@ -1,0 +1,23 @@
+# SLURM profile for singer-snakemake on midway3 (see ../singer-snakemake/SLURM.md).
+#
+# The workflow declares no per-rule `resources:` blocks, so every rule inherits these
+# defaults. They are sized for the most demanding rule rather than the average one:
+# chunk_chromosomes builds a numpy <U1 array of the whole chromosome from the ancestral
+# FASTA (~1 GB for chr1, ~200 MB for chr22) plus the intermediate Python string, and
+# read_vcf holds the full genotype matrix (~2.2 GiB measured for EAST_ASIA chr1).
+# SLURM.md's suggested 4000 MB would OOM there.
+executor: slurm
+jobs: 200
+max-jobs-per-second: 5
+max-status-checks-per-second: 0.5
+latency-wait: 30            # project filesystem can lag on output visibility
+keep-going: true            # one failing chunk should not halt the other sets
+rerun-incomplete: true
+printshellcmds: true
+
+default-resources:
+    slurm_account: pi-jnovembre
+    slurm_partition: jnovembre
+    cpus_per_task: 1
+    mem_mb: 16000
+    runtime: "12h"
