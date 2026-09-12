@@ -25,7 +25,8 @@ bash download.sh
 bash subset.sh --slurm-partition jnovembre --slurm-account pi-jnovembre
 
 # 3. infer ARGs with SINGER                                           (~1 day, whole genome)
-bash runs/run_singer.sh ALL --profile caslake_profile
+bash runs/run_singer.sh ALL --profile caslake_profile   # shared partition, high throughput
+#   ...or --profile slurm_profile                       # dedicated partition, no queue
 
 # 4. cut the final posterior draw into CoaSTT's input directory       (minutes)
 bash runs/extract_chunks.sh ALL
@@ -82,9 +83,13 @@ stops with these instructions if it is missing.
 bash subset.sh                       # 4 sets at a time locally; --jobs 8 widens it
 bash runs/run_singer.sh --chrom chr21 ALL --profile caslake_profile   # one chromosome
 bash runs/run_singer.sh --chrom chr22 --profile caslake_profile       # all 8 sets
+bash runs/run_singer.sh ALL --profile slurm_profile                   # dedicated partition
 bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA                 # smoke test
 bash runs/extract_chunks.sh                                           # every finished set
 ```
+
+`--profile` selects the cluster profile; `slurm_profile` is the default if omitted. See
+*Cluster profiles* below, and *Adapting this to your own cluster* if you are not on midway3.
 
 ## Sources
 
@@ -294,31 +299,68 @@ Two documented exceptions, both applied by the launcher rather than a second con
 
 ### Cluster profiles
 
-Two, selected with `--profile`:
+Pick one with `--profile`. Both request **one CPU per job** — every rule in this workflow is
+single-threaded, so that is what the work actually is, not a compromise — and both size memory
+and walltime from measured usage rather than guesses:
 
-- **`caslake_profile/`** (recommended) — the shared partition: 9,120 CPUs, 190 nodes. Every rule
-  is single-threaded, so each job asks for **one CPU** and memory sized from measured `MaxRSS`.
-  Small requests backfill into gaps that large ones wait behind, which matters on a queue shared
-  with other users.
+| rule | measured max | requested |
+|---|---|---|
+| `run_singer` | 5.8 h / 5.4 GB | 10–12 h / 8 GB |
+| `run_polegon` | 1.2 min / 346 MB | 30 min / 1 GB |
+| `chunk_chromosomes` | ~2 min / ~35 MB (chr22) | 4 h / 8 GB |
+| everything else | ~200 MB | 4 GB |
 
-  | rule | measured max | requested |
-  |---|---|---|
-  | `run_singer` | 5.8 h / 5.4 GB | 10 h / 8 GB |
-  | `run_polegon` | 1.2 min / 346 MB | 30 min / 1 GB |
-  | `chunk_chromosomes` | ~2 min / ~35 MB (chr22) | 4 h / 8 GB |
+`chunk_chromosomes` keeps generous memory deliberately: it is the one rule whose cost scales
+with chromosome length, building a full-chromosome numpy array from the ancestral FASTA plus the
+genotype matrix, and chr1 is 5× chr21. Everything else runs on fixed-size 2 Mb chunks, so its
+cost does not grow with the chromosome.
 
-  `chunk_chromosomes` keeps generous memory deliberately: it is the one rule whose cost scales
-  with chromosome length, building a full-chromosome numpy array from the ancestral FASTA plus
-  the genotype matrix, and chr1 is 5× chr21.
+**`caslake_profile/` — shared, high throughput.** 9,120 CPUs over 190 nodes, but shared with the
+rest of the cluster, so jobs queue. Small requests backfill into gaps that large ones wait
+behind, which is exactly why the per-rule sizing matters here. `jobs: 500` concurrent.
 
-  **⚠ caslake's QOS caps a single job at 36 h**, even though the partition advertises
-  `MaxTime=UNLIMITED`. Exceed it and jobs sit in `PENDING` forever with reason
-  `QOSMaxWallDurationPerJobLimit` — not slow, unschedulable. Check with
-  `sacctmgr show qos caslake format=MaxWall`.
+**`slurm_profile/` — dedicated, predictable.** The `jnovembre` partition, 192 CPUs over 3 nodes.
+Nothing else competes, so jobs start immediately, but throughput is capped by the partition.
+`jobs: 190`.
 
-- **`slurm_profile/`** — the dedicated `jnovembre` partition, 192 CPUs. Blanket 16 GB per job
-  and a 12 h walltime we control. Simpler, but the coarse request wastes memory and the job
-  count is capped by a much smaller partition.
+Rule of thumb: use `caslake_profile` for a whole-genome run, `slurm_profile` for a single
+chromosome or when you want results without queue variance.
+
+### Adapting this to your own cluster
+
+Copy either profile and change three things:
+
+```yaml
+default-resources:
+    slurm_account: <your-account>       # sacctmgr show assoc user=$USER format=account
+    slurm_partition: <your-partition>   # sinfo -s
+```
+
+```yaml
+jobs: <n>        # concurrent jobs. Cap near the CPUs you can reasonably occupy;
+                 # on a shared partition, well below its total.
+```
+
+Then check your walltime ceiling before trusting `runtime:`:
+
+```bash
+sinfo -p <partition> -o "%P %l"                          # partition limit
+sacctmgr show qos <qos> format=Name,MaxWall              # QOS limit -- often lower
+```
+
+**The QOS limit is the one that bites.** caslake's partition advertises `MaxTime=UNLIMITED`
+while its QOS caps a single job at 36 h; jnovembre's QOS allows 48 h. Asking for more than the
+QOS allows does not slow a job down — it makes it **unschedulable**, sitting in `PENDING`
+forever with reason `QOSMaxWallDurationPerJobLimit`. That is silent unless you look.
+
+If your cluster has no SLURM, drop `--profile` and pass `--cores N` instead; snakemake will run
+the same DAG locally.
+
+Sanity-check any profile before committing a long run to it:
+
+```bash
+bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA --profile <your_profile>
+```
 
 ### Run state
 

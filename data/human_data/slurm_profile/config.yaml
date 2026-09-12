@@ -1,17 +1,34 @@
-# SLURM profile for singer-snakemake on midway3 (see ../singer-snakemake/SLURM.md).
+# SLURM profile for the DEDICATED jnovembre partition (192 CPUs, 3 nodes).
 #
-# The workflow declares no per-rule `resources:` blocks, so every rule inherits these
-# defaults. They are sized for the most demanding rule rather than the average one:
-# chunk_chromosomes builds a numpy <U1 array of the whole chromosome from the ancestral
-# FASTA (~1 GB for chr1, ~200 MB for chr22) plus the intermediate Python string, and
-# read_vcf holds the full genotype matrix (~2.2 GiB measured for EAST_ASIA chr1).
-# SLURM.md's suggested 4000 MB would OOM there.
+#   bash runs/run_singer.sh <SET> --profile slurm_profile
+#
+# Use this when you own the partition and want predictable scheduling: nothing else is
+# competing, so jobs start immediately and the only limit is the 192 CPUs. Use
+# caslake_profile instead when you need throughput -- caslake has 9,120 CPUs but is shared,
+# so jobs queue.
+#
+# Per-rule resources are sized from measured MaxRSS and Elapsed on a completed ALL
+# (n=216, 2 Mb chunks) run -- the same measurements the caslake profile uses:
+#
+#     rule                measured max        requested here
+#     run_singer          5.8 h / 5.4 GB      12 h / 8 GB
+#     run_polegon         1.2 min / 346 MB    30 min / 1 GB
+#     chunk_chromosomes   ~2 min / ~35 MB     4 h / 8 GB
+#
+# chunk_chromosomes keeps generous memory on purpose: it is the one rule whose cost scales
+# with chromosome length, building a full-chromosome numpy <U1 array from the ancestral FASTA
+# plus the whole genotype matrix, and chr1 is 5x chr21. Everything else runs on fixed-size
+# 2 Mb chunks, so its cost does not grow with the chromosome.
+#
+# Walltime headroom: the jnovembre QOS allows 2-00:00:00 (48 h), more generous than caslake's
+# 36 h, so run_singer gets 12 h -- about 2x the observed maximum. Check your own limit with
+#     sacctmgr show qos <your-qos> format=MaxWall
 executor: slurm
-jobs: 200
+jobs: 190                   # just under the partition's 192 CPUs; every rule is 1 CPU
 max-jobs-per-second: 5
 max-status-checks-per-second: 0.5
 latency-wait: 30            # project filesystem can lag on output visibility
-keep-going: true            # one failing chunk should not halt the other sets
+keep-going: true            # one failing chunk should not halt the rest
 rerun-incomplete: true
 printshellcmds: true
 
@@ -19,5 +36,27 @@ default-resources:
     slurm_account: pi-jnovembre
     slurm_partition: jnovembre
     cpus_per_task: 1
-    mem_mb: 16000
-    runtime: "12h"
+    mem_mb: 2000
+    runtime: 240
+
+set-resources:
+    chunk_chromosomes:
+        mem_mb: 8000
+        runtime: 240
+    run_singer:
+        mem_mb: 8000           # observed max 5.4 GB
+        runtime: 720           # 12 h; observed max 5.8 h
+    run_polegon:
+        mem_mb: 1000           # observed max 346 MB
+        runtime: 30            # observed max 1.2 min
+    merge_chunks:
+        mem_mb: 8000
+        runtime: 720
+    observed_tree_statistics:
+        mem_mb: 4000
+    expected_tree_statistics:
+        mem_mb: 4000
+    coalescence_rates:
+        mem_mb: 4000
+    diagnostics:
+        mem_mb: 4000
