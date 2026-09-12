@@ -373,5 +373,15 @@ decisions:
   tskit_fork:
     used: false
     note: >
-      singer-snakemake's requirements.txt pins nspope/tskit@nsp-paircoal-partial-missing.
-      CoaSTT_env uses stock tskit 1.0.3 instead; see README.md for what that costs.
+      singer-snakemake's requirements.txt pins nspope/tskit@nsp-paircoal-partial-missing;
+      CoaSTT_env uses stock tskit 1.0.3. The fork changes how pair-coalescence rates are
+      NORMALISED under partial missingness (stock divides by all sample pairs including
+      unobserved ones, the fork by pairs actually observed), biasing stock's rates low by ~17%
+      on a test with isolated samples.
+    scope: >
+      Affects singer-snakemake's own diagnostics only -- plots/pair-coalescence-rates.png and
+      stats/*.coalrate.p -- which should be read as biased low where chunks carry isolated
+      samples. It does NOT reach CoaSTT's rates: src/CountCoalEvents.py calls
+      pair_coalescence_counts(..., span_normalise=False) and normalises itself, so the
+      divergent path is never taken. Do not infer a CoaSTT rate bias from set missingness by
+      this route.
