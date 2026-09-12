@@ -104,6 +104,10 @@ data/chimp_data/SingerSnakemake_Input/
 data/chimp_data/results/
 data/chimp_data/logs/
 
+# Per-chromosome snakemake workdirs (symlink farms + a generated config). Same reasoning as
+# the human runs/work/ rule above: regenerable state, and the symlinks are absolute paths.
+data/chimp_data/runs/work/
+
 # Tracked despite the blanket rules above.
 !data/chimp_data/README.md
 !data/chimp_data/prep.yaml
