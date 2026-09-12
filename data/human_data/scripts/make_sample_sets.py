@@ -1,14 +1,26 @@
 """
 Define the 8 sample sets written to `resources/hgdp/sets/{set}.csv`.
 
-Seven regional sets take every sample in that region. The eighth, ALL, is a geographically
-even subsample: the 4 highest-coverage samples from each of the 54 populations, 216 samples.
-Taking all 929 would make SINGER's cost (quadratic in sample count) prohibitive, and an
-unweighted subsample would be dominated by the densely sampled regions -- EAST_ASIA alone is
-223 samples against OCEANIA's 28.
+Seven regional sets take the samples in that region, three of them capped per population to
+hold down SINGER's cost, which grows steeply with sample count. The eighth, ALL, is a
+geographically even subsample: the 4 highest-coverage samples from each of the 54 populations.
 
-Every population has at least 4 samples, so the per-population quota is always met exactly.
-Ties in coverage are broken by sample id so the selection is reproducible.
+Per-population caps (REGION_CAPS below):
+
+    MIDDLE_EAST           25 per population    161 -> 98
+    CENTRAL_SOUTH_ASIA    15 per population    197 -> 130
+    EAST_ASIA             10 per population    223 -> 158
+
+AFRICA, EUROPE, OCEANIA and AMERICA are uncapped; their populations are small enough already.
+A cap only ever removes samples, so a population already at or below its cap is untouched --
+Uygur (10) under the CENTRAL_SOUTH_ASIA cap of 15, for instance, and all fifteen EAST_ASIA
+populations that already sit at 10 or fewer.
+
+Wherever a cap binds, the retained samples are the ones with the highest coverage. Ties in
+coverage are broken by sample id, so the selection is deterministic and reproducible.
+
+ALL is deliberately drawn from the FULL metadata rather than from the capped regional pools,
+so capping a region does not change which individuals represent it in ALL.
 
 Each CSV is a headerless single column of sample ids, which is the format `bcftools view -S`
 expects.
@@ -24,6 +36,14 @@ REGIONS = [
     "AFRICA", "EUROPE", "CENTRAL_SOUTH_ASIA", "EAST_ASIA",
     "OCEANIA", "AMERICA", "MIDDLE_EAST",
 ]
+
+# Maximum samples kept per population, by region. Regions absent here are uncapped.
+# Applied as a cap, not a quota: populations already at or below the limit keep every sample.
+REGION_CAPS = {
+    "MIDDLE_EAST": 25,
+    "CENTRAL_SOUTH_ASIA": 15,
+    "EAST_ASIA": 10,
+}
 
 
 def main():
@@ -47,12 +67,32 @@ def main():
     summary = []
 
     for region in REGIONS:
-        members = sorted(r["sample_id"] for r in rows if r["region"] == region)
-        assert members, f"No samples found for region {region}"
+        in_region = [r for r in rows if r["region"] == region]
+        assert in_region, f"No samples found for region {region}"
+        cap = REGION_CAPS.get(region)
+
+        by_population = defaultdict(list)
+        for row in in_region:
+            by_population[row["population"]].append(row)
+
+        members = []
+        capped_pops = []
+        for population, pop_rows in sorted(by_population.items()):
+            if cap is not None and len(pop_rows) > cap:
+                # Highest coverage first; sample id breaks ties so this is deterministic.
+                ranked = sorted(
+                    pop_rows, key=lambda r: (-float(r["coverage"]), r["sample_id"])
+                )
+                capped_pops.append((population, len(pop_rows), cap))
+                pop_rows = ranked[:cap]
+            members.extend(r["sample_id"] for r in pop_rows)
+
+        members = sorted(members)
         write_set(region, members)
-        summary.append((region, len(members), len({
-            r["population"] for r in rows if r["region"] == region
-        })))
+        summary.append((region, len(members), len(by_population)))
+
+        for population, before, after in capped_pops:
+            print(f"    {region}/{population}: {before} -> {after}")
 
     # ALL: highest-coverage `PER_POPULATION` per population.
     by_population = defaultdict(list)
