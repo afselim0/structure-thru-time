@@ -47,6 +47,25 @@ dependencies:
   # (nspope/tskit@nsp-paircoal-partial-missing) which is deliberately NOT used here -- see
   # data/human_data/README.md for what that costs.
   - scikit-allel=1.3.13
+  # Chimpanzee data preparation for SINGER ARG inference (data/chimp_data/). Unlike the human
+  # prep, which starts from a curated phased release, the chimp callset is raw, unphased and
+  # has no published accessibility mask, so phasing, liftover and mappability all have to be
+  # done here. See data/chimp_data/README.md.
+  #   beagle           statistical phasing (§3). A Java tool -- see the openjdk note below.
+  #   whatshap         read-backed phasing utilities, used to validate the statistical phasing
+  #   ucsc-liftover    panTro5 -> panTro6 for the EPO ancestral FASTA (§6), and
+  #                    hg18 -> hg38 -> panTro6 for the Stevison recombination map (§5)
+  #   genmap           reference mappability for the accessibility mask (§4); the callset is
+  #                    variant-only, so a depth-based callability track is not possible
+  #   ucsc-bigbedtobed reads UCSC panTro6 .bb tracks (assembly gaps, repeats) for the mask
+  - beagle=5.4
+  - whatshap=2.8
+  - ucsc-liftover=482
+  - ucsc-bigbedtobed=482
+  - genmap=1.3.0
+  # Pulled in by beagle, which is a Java tool. Named explicitly because the environment
+  # otherwise has no JDK and the system java is 8, which Beagle 5.4 will not run on.
+  - openjdk=25.0.2
   - pip
   - pip:
     - demesdraw
