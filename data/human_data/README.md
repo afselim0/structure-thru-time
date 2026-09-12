@@ -9,23 +9,82 @@ ready-to-run input directories, one per sample set. Then run the workflow — se
 SINGER* below. `singer-snakemake` is a git submodule at `../singer-snakemake`, pinned to the
 commit these inputs were built and tested against; `git submodule update --init` after cloning.
 
-## Quick start
+## The whole pipeline, start to finish
+
+Four commands take you from the published HGDP callset to tree sequences CoaSTT can read.
+Each stage is idempotent — it skips work whose output already exists — so an interrupted run
+resumes rather than restarting.
 
 ```bash
 conda activate CoaSTT_env
 
-bash download.sh    # raw downloads, shared resources, verification (a few hours)
-bash subset.sh      # the 8 input directories (minutes per set)
+# 1. download raw data + derive the shared per-chromosome resources   (a few hours)
+bash download.sh
+
+# 2. cut those into 8 per-set input directories                       (~15 min per set)
+bash subset.sh --slurm-partition jnovembre --slurm-account pi-jnovembre
+
+# 3. infer ARGs with SINGER                                           (~1 day, whole genome)
+bash runs/run_singer.sh ALL --profile caslake_profile
+
+# 4. cut the final posterior draw into CoaSTT's input directory       (minutes)
+bash runs/extract_chunks.sh ALL
 ```
 
-`subset.sh` runs 4 sets at a time locally. `--jobs 8` widens that; `--slurm-partition` and
-`--slurm-account` together submit a single 8-task array instead.
+What each stage actually does, in order:
 
-**One file needs fetching by hand.** science.org serves supplements behind bot protection and
-returns 403 to every scripted request, so the deCODE recombination map can't be automated. Grab
-*Data S3* from [doi:10.1126/science.aau1043](https://www.science.org/doi/10.1126/science.aau1043)
-and drop it at `resources/raw/aau1043_datas3.gz`. `download.sh` stops with these instructions
-if it's missing.
+**1. `download.sh`** — seven steps, then verification:
+
+| step | script | produces |
+|---|---|---|
+| 1 | *(curl)* | `resources/raw/` — statphase VCF, mask, metadata, ancestral tarball |
+| 2 | `bcftools index -n` | integrity check: 929 samples against the published index |
+| 3 | `make_ancestral.py` | `grch38/ancestral/chr{N}.ancestral.fa.gz` + `chrom.sizes` |
+| 4 | `make_masks.py` | `grch38/mask/chr{N}.mask.bed` — **complemented** to inaccessible |
+| 5 | `make_hapmaps.py` | `grch38/hapmap/chr{N}.hapmap` from the deCODE map |
+| 6 | `make_metadata.py`, `make_sample_sets.py` | `hgdp/metadata.tsv`, `hgdp/sets/*.csv` |
+| 7 | `split_statphase.sh` | `hgdp/statphase/chr{N}.bcf` — GT-only, per chromosome |
+| — | `verify_resources.py` | 200 checks (see *Verification*) |
+
+The deCODE map must be placed by hand first — see the note below.
+
+**2. `subset.sh`** — runs `make_set_inputs.sh` per set (locally via `xargs -P`, or as an
+8-task SLURM array), then `verify_sets.py`. Per set, per chromosome:
+
+```
+bcftools view -S <set>.csv -a -c 1 -v snps   →  chr{N}.vcf.gz   (+ index)
+ln -s  mask.bed / hapmap / ancestral.fa.gz   →  shared, symlinked
+make_sample_masks.py                         →  chr{N}.sample.mask.bed
+write_set_metadata.py                        →  chr{N}.meta.csv  (in VCF order — order matters)
+```
+
+**3. `runs/run_singer.sh`** — one `snakemake` call against
+`../singer-snakemake/workflow/Snakefile`, with `singer_config.yaml` as the configfile and only
+`input-dir`, `output-dir` and `chromosomes` overridden per run. Writes
+`results/<SET>/singer-snakemake_outputs/chr{N}/` with `trees/ plots/ stats/ chunks/`.
+
+**4. `runs/extract_chunks.sh`** — calls `extract_ts_chunks.py`, which takes the highest-numbered
+replicate (the most burnt-in posterior draw) for each chromosome, cuts it at the chunk
+boundaries in `chr{N}.chunks.p`, and writes `results/<SET>/ts_chunks/chr{N}_{start}_{end}.trees`
+— flat, all chromosomes together, which is what CoaSTT globs.
+
+### Before you start: one file must be fetched by hand
+
+science.org serves its supplements behind bot protection and returns 403 to every scripted
+request, so the deCODE recombination map cannot be downloaded automatically. Grab *Data S3*
+from [doi:10.1126/science.aau1043](https://www.science.org/doi/10.1126/science.aau1043) and put
+it at `resources/raw/aau1043_datas3.gz` (gzip it if it arrives uncompressed). `download.sh`
+stops with these instructions if it is missing.
+
+### Variations
+
+```bash
+bash subset.sh                       # 4 sets at a time locally; --jobs 8 widens it
+bash runs/run_singer.sh --chrom chr21 ALL --profile caslake_profile   # one chromosome
+bash runs/run_singer.sh --chrom chr22 --profile caslake_profile       # all 8 sets
+bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA                 # smoke test
+bash runs/extract_chunks.sh                                           # every finished set
+```
 
 ## Sources
 
@@ -64,11 +123,27 @@ mutation-rate adjustment.
 
 ## The 8 sample sets
 
-Seven take every sample in a region: AFRICA (104), EUROPE (155), CENTRAL_SOUTH_ASIA (197),
-EAST_ASIA (223), OCEANIA (28), AMERICA (61), MIDDLE_EAST (161).
+| set | n | per-population cap |
+|---|---|---|
+| OCEANIA | 28 | — |
+| AMERICA | 61 | — |
+| MIDDLE_EAST | 100 | 25 |
+| AFRICA | 104 | — |
+| CENTRAL_SOUTH_ASIA | 130 | 15 |
+| EUROPE | 155 | — |
+| EAST_ASIA | 168 | 10 |
+| ALL | 216 | 4 (all 54 populations) |
 
-ALL (216) is the 4 highest-coverage samples from each of the 54 populations, ties broken by
-sample ID.
+Seven are regional. Three of those are capped per population to hold down SINGER's cost, which
+rises steeply with sample count: MIDDLE_EAST 161→100, CENTRAL_SOUTH_ASIA 197→130, EAST_ASIA
+223→168, for 929→746 across the seven. A cap only ever removes samples, so populations already
+at or below it are untouched — Uygur (10) under CSA's cap of 15, and the fifteen EAST_ASIA
+populations already at ≤10. Where a cap binds, the highest-coverage samples are kept, ties
+broken by sample ID.
+
+ALL is the 4 highest-coverage samples from each of the 54 populations. It is drawn from the
+full metadata rather than the capped regional pools, so capping a region does not change who
+represents it in ALL.
 
 ## Missing genotypes
 
@@ -76,7 +151,7 @@ This is the one substantive transformation applied to the genotype data, so it's
 understanding.
 
 SINGER's wrapper drops any site with even a single missing genotype. That's a lot of sites —
-per-site union over samples, across all 22 autosomes:
+per-site union over samples, across all 22 autosomes, measured on the *uncapped* sets:
 
 | set | n | affected | | set | n | affected |
 |---|---|---|---|---|---|---|
@@ -84,6 +159,10 @@ per-site union over samples, across all 22 autosomes:
 | AMERICA | 61 | 12.3% | | MIDDLE_EAST | 161 | 28.1% |
 | ALL | 216 | 19.2% | | CENTRAL_SOUTH_ASIA | 197 | 35.3% |
 | AFRICA | 104 | 23.7% | | EAST_ASIA | 223 | 41.3% |
+
+The three capped sets are now smaller than the n shown, so their true fractions are somewhat
+lower — the statistic is a per-site union over samples, so it falls with sample count. The
+figures are kept as measured because they are what motivated the imputation scheme.
 
 Most of the loss is sites missing in one or two samples, so we split by severity:
 
@@ -162,28 +241,109 @@ or very late:
 
 ## Running SINGER
 
-Everything needed to run the workflow on these inputs lives here:
-
 ```bash
-bash runs/run_chr22.sh              # all 8 sets, chr22
-bash runs/run_chr22.sh OCEANIA      # one set
+# one set, one chromosome
+bash runs/run_singer.sh --chrom chr21 ALL --profile caslake_profile
+
+# one set, whole genome (omit --chrom)
+bash runs/run_singer.sh ALL --profile caslake_profile
+
+# all 8 sets, one chromosome
+bash runs/run_singer.sh --chrom chr22 --profile caslake_profile
+
+# quick smoke test: fewer MCMC samples, writes to <SET>_pilot/
+bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA
+
+# then cut the final posterior draw into CoaSTT's input directory
+bash runs/extract_chunks.sh ALL
 ```
 
-- `slurm_profile/` — the SLURM profile. Its `mem_mb: 16000` default is deliberate:
-  `chunk_chromosomes` builds a full-chromosome numpy array from the ancestral FASTA (~1 GB for
-  chr1) on top of the genotype matrix, so the 4000 MB that upstream's `SLURM.md` suggests will
-  OOM. No rule declares its own `resources:`, so every job inherits this.
-- `runs/chr22_configs/<SET>.yaml` — one config per set, generated from `singer_config.yaml` with
-  `input-dir`, `output-dir` and `chromosomes` overridden.
-- `runs/work/<SET>/` — **each set needs its own workdir.** Snakemake keeps run state in
-  `<workdir>/.snakemake`, and concurrent runs sharing a directory race on `.snakemake/iocache`;
-  `--nolock` is not sufficient. The launcher handles this.
+Output per set:
 
-A pilot at `singer-mcmc-samples: 10` completes chr22/OCEANIA in about 9 minutes and is the
-fastest way to confirm a change end to end. Note the job count snakemake prints at startup is an
-underestimate: `chunk_chromosomes` is a checkpoint, so the per-chunk and per-replicate jobs are
-only added to the DAG once it has run — the pilot starts by reporting 44 jobs and finishes at
-429. Production runs use 100 replicates, roughly 10x that again.
+```
+results/<SET>/
+  singer-snakemake_outputs/     chr1/ ... chr22/, each with trees/ plots/ stats/ chunks/
+  ts_chunks/                    chr21_10519382_12519382.trees ...   <- CoaSTT reads this
+```
+
+`ts_chunks/` is flat — every chromosome's chunks in one directory, no subdirectories — because
+`CountCoalEvents` globs `*.trees` and turns each filename into a contig id. The files are the
+final posterior draw cut at the chunk boundaries SINGER actually ran on, so they keep true
+chromosomal coordinates, and only kept chunks appear.
+
+### Configuration
+
+**`singer_config.yaml` is the single source of truth for every scientific parameter.** There are
+no per-set config files. `run_singer.sh` overrides only `input-dir`, `output-dir` and
+`chromosomes` via `--config`, which snakemake applies after `--configfile`. Change a rate or an
+MCMC length in that one file and every subsequent run picks it up.
+
+Current settings: 2 Mb chunks, `min-sites: 1500`, **16 MCMC samples × 100 thinning = 1600
+iterations**. Note SINGER's chunk log prints one line per *retained sample*, not per iteration —
+"iteration 15" means all 16 samples are done, with the 100 thinning steps happening internally.
+
+Two documented exceptions, both applied by the launcher rather than a second config file:
+
+- **ALL is stratified by `region`, not `population`.** It holds 4 samples from each of 54
+  populations, so stratifying by population gives 1,485 cross-coalescence pairs each backed by
+  just 8 haplotypes — too sparse to estimate. The 7 regions give 28 pairs with real support.
+  Every other set covers a single region, where `population` is the informative level.
+- **`--pilot` cuts the number of MCMC samples** but keeps the thinning interval, so a pilot draw
+  comes from the same chain behaviour as a production one. It writes to `<SET>_pilot/` so it
+  cannot overwrite production output.
+
+### Cluster profiles
+
+Two, selected with `--profile`:
+
+- **`caslake_profile/`** (recommended) — the shared partition: 9,120 CPUs, 190 nodes. Every rule
+  is single-threaded, so each job asks for **one CPU** and memory sized from measured `MaxRSS`.
+  Small requests backfill into gaps that large ones wait behind, which matters on a queue shared
+  with other users.
+
+  | rule | measured max | requested |
+  |---|---|---|
+  | `run_singer` | 5.8 h / 5.4 GB | 10 h / 8 GB |
+  | `run_polegon` | 1.2 min / 346 MB | 30 min / 1 GB |
+  | `chunk_chromosomes` | ~2 min / ~35 MB (chr22) | 4 h / 8 GB |
+
+  `chunk_chromosomes` keeps generous memory deliberately: it is the one rule whose cost scales
+  with chromosome length, building a full-chromosome numpy array from the ancestral FASTA plus
+  the genotype matrix, and chr1 is 5× chr21.
+
+  **⚠ caslake's QOS caps a single job at 36 h**, even though the partition advertises
+  `MaxTime=UNLIMITED`. Exceed it and jobs sit in `PENDING` forever with reason
+  `QOSMaxWallDurationPerJobLimit` — not slow, unschedulable. Check with
+  `sacctmgr show qos caslake format=MaxWall`.
+
+- **`slurm_profile/`** — the dedicated `jnovembre` partition, 192 CPUs. Blanket 16 GB per job
+  and a 12 h walltime we control. Simpler, but the coarse request wastes memory and the job
+  count is capped by a much smaller partition.
+
+### Run state
+
+Each set gets its own workdir under `runs/work/<SET>/`. Snakemake keeps run state in
+`<workdir>/.snakemake`, and concurrent runs sharing a directory race on `.snakemake/iocache` —
+`--nolock` is not sufficient. The launcher handles this.
+
+Two related gotchas, both learned the hard way:
+
+- **Do not delete or move a config file while a run is in flight.** Snakemake's SLURM executor
+  re-reads `--configfile` inside *every* submitted job, not just the driver, so removing it
+  mid-run fails every job that starts afterwards.
+- **A killed driver leaves a stale lock.** Clear it with the same invocation plus `--unlock`
+  before relaunching.
+
+### Scale
+
+For ALL (n=216) at 2 Mb chunks and 1600 iterations: **1,327 kept chunks genome-wide** (of 1,518
+created; retention is 87–94% on the large chromosomes and drops to ~59% on chr22, whose
+acrocentric p-arm is unmappable). Roughly **4 h per chunk** end to end and **~5,300 CPU-h** for
+the genome, which is about a day of wall-clock at 500 concurrent jobs.
+
+Note the job count snakemake prints at startup is a large underestimate: `chunk_chromosomes` is
+a checkpoint, so per-chunk and per-replicate jobs only join the DAG after it runs. A whole-genome
+ALL run starts by reporting 21 jobs and expands to ~24,000.
 
 Expect one benign warning per run: `Failed to solve scheduling problem with ILP solver, falling
 back to greedy scheduler`. It affects job ordering only, not results.

@@ -153,6 +153,13 @@ sample_sets:
       AMERICA: 61
       MIDDLE_EAST: 161
   ALL:
+    stratify_by: region
+    stratify_reason: >
+      Overridden from the shared config's `population` by runs/run_singer.sh. ALL is 4 samples
+      from each of 54 populations, so stratifying by population yields 1,485 cross-coalescence
+      pairs each backed by only 8 haplotypes -- too sparse to estimate. The 7 regions give 28
+      pairs with real support. The seven regional sets each cover one region, so `population`
+      remains the informative level there.
     rule: the 4 highest-coverage samples from each of the 54 populations
     tie_break: sample id
     size: 216
