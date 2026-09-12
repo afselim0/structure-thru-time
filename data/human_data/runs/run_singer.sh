@@ -37,6 +37,13 @@ export PATH="/project/jnovembre/afselim/CoaSTT_env/bin:${PATH}"
 # CoaSTT_env's libstdc++ must lead or numpy fails to import on midway3 compute nodes.
 export LD_LIBRARY_PATH="/project/jnovembre/afselim/CoaSTT_env/lib:${LD_LIBRARY_PATH:-}"
 
+# Guard against a snakemake SLURM-executor bug: one NODE_FAIL makes it cache the literal
+# string "None assigned" as a failed node, after which EVERY submission carries
+# `--exclude=None assigned` and is rejected by SLURM. See scripts/slurm_executor_patch.py.
+# Injected via sitecustomize so it applies to the driver without editing site-packages, which
+# would not survive rebuilding the environment from environment.yml.
+export PYTHONPATH="${ROOT}/scripts:${PYTHONPATH:-}"
+
 CHROM=""
 PILOT=0
 # slurm_profile = the dedicated jnovembre partition (192 CPUs, 12h walltime).

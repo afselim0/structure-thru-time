@@ -392,6 +392,39 @@ back to greedy scheduler`. It affects job ordering only, not results.
 
 ## Known issues
 
+**A SLURM node failure can poison every subsequent job submission — guarded, but know the
+symptom.** `snakemake-executor-plugin-slurm` 2.8.0 reacts to a `NODE_FAIL` by recording the
+failed node so later jobs avoid it. It reads the node from `sacct`, which reports
+`"None assigned"` for a job that died before SLURM placed it anywhere. The executor stores that
+string verbatim and puts it in every later submission:
+
+```
+sbatch ... --exclude=None assigned ...
+sbatch: error: Batch job submission failed: Invalid node name specified
+```
+
+which the executor reports, confusingly, as `Unable to open file assigned`. It is a latch: one
+node failure and nothing submits again for the life of the driver. Observed on a whole-genome
+run — a single `NODE_FAIL` was followed by **8,522 consecutive failed submissions**, with SINGER
+limping along on already-queued jobs while POLEGON produced nothing at all.
+
+`scripts/slurm_executor_patch.py` validates node names before they enter the exclusion set, and
+`scripts/sitecustomize.py` applies it automatically because `runs/run_singer.sh` puts
+`scripts/` on `PYTHONPATH`. **Launch through `runs/run_singer.sh`** — invoking `snakemake`
+directly skips the guard.
+
+The guard is deliberately not a patch to site-packages: that would be lost the moment the conda
+environment is rebuilt from `environment.yml`, so a fresh clone would hit the bug again. Drop it
+once upstream validates the `sacct` output itself.
+
+To check a suspect run:
+
+```bash
+grep -c "Unable to open file assigned" runs/work/<SET>/snakemake.log   # should be 0
+```
+
+
+
 **`max-masked-samples` is very important and defaults to a value that breaks this setup.** At the
 default of `0`, any position covered by a mask is marked globally inaccessible — silently
 deleting the sites the mask exists to rescue. `singer_config.yaml` sets it to 999,
