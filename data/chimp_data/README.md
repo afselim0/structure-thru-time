@@ -10,11 +10,6 @@ The HGDP prep begins with a curated, phased, quality-filtered public release. Th
 with a raw GATK callset: **unphased, unfiltered, no published accessibility mask, and
 variant-only**. Everything the human prep could download, this one has to build.
 
-**Status: inputs complete, ready to infer.** All 23 autosomes are built and pass verification
-(14/14 checks each). The first genome-wide SINGER run was abandoned and its output deleted:
-its 1,600-iteration MCMC budget was entirely inside burn-in. See
-[Burn-in](#burn-in-and-why-5000-iterations).
-
 ## Reproducing this from a fresh clone
 
 Everything is driven by the numbered scripts in `drivers/`. Run them in order; each is a thin
@@ -430,11 +425,24 @@ Two traps follow from that, both of which have teeth:
 
 ### Timing
 
-Timing is **not linear in the MCMC budget**: there is a fixed setup cost of about 7.7 minutes
-per chunk before the first iteration, then ~7.2 s/iteration. At 5,000 iterations that is
-**~10.1 h per chunk** against ~3.3 h at 1,600, so expect roughly 3x the wall time for the same
-~958 chunks. `run_singer` is given a 36 h limit accordingly -- a walltime kill loses the whole
-chunk, where a memory kill retries cheaply.
+Timing is **not linear in the MCMC budget**: each chunk costs a fixed ARG-construction phase
+plus a term linear in iterations, so tripling the iteration count does not triple the runtime.
+
+`run_singer` requests **20 h**, sized from measured per-chunk times on the human run at these
+exact MCMC settings (2,971 completed jobs):
+
+| p50 | p90 | p99 | max |
+|---|---|---|---|
+| 1.71 h | 3.36 h | 5.65 h | **17.15 h** |
+
+A 12 h limit would have killed 12 of those 2,971 jobs (0.40%); 18 h and above kill none, and
+20 h clears the observed maximum with ~17% margin.
+
+Resist raising this "to be safe". An oversized walltime is not free -- SLURM backfills short
+jobs into scheduling gaps, so a job asking for far more than it uses waits longer for headroom
+it never touches. Those numbers are from n=216 humans; this panel is n=54, so ARG construction
+should be faster here, while 3 Mb chunks against 2 Mb push the other way. **Re-measure once
+real chunks have run** rather than trusting the transfer.
 
 `jnovembre` has 192 CPUs and runs one chunk per core; `slurm_caslake` has 9,120 and can hold
 far more in flight, at the cost of queueing behind other users.
