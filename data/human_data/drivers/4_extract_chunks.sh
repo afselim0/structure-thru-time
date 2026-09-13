@@ -26,6 +26,11 @@
 #     burnt-in posterior sample than the rest. Re-run step 3 to fill the gap -- it redoes only
 #     the missing merges, not the inference behind them.
 #
+# After a successful extraction it reports what scripts/prune_burnin_draws.py could free: the
+# workflow writes all 100 draws per chromosome and only the last 20 are past burn-in, so the
+# other 80 are ~240 GB of dead weight per set. It only REPORTS -- reclaiming disk is not worth
+# doing behind someone's back, and the dry run prints the exact command to do it.
+#
 # Runs in minutes, on the login node.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 bash "${ROOT}/scripts/extract_chunks.sh" "$@"

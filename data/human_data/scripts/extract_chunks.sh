@@ -31,5 +31,17 @@ for s in "${SETS[@]}"; do
     echo "[${s}]"
     python "${ROOT}/scripts/extract_ts_chunks.py" \
         --singer-output "$out" \
-        --out-dir "${ROOT}/results/${s}/ts_chunks"
+        --out-dir "${ROOT}/results/${s}/ts_chunks" \
+        --config "${ROOT}/drivers/singer_config.yaml"
+
+    # Now that extraction has SUCCEEDED, the pre-convergence draws are dead weight:
+    # merge_chunks writes all 100, of which only the last 20 are past burn-in. Report what
+    # could be freed, but do not delete it automatically -- reclaiming disk is not worth doing
+    # behind someone's back, and the dry run prints the exact command.
+    echo
+    python "${ROOT}/scripts/prune_burnin_draws.py" \
+        --singer-output "$out" \
+        --config "${ROOT}/drivers/singer_config.yaml" \
+        --ts-chunks "${ROOT}/results/${s}/ts_chunks" || true
+    echo "To reclaim that space, re-run the command above with --apply"
 done
