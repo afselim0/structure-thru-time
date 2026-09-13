@@ -12,6 +12,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="/project/jnovembre/afselim/CoaSTT_env/bin:${PATH}"
 export LD_LIBRARY_PATH="/project/jnovembre/afselim/CoaSTT_env/lib:${LD_LIBRARY_PATH:-}"
+# Silences a harmless "Can't find a usable init.tcl" from this env's Tcl, which was
+# built for a differently-named prefix and is found via the lib path above.
+export TCL_LIBRARY="/project/jnovembre/afselim/CoaSTT_env/lib/tcl8.6"
 
 SETS=("$@")
 if [[ ${#SETS[@]} -eq 0 ]]; then

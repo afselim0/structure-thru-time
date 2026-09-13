@@ -137,12 +137,34 @@ def main():
     if not chroms:
         raise SystemExit(f"No chromosome directories with trees/ under {args.singer_output}")
 
+    # Resolve every chromosome's draw BEFORE writing anything, and require them to agree.
+    #
+    # A killed merge job leaves one chromosome short of its top draw. Since this takes the
+    # highest replicate present per chromosome, that chromosome would silently contribute a
+    # different, less burnt-in posterior sample than the rest -- and the resulting ts_chunks/
+    # directory would look complete. Re-run the inference step to fill the gap; it redoes only
+    # the missing merges, not the inference behind them.
+    resolved = {}
+    for chrom in chroms:
+        trees_dir = os.path.join(args.singer_output, chrom, "trees")
+        resolved[chrom] = final_replicate(trees_dir, chrom, min_replicate=min_replicate)
+
+    reps_seen = {rep for _, rep in resolved.values()}
+    if len(reps_seen) > 1:
+        detail = "\n".join(
+            f"    {c}: replicate {r}" for c, (_, r) in sorted(resolved.items())
+        )
+        raise SystemExit(
+            "Chromosomes disagree on their latest replicate "
+            f"({', '.join(str(r) for r in sorted(reps_seen))}):\n{detail}\n"
+            "That usually means a merge job was killed. Re-run the inference step to fill the "
+            "gap -- it redoes only the missing merges, not the inference behind them."
+        )
+
     total = 0
     for chrom in chroms:
         base = os.path.join(args.singer_output, chrom)
-        tsz_path, rep = final_replicate(
-            os.path.join(base, "trees"), chrom, min_replicate=min_replicate
-        )
+        tsz_path, rep = resolved[chrom]
         intervals = chunk_intervals(os.path.join(base, f"{chrom}.chunks.p"))
 
         ts = tszip.decompress(tsz_path)

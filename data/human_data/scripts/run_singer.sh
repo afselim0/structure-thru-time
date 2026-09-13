@@ -43,6 +43,9 @@ DRIVERS="${ROOT}/drivers"
 export PATH="/project/jnovembre/afselim/CoaSTT_env/bin:${PATH}"
 # CoaSTT_env's libstdc++ must lead or numpy fails to import on midway3 compute nodes.
 export LD_LIBRARY_PATH="/project/jnovembre/afselim/CoaSTT_env/lib:${LD_LIBRARY_PATH:-}"
+# Silences a harmless "Can't find a usable init.tcl" from this env's Tcl, which was
+# built for a differently-named prefix and is found via the lib path above.
+export TCL_LIBRARY="/project/jnovembre/afselim/CoaSTT_env/lib/tcl8.6"
 
 # Guard against a snakemake SLURM-executor bug: one NODE_FAIL makes it cache the literal
 # string "None assigned" as a failed node, after which EVERY submission carries
@@ -63,7 +66,9 @@ CLUSTER_CONFIG="slurm_jnovembre"
 # Where snakemake keeps per-run state. Deliberately outside the repo: it is large (hundreds of
 # MB per set), regenerable, and must not be committed. Override with WORKDIR_ROOT=... if your
 # scratch lives elsewhere.
-WORKDIR_ROOT="${WORKDIR_ROOT:-${SCRATCH:-/tmp/$USER}/singer_work}"
+# $SCRATCH on midway3 is the shared /scratch/midway3, not a per-user directory, so include
+# $USER explicitly rather than writing into a path other people also own.
+WORKDIR_ROOT="${WORKDIR_ROOT:-${SCRATCH:-/tmp}/${USER}/singer_work}"
 SETS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
