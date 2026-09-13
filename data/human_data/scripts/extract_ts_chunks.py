@@ -9,6 +9,16 @@ flat directory, treating each file as an independent contig -- `CountCoalEvents`
 This takes the FINAL posterior draw (the highest replicate index, i.e. the most burnt-in
 sample) and cuts it at the chunk boundaries SINGER actually ran on, writing:
 
+Only ONE draw is written per chunk, deliberately. CoaSTT treats every `.trees` file in the
+directory as an independent contig, so writing several posterior draws of the same region
+would enter that region into the likelihood more than once.
+
+The draw is also checked against the burn-in floor implied by `singer-mcmc-samples` and
+`singer-mcmc-burnin`. singer-snakemake applies that burn-in only to its statistics and
+diagnostic plots -- `merge_chunks` writes a tree sequence for every draw, including
+pre-convergence ones -- so this script is the last point at which an unconverged draw can be
+stopped before it reaches CoaSTT.
+
     ts_chunks/<chrom>_<start_pos>_<end_pos>.trees        e.g. chr22_10519382_11519382.trees
 
 The chromosome keeps its `chr` prefix deliberately: CoaSTT turns each filename into a contig
@@ -37,8 +47,15 @@ import tskit
 import tszip
 
 
-def final_replicate(trees_dir, chrom):
-    """Path to the highest-numbered replicate, which is the last posterior draw."""
+def final_replicate(trees_dir, chrom, min_replicate=0):
+    """
+    Path to the highest-numbered replicate, which is the last posterior draw.
+
+    `min_replicate` is the burn-in floor: the index of the first draw the chain is considered
+    converged at. It is not used to choose the draw -- the highest is always the most burnt-in
+    -- but to REFUSE a directory whose best draw is still inside burn-in, which is how a run
+    with too short a chain would otherwise reach CoaSTT unnoticed.
+    """
     reps = []
     for name in os.listdir(trees_dir):
         if name.startswith(f"{chrom}.") and name.endswith(".tsz"):
@@ -47,7 +64,14 @@ def final_replicate(trees_dir, chrom):
                 reps.append(int(middle))
     if not reps:
         raise FileNotFoundError(f"No {chrom}.<rep>.tsz in {trees_dir}")
-    return os.path.join(trees_dir, f"{chrom}.{max(reps)}.tsz"), max(reps)
+    best = max(reps)
+    if best < min_replicate:
+        raise SystemExit(
+            f"{chrom}: highest replicate is {best}, inside the burn-in region "
+            f"(< {min_replicate}). Every draw here is pre-convergence and must not be used. "
+            f"Check singer-mcmc-samples / singer-mcmc-burnin in drivers/singer_config.yaml."
+        )
+    return os.path.join(trees_dir, f"{chrom}.{best}.tsz"), best
 
 
 def chunk_intervals(chunks_path):
@@ -78,7 +102,29 @@ def main():
     parser.add_argument("--out-dir", required=True, help="ts_chunks/ to write into")
     parser.add_argument("--chromosomes", nargs="*", default=None,
                         help="default: every chromosome directory present")
+    parser.add_argument("--config", default=None,
+                        help="drivers/singer_config.yaml; used to derive the burn-in floor. "
+                             "Default: the copy next to this script's parent directory.")
     args = parser.parse_args()
+
+    # Burn-in floor, read from the same config the run used so the two cannot drift apart.
+    # singer-snakemake applies singer-mcmc-burnin only to statistics and plots; the tree
+    # sequences are written for every draw, so nothing upstream stops a pre-convergence draw
+    # from reaching CoaSTT. This is where that is caught.
+    config_path = args.config or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "drivers", "singer_config.yaml",
+    )
+    min_replicate = 0
+    if os.path.exists(config_path):
+        import yaml
+        cfg = yaml.safe_load(open(config_path))
+        n = int(cfg["singer-mcmc-samples"])
+        min_replicate = int(float(cfg["singer-mcmc-burnin"]) * n)
+        print(f"burn-in floor: replicate >= {min_replicate} of {n} "
+              f"(singer-mcmc-burnin {cfg['singer-mcmc-burnin']})")
+    else:
+        print(f"WARNING: no config at {config_path}; burn-in floor not enforced")
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -94,7 +140,9 @@ def main():
     total = 0
     for chrom in chroms:
         base = os.path.join(args.singer_output, chrom)
-        tsz_path, rep = final_replicate(os.path.join(base, "trees"), chrom)
+        tsz_path, rep = final_replicate(
+            os.path.join(base, "trees"), chrom, min_replicate=min_replicate
+        )
         intervals = chunk_intervals(os.path.join(base, f"{chrom}.chunks.p"))
 
         ts = tszip.decompress(tsz_path)
