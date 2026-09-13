@@ -9,6 +9,20 @@ ready-to-run input directories, one per sample set. Then run the workflow — se
 SINGER* below. `singer-snakemake` is a git submodule at `../singer-snakemake`, pinned to the
 commit these inputs were built and tested against; `git submodule update --init` after cloning.
 
+> **The submodule carries one local patch.** It is pinned to `dbd1509` on the branch
+> `coastt-batched-polegon`, which forks upstream's `1d6b370` to make `run_polegon` date every
+> MCMC draw of a chunk in one job rather than one job per draw. POLEGON takes ~10 s per draw,
+> so the per-draw form spent more time on SLURM scheduling than on work: at 100 draws a
+> whole-genome set is 133,700 ten-second jobs, which took ~32 h against ~4 h of real compute
+> because the job submission rate — not the partition — capped throughput. Batching gives
+> 1,337 jobs of 7–20 minutes. The dating itself is unchanged and each draw keeps its own seed,
+> so results are statistically identical to upstream.
+>
+> That commit exists **only in this checkout**, so `git submodule update --init` on a fresh
+> clone cannot fetch it. Push the branch somewhere reachable (a fork of
+> `nspope/singer-snakemake`) and update `.gitmodules` before anyone else clones this, or they
+> will get upstream's per-draw rule and a POLEGON phase that takes days.
+
 ## Layout
 
 ```
