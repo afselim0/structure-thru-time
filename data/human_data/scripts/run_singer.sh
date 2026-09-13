@@ -91,18 +91,38 @@ CLUSTER_FILE="${CLUSTER_FILE%.config}.config"
     exit 1
 }
 
-# snakemake's --profile takes a DIRECTORY containing a file literally named config.yaml, but a
-# directory per cluster is a poor fit for a drivers/ folder meant to be read at a glance. Stage
-# the chosen flat .config into a throwaway profile directory instead; the contents are byte for
-# byte what snakemake would have read from a committed profile folder.
-PROFILE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/singer_profile.XXXXXXXX")"
-trap 'rm -rf "$PROFILE_DIR"' EXIT
-cp "$CLUSTER_FILE" "${PROFILE_DIR}/config.yaml"
+# run_singer's memory need scales with the number of haplotypes -- SINGER holds the ARG for the
+# whole sample in memory -- so a single constant is wrong for a set of 8 sample sets spanning
+# 28 to 216 diploids. Sizing every set for the largest starves the partition: a jnovembre node
+# has 257 GB and 64 CPUs, so at 12 GB per job only 21 jobs fit per node and 43 of its CPUs sit
+# idle. AMERICA measured 0.87-1.32 GB against that 12 GB request.
+#
+# The model is proportional through the origin, anchored on the ALL measurement (6.81 GB peak
+# over 576 jobs at 432 haplotypes) = 15.76 MB per haplotype, doubled for headroom, with a 4 GB
+# floor. It is deliberately anchored on the LARGEST set: that over-predicts the small ones
+# (AMERICA: predicts 1.92 GB against 1.32 measured, 1.46x) rather than under-predicting them,
+# and a two-point fit would give a negative intercept, which is unphysical.
+#
+# Retries still escalate on top of whatever this picks, so a chunk that defies the model gets
+# more memory on its next attempt rather than failing.
+mem_for_set() {
+    local set_name=$1
+    local list="${ROOT}/resources/hgdp/sets/${set_name}.csv"
+    [[ -f "$list" ]] || { echo ""; return; }          # unknown set: leave the config's value
+    local diploids haplotypes mb
+    diploids=$(grep -c . "$list")
+    haplotypes=$(( diploids * 2 ))
+    # 15.76 MB/haplotype x 2 headroom = 31.52; integer arithmetic, rounded up.
+    mb=$(( (haplotypes * 3152 + 99) / 100 ))
+    (( mb < 4000 )) && mb=4000
+    echo "$mb"
+}
 
 # The pilot exists to exercise the pipeline quickly, not to produce usable posteriors, so it is
 # the one place MCMC lengths deviate from the shared config.
 PILOT_OVERRIDES=()
 SUFFIX=""
+STAGED_PROFILES=()
 if [[ $PILOT -eq 1 ]]; then
     # Cut the NUMBER of samples but keep the shared thinning interval, so a pilot draw comes
     # from the same chain behaviour as a production one. Lowering thin as well would make the
@@ -119,6 +139,37 @@ for s in "${SETS[@]}"; do
     out="${ROOT}/results/${name}/singer-snakemake_outputs"
     work="${WORKDIR_ROOT}/${name}"
     mkdir -p "$work" "${ROOT}/logs"
+
+    # Stage this set's profile. Each set gets its own directory because run_singer's memory is
+    # sized per set (see mem_for_set above) -- and because snakemake re-reads the profile inside
+    # every submitted job, so it must outlive this script and must not be shared between sets.
+    PROFILE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/singer_profile_${name}.XXXXXXXX")"
+    STAGED_PROFILES+=("$PROFILE_DIR")
+    cp "$CLUSTER_FILE" "${PROFILE_DIR}/config.yaml"
+    set_mem="$(mem_for_set "$s")"
+    if [[ -n "$set_mem" ]]; then
+        # Replace the run_singer mem_mb line, keeping the retry escalation term. Anchored on the
+        # `run_singer:` key so the other rules' mem_mb lines are untouched.
+        python3 - "${PROFILE_DIR}/config.yaml" "$set_mem" <<'PY'
+import re, sys
+path, mem = sys.argv[1], int(sys.argv[2])
+text = open(path).read()
+# within the run_singer block only, rewrite the mem_mb value and keep `+ 8000 * (attempt - 1)`
+pat = re.compile(r"(    run_singer:\n)(?:.*\n)*?(        mem_mb: )[^\n]+")
+new, n = pat.subn(
+    lambda m: (
+        f"{m.group(1)}"
+        f"        # Sized for this sample set by scripts/run_singer.sh; see mem_for_set there.\n"
+        f"{m.group(2)}{mem} + 8000 * (attempt - 1)"
+    ),
+    text, count=1,
+)
+if n != 1:
+    sys.exit(f"could not rewrite run_singer mem_mb in {path}")
+open(path, "w").write(new)
+PY
+        echo "[${name}] run_singer memory: ${set_mem} MB (from $(grep -c . "${ROOT}/resources/hgdp/sets/${s}.csv") diploids)"
+    fi
 
     overrides=(input-dir="$input" output-dir="$out")
     [[ -n "$CHROM" ]] && overrides+=(chromosomes="[\"${CHROM}\"]")
@@ -163,15 +214,19 @@ for s in "${SETS[@]}"; do
 done
 
 if [[ $DRYRUN -eq 1 ]]; then
+    # Nothing was submitted, so nothing will read these again.
+    rm -rf "${STAGED_PROFILES[@]}"
     echo
     echo "Dry run only -- nothing was submitted."
     exit 0
 fi
 
-# The staged profile must outlive this script: the drivers keep running after it exits and
-# snakemake re-reads the profile in each submitted job.
-trap - EXIT
-echo "  (cluster config staged at ${PROFILE_DIR}; remove it once the runs finish)"
+# The staged profiles must OUTLIVE this script: the drivers keep running after it exits and
+# snakemake re-reads the profile inside every job it submits. Deleting one mid-run fails every
+# job submitted afterwards, so they are left in place and listed here instead.
+echo
+echo "Staged cluster configs (do NOT delete while the runs are live):"
+printf '  %s\n' "${STAGED_PROFILES[@]}"
 
 echo
 echo "Launched ${#SETS[@]}. Monitor with:"
