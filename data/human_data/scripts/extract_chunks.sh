@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Cut each finished set's final posterior draw into per-chunk tree sequences for CoaSTT.
 #
-#   bash runs/extract_chunks.sh            # every set with singer-snakemake output
-#   bash runs/extract_chunks.sh OCEANIA    # just one
+#   bash scripts/extract_chunks.sh            # every set with singer-snakemake output
+#   bash scripts/extract_chunks.sh OCEANIA    # just one
 #
 # Writes results/<SET>/ts_chunks/<chr>_<start>_<end>.trees -- flat, no chromosome
 # subdirectories, which is what CountCoalEvents expects (it globs *.trees and treats each

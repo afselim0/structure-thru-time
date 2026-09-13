@@ -2,7 +2,7 @@
 # Build one sample set's singer-snakemake input directory.
 #
 # Called once per set by subset.sh (locally via xargs, or as one task of a SLURM array).
-# Writes SingerSnakemake_SampleSets/<set>/input/ containing, per chromosome:
+# Writes SingerSnakemake_SampleSets/<set>/ containing, per chromosome:
 #
 #   chr{N}.vcf.gz(.tbi)      subset to this set's samples, re-trimmed to segregating sites
 #   chr{N}.mask.bed          symlink to the shared inaccessible-interval mask
@@ -28,7 +28,7 @@ command -v bcftools >/dev/null || {
 SETS_DIR="${ROOT}/resources/hgdp/sets"
 STATPHASE="${ROOT}/resources/hgdp/statphase"
 GRCH38="${ROOT}/resources/grch38"
-OUT="${ROOT}/SingerSnakemake_SampleSets/${SET}/input"
+OUT="${ROOT}/SingerSnakemake_SampleSets/${SET}"
 SENTINEL="${ROOT}/SingerSnakemake_SampleSets/${SET}/.complete"
 
 SAMPLES="${SETS_DIR}/${SET}.csv"
@@ -63,10 +63,11 @@ for n in $(seq 1 22); do
         echo "[${SET}] ${chrom}: $(bcftools index -n "$vcf") sites"
     fi
 
-    # Shared resources: relative symlinks so the tree stays relocatable.
-    ln -sfn "../../../resources/grch38/mask/${chrom}.mask.bed" "${OUT}/${chrom}.mask.bed"
-    ln -sfn "../../../resources/grch38/hapmap/${chrom}.hapmap" "${OUT}/${chrom}.hapmap"
-    ln -sfn "../../../resources/grch38/ancestral/${chrom}.ancestral.fa.gz" \
+    # Shared resources: relative symlinks so the tree stays relocatable. Two levels up from
+    # SingerSnakemake_SampleSets/<SET>/ is data/human_data/, which is where resources/ lives.
+    ln -sfn "../../resources/grch38/mask/${chrom}.mask.bed" "${OUT}/${chrom}.mask.bed"
+    ln -sfn "../../resources/grch38/hapmap/${chrom}.hapmap" "${OUT}/${chrom}.hapmap"
+    ln -sfn "../../resources/grch38/ancestral/${chrom}.ancestral.fa.gz" \
         "${OUT}/${chrom}.ancestral.fa.gz"
 done
 

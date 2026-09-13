@@ -32,7 +32,7 @@ Wrap `set.add` on the executor's `_failed_nodes` so only plausible SLURM node na
 Valid names are alphanumerics, underscores, hyphens, dots and comma/bracket range syntax --
 never whitespace, which is what makes "None assigned" detectable.
 
-This is applied by importing this module before snakemake starts (runs/run_singer.sh does it
+This is applied by importing this module before snakemake starts (scripts/run_singer.sh does it
 via PYTHONSTARTUP-style injection). It is deliberately NOT a patch to site-packages: that would
 not survive `conda env create` from environment.yml, so a fresh clone would hit the bug again.
 

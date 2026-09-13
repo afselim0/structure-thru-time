@@ -63,7 +63,7 @@ def main():
 
     # Read max-masked-samples from the config rather than hardcoding it, so the limit asserted
     # here and the one the workflow actually uses cannot drift apart.
-    config_path = os.path.join(args.root, "singer_config.yaml")
+    config_path = os.path.join(args.root, "drivers", "singer_config.yaml")
     singer_config = yaml.safe_load(open(config_path)) if os.path.exists(config_path) else {}
     names = args.sets or sorted(
         f[:-4] for f in os.listdir(sets_dir) if f.endswith(".csv")
@@ -72,7 +72,7 @@ def main():
     report = Report()
 
     for name in names:
-        input_dir = os.path.join(base, name, "input")
+        input_dir = os.path.join(base, name)
         print(f"\n{name}")
         if not report.check(os.path.isdir(input_dir), f"{name} input dir exists"):
             continue

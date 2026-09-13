@@ -10,11 +10,11 @@
 # set, so queue wait typically exceeds the work. Each set writes a `.complete` sentinel, so a
 # re-run skips finished sets and resumes a partial one.
 #
-# Output: SingerSnakemake_SampleSets/<set>/input/, one directory per set, each holding the five
+# Output: SingerSnakemake_SampleSets/<set>/, one directory per set, each holding the five
 # per-chromosome files singer-snakemake expects (see scripts/make_set_inputs.sh).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETS_DIR="${ROOT}/resources/hgdp/sets"
 
 JOBS=4

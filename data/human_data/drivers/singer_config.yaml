@@ -4,27 +4,28 @@
 #     chromosomes     which chromosomes (null = all present in input-dir)
 #
 # Those three are supplied on the command line with --config, NOT by copying this file.
-# runs/run_singer.sh does it like this:
+# scripts/run_singer.sh does it like this:
 #
-#     snakemake --configfile singer_config.yaml \
+#     snakemake --configfile drivers/singer_config.yaml \
 #               --config input-dir=... output-dir=... chromosomes='["chr22"]' \
-#               --directory runs/work/<SET> --profile slurm_profile
+#               --directory <scratch workdir> --profile <staged cluster config>
 #
 # snakemake applies --config after --configfile, so the overrides win. Change a rate, a chunk
 # size or an MCMC length HERE and every subsequent run picks it up; there is no second copy to
 # keep in sync.
 #
-# Two documented exceptions, both applied by runs/run_singer.sh rather than by a second file:
+# Two documented exceptions, both applied by scripts/run_singer.sh rather than by a second file:
 #   * ALL is stratified by `region` (see the stratify-by block below).
 #   * --pilot cuts the number of MCMC samples, to exercise the pipeline quickly. It keeps the
 #     thinning interval below, so a pilot draw is drawn from the same chain behaviour as a
 #     production one -- there are simply fewer of them.
 #
-# NOT YET TUNED. The chunking, MCMC lengths and rates below are still at or near the upstream
-# example's defaults and want revisiting against pilot output before production use.
+# Chunking and MCMC lengths below are set from measured pilot runs (2 Mb chunks, 1600 MCMC
+# iterations = 16 samples x thin 100); the per-rule memory and walltime that follow from them
+# live in drivers/slurm_*.config.
 
 # --- run identity: overridden per run, values here are only a usable default ---
-input-dir: "SingerSnakemake_SampleSets/OCEANIA/input"
+input-dir: "SingerSnakemake_SampleSets/OCEANIA"
 output-dir: "results/OCEANIA/singer-snakemake_outputs"
 chromosomes: null           # null => glob every {chrom}.vcf.gz in input-dir
 
@@ -51,7 +52,7 @@ remove-unpolarised: false
 # `population` is right for the seven regional sets, which each cover one region and where the
 # populations within it are the structure of interest.
 #
-# ALL is the documented exception and run_singer.sh overrides it to `region`: ALL is 4 samples
+# ALL is the documented exception and scripts/run_singer.sh overrides it to `region`: ALL is 4 samples
 # from each of 54 populations, so stratifying by population would give 1,485 cross-coalescence
 # pairs each backed by only 8 haplotypes. The 7 regions give 28 pairs with real support.
 stratify-by: "population"

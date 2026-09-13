@@ -9,6 +9,30 @@ ready-to-run input directories, one per sample set. Then run the workflow — se
 SINGER* below. `singer-snakemake` is a git submodule at `../singer-snakemake`, pinned to the
 commit these inputs were built and tested against; `git submodule update --init` after cloning.
 
+## Layout
+
+```
+README.md                        this file — the only file at the top level
+drivers/                         everything you edit or run to reproduce the pipeline
+  download.sh                      stage 1: fetch + derive shared resources
+  subset.sh                        stage 2: cut them into 8 per-set input directories
+  singer_config.yaml               ALL scientific parameters, one source of truth
+  slurm_caslake.config             cluster settings: shared partition
+  slurm_jnovembre.config           cluster settings: dedicated partition (default)
+  prep.yaml                        recorded decisions, provenance, known issues
+scripts/                         implementation called by the drivers, plus the two launchers
+  run_singer.sh                    stage 3: infer ARGs
+  extract_chunks.sh                stage 4: cut posterior draws into CoaSTT input
+resources/                       downloaded + derived shared data          (gitignored)
+SingerSnakemake_SampleSets/<SET>/  per-set workflow input, flat            (gitignored)
+results/<SET>/
+  singer-snakemake_outputs/        the workflow's own output tree          (gitignored)
+  ts_chunks/                       CoaSTT's input directory                (gitignored)
+logs/                            run logs                                  (gitignored)
+```
+
+Snakemake run state is deliberately **not** here — it lives under `$SCRATCH` (see *Run state*).
+
 ## The whole pipeline, start to finish
 
 Four commands take you from the published HGDP callset to tree sequences CoaSTT can read.
@@ -19,22 +43,22 @@ resumes rather than restarting.
 conda activate CoaSTT_env
 
 # 1. download raw data + derive the shared per-chromosome resources   (a few hours)
-bash download.sh
+bash drivers/download.sh
 
 # 2. cut those into 8 per-set input directories                       (~15 min per set)
-bash subset.sh --slurm-partition jnovembre --slurm-account pi-jnovembre
+bash drivers/subset.sh --slurm-partition jnovembre --slurm-account pi-jnovembre
 
 # 3. infer ARGs with SINGER                                           (~1 day, whole genome)
-bash runs/run_singer.sh ALL --profile caslake_profile   # shared partition, high throughput
-#   ...or --profile slurm_profile                       # dedicated partition, no queue
+bash scripts/run_singer.sh ALL --config slurm_caslake   # shared partition, high throughput
+#   ...or --config slurm_jnovembre                       # dedicated partition, no queue
 
 # 4. cut the final posterior draw into CoaSTT's input directory       (minutes)
-bash runs/extract_chunks.sh ALL
+bash scripts/extract_chunks.sh ALL
 ```
 
 What each stage actually does, in order:
 
-**1. `download.sh`** — seven steps, then verification:
+**1. `drivers/download.sh`** — seven steps, then verification:
 
 | step | script | produces |
 |---|---|---|
@@ -49,7 +73,7 @@ What each stage actually does, in order:
 
 The deCODE map must be placed by hand first — see the note below.
 
-**2. `subset.sh`** — runs `make_set_inputs.sh` per set (locally via `xargs -P`, or as an
+**2. `drivers/subset.sh`** — runs `make_set_inputs.sh` per set (locally via `xargs -P`, or as an
 8-task SLURM array), then `verify_sets.py`. Per set, per chromosome:
 
 ```
@@ -59,12 +83,12 @@ make_sample_masks.py                         →  chr{N}.sample.mask.bed
 write_set_metadata.py                        →  chr{N}.meta.csv  (in VCF order — order matters)
 ```
 
-**3. `runs/run_singer.sh`** — one `snakemake` call against
-`../singer-snakemake/workflow/Snakefile`, with `singer_config.yaml` as the configfile and only
+**3. `scripts/run_singer.sh`** — one `snakemake` call against
+`../singer-snakemake/workflow/Snakefile`, with `drivers/singer_config.yaml` as the configfile and only
 `input-dir`, `output-dir` and `chromosomes` overridden per run. Writes
 `results/<SET>/singer-snakemake_outputs/chr{N}/` with `trees/ plots/ stats/ chunks/`.
 
-**4. `runs/extract_chunks.sh`** — calls `extract_ts_chunks.py`, which takes the highest-numbered
+**4. `scripts/extract_chunks.sh`** — calls `extract_ts_chunks.py`, which takes the highest-numbered
 replicate (the most burnt-in posterior draw) for each chromosome, cuts it at the chunk
 boundaries in `chr{N}.chunks.p`, and writes `results/<SET>/ts_chunks/chr{N}_{start}_{end}.trees`
 — flat, all chromosomes together, which is what CoaSTT globs.
@@ -74,22 +98,23 @@ boundaries in `chr{N}.chunks.p`, and writes `results/<SET>/ts_chunks/chr{N}_{sta
 science.org serves its supplements behind bot protection and returns 403 to every scripted
 request, so the deCODE recombination map cannot be downloaded automatically. Grab *Data S3*
 from [doi:10.1126/science.aau1043](https://www.science.org/doi/10.1126/science.aau1043) and put
-it at `resources/raw/aau1043_datas3.gz` (gzip it if it arrives uncompressed). `download.sh`
+it at `resources/raw/aau1043_datas3.gz` (gzip it if it arrives uncompressed). `drivers/download.sh`
 stops with these instructions if it is missing.
 
 ### Variations
 
 ```bash
-bash subset.sh                       # 4 sets at a time locally; --jobs 8 widens it
-bash runs/run_singer.sh --chrom chr21 ALL --profile caslake_profile   # one chromosome
-bash runs/run_singer.sh --chrom chr22 --profile caslake_profile       # all 8 sets
-bash runs/run_singer.sh ALL --profile slurm_profile                   # dedicated partition
-bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA                 # smoke test
-bash runs/extract_chunks.sh                                           # every finished set
+bash drivers/subset.sh                       # 4 sets at a time locally; --jobs 8 widens it
+bash scripts/run_singer.sh --chrom chr21 ALL --config slurm_caslake   # one chromosome
+bash scripts/run_singer.sh --chrom chr22 --config slurm_caslake       # all 8 sets
+bash scripts/run_singer.sh ALL --config slurm_jnovembre                   # dedicated partition
+bash scripts/run_singer.sh --pilot --chrom chr22 OCEANIA                 # smoke test
+bash scripts/extract_chunks.sh                                           # every finished set
 ```
 
-`--profile` selects the cluster profile; `slurm_profile` is the default if omitted. See
-*Cluster profiles* below, and *Adapting this to your own cluster* if you are not on midway3.
+`--config` selects the cluster settings by the basename of a `drivers/*.config` file;
+`slurm_jnovembre` is the default if omitted. See *Cluster profiles* below, and *Adapting this to
+your own cluster* if you are not on midway3.
 
 ## Sources
 
@@ -101,7 +126,7 @@ bash runs/extract_chunks.sh                                           # every fi
 | Ancestral alleles | Ensembl release 113, EPO | `resources/grch38/ancestral/chr{N}.ancestral.fa.gz` |
 | Recombination map | deCODE 2019, Data S3 (manual) | `resources/grch38/hapmap/chr{N}.hapmap` |
 
-Sizes and SHA-256 for every download are in `prep.yaml`. Sanger publishes no checksums, so the
+Sizes and SHA-256 for every download are in `drivers/prep.yaml`. Sanger publishes no checksums, so the
 VCF is validated by agreement between its index and its data instead.
 
 ## What each input directory contains
@@ -110,7 +135,7 @@ VCF is validated by agreement between its index and its data instead.
 that filename, so all five files share a stem and sit together:
 
 ```
-SingerSnakemake_SampleSets/<SET>/input/
+SingerSnakemake_SampleSets/<SET>/
   chr{N}.vcf.gz(.tbi)       set-specific: subset, trimmed to segregating SNPs
   chr{N}.meta.csv           set-specific: sample metadata, in VCF order
   chr{N}.sample.mask.bed    set-specific: missing genotypes to impute (see below)
@@ -248,19 +273,19 @@ or very late:
 
 ```bash
 # one set, one chromosome
-bash runs/run_singer.sh --chrom chr21 ALL --profile caslake_profile
+bash scripts/run_singer.sh --chrom chr21 ALL --config slurm_caslake
 
 # one set, whole genome (omit --chrom)
-bash runs/run_singer.sh ALL --profile caslake_profile
+bash scripts/run_singer.sh ALL --config slurm_caslake
 
 # all 8 sets, one chromosome
-bash runs/run_singer.sh --chrom chr22 --profile caslake_profile
+bash scripts/run_singer.sh --chrom chr22 --config slurm_caslake
 
 # quick smoke test: fewer MCMC samples, writes to <SET>_pilot/
-bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA
+bash scripts/run_singer.sh --pilot --chrom chr22 OCEANIA
 
 # then cut the final posterior draw into CoaSTT's input directory
-bash runs/extract_chunks.sh ALL
+bash scripts/extract_chunks.sh ALL
 ```
 
 Output per set:
@@ -278,7 +303,7 @@ chromosomal coordinates, and only kept chunks appear.
 
 ### Configuration
 
-**`singer_config.yaml` is the single source of truth for every scientific parameter.** There are
+**`drivers/singer_config.yaml` is the single source of truth for every scientific parameter.** There are
 no per-set config files. `run_singer.sh` overrides only `input-dir`, `output-dir` and
 `chromosomes` via `--config`, which snakemake applies after `--configfile`. Change a rate or an
 MCMC length in that one file and every subsequent run picks it up.
@@ -315,20 +340,31 @@ with chromosome length, building a full-chromosome numpy array from the ancestra
 genotype matrix, and chr1 is 5× chr21. Everything else runs on fixed-size 2 Mb chunks, so its
 cost does not grow with the chromosome.
 
-**`caslake_profile/` — shared, high throughput.** 9,120 CPUs over 190 nodes, but shared with the
-rest of the cluster, so jobs queue. Small requests backfill into gaps that large ones wait
-behind, which is exactly why the per-rule sizing matters here. `jobs: 500` concurrent.
+**`drivers/slurm_caslake.config` — shared, high throughput.** 9,120 CPUs over 190 nodes, but
+shared with the rest of the cluster, so jobs queue. Small requests backfill into gaps that large
+ones wait behind, which is exactly why the per-rule sizing matters here. `jobs: 500` concurrent.
 
-**`slurm_profile/` — dedicated, predictable.** The `jnovembre` partition, 192 CPUs over 3 nodes.
-Nothing else competes, so jobs start immediately, but throughput is capped by the partition.
-`jobs: 190`.
+**`drivers/slurm_jnovembre.config` — dedicated, predictable.** The `jnovembre` partition, 192
+CPUs over 3 nodes. Nothing else competes, so jobs start immediately, but throughput is capped by
+the partition. `jobs: 190`. This is the default.
 
-Rule of thumb: use `caslake_profile` for a whole-genome run, `slurm_profile` for a single
+Rule of thumb: use `slurm_caslake` for a whole-genome run, `slurm_jnovembre` for a single
 chromosome or when you want results without queue variance.
+
+Both files are snakemake *profile bodies*. Snakemake's `--profile` takes a directory containing
+a file named `config.yaml`, so `scripts/run_singer.sh` copies the one you select into a
+temporary directory under that name. Selecting one by basename is all the launcher needs:
+`--config slurm_caslake`. To drive snakemake by hand, stage it yourself:
+
+```bash
+mkdir -p /tmp/prof && cp drivers/slurm_caslake.config /tmp/prof/config.yaml
+snakemake ... --profile /tmp/prof
+```
 
 ### Adapting this to your own cluster
 
-Copy either profile and change three things:
+Copy either file to `drivers/slurm_<yourcluster>.config` — the launcher will then accept
+`--config slurm_<yourcluster>` — and change three things:
 
 ```yaml
 default-resources:
@@ -359,14 +395,21 @@ the same DAG locally.
 Sanity-check any profile before committing a long run to it:
 
 ```bash
-bash runs/run_singer.sh --pilot --chrom chr22 OCEANIA --profile <your_profile>
+bash scripts/run_singer.sh --pilot --chrom chr22 OCEANIA --profile <your_profile>
 ```
 
 ### Run state
 
-Each set gets its own workdir under `runs/work/<SET>/`. Snakemake keeps run state in
-`<workdir>/.snakemake`, and concurrent runs sharing a directory race on `.snakemake/iocache` —
-`--nolock` is not sufficient. The launcher handles this.
+Each set gets its own workdir, **outside the repository** — by default
+`$SCRATCH/singer_work/<SET>/` (set `WORKDIR_ROOT=...` to put it elsewhere). Snakemake keeps run
+state in `<workdir>/.snakemake`, and concurrent runs sharing a directory race on
+`.snakemake/iocache` — `--nolock` is not sufficient. The launcher handles this.
+
+**This state is disposable.** Which chunks are finished is recorded by the `.singer.done`
+sentinel files under `results/<SET>/singer-snakemake_outputs/`, not by the workdir, so deleting
+a workdir loses no completed work: the next run rebuilds its DAG from `results/` and queues only
+what is genuinely unfinished. That makes a fresh workdir the first thing to try when a driver is
+behaving strangely — it is cheaper and safer than trying to repair accumulated state.
 
 Two related gotchas, both learned the hard way:
 
@@ -409,8 +452,8 @@ run — a single `NODE_FAIL` was followed by **8,522 consecutive failed submissi
 limping along on already-queued jobs while POLEGON produced nothing at all.
 
 `scripts/slurm_executor_patch.py` validates node names before they enter the exclusion set, and
-`scripts/sitecustomize.py` applies it automatically because `runs/run_singer.sh` puts
-`scripts/` on `PYTHONPATH`. **Launch through `runs/run_singer.sh`** — invoking `snakemake`
+`scripts/sitecustomize.py` applies it automatically because `scripts/run_singer.sh` puts
+`scripts/` on `PYTHONPATH`. **Launch through `scripts/run_singer.sh`** — invoking `snakemake`
 directly skips the guard.
 
 The guard is deliberately not a patch to site-packages: that would be lost the moment the conda
@@ -420,14 +463,14 @@ once upstream validates the `sacct` output itself.
 To check a suspect run:
 
 ```bash
-grep -c "Unable to open file assigned" runs/work/<SET>/snakemake.log   # should be 0
+grep -c "Unable to open file assigned" logs/<SET>.snakemake.log   # should be 0
 ```
 
 
 
 **`max-masked-samples` is very important and defaults to a value that breaks this setup.** At the
 default of `0`, any position covered by a mask is marked globally inaccessible — silently
-deleting the sites the mask exists to rescue. `singer_config.yaml` sets it to 999,
+deleting the sites the mask exists to rescue. `drivers/singer_config.yaml` sets it to 999,
 `verify_sets.py` asserts it exceeds the observed maximum, and
 `scripts/test_max_masked_samples.py` is a permanent regression test covering both branches.
 Don't copy this config without that value.
@@ -455,6 +498,6 @@ is to intersect against `resources/grch38/mask/` inside `make_sample_masks.py`; 
 when the masks are being regenerated for another reason. Re-test with:
 
 ```bash
-bedtools intersect -a SingerSnakemake_SampleSets/<SET>/input/chr22.sample.mask.bed \
+bedtools intersect -a SingerSnakemake_SampleSets/<SET>/chr22.sample.mask.bed \
                    -b resources/grch38/mask/chr22.mask.bed -u | wc -l
 ```

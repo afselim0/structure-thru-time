@@ -85,15 +85,16 @@ data/human_data/results/
 data/human_data/logs/
 data/human_data/.scratch/
 
-# Snakemake per-run state: each set gets its own workdir (they race on .snakemake/iocache
-# otherwise), but that state is regenerable and shouldn't be tracked. The launcher, the SLURM
-# profile and the per-set configs under runs/ ARE tracked -- the README tells people to run them.
-data/human_data/runs/work/
+# Snakemake per-run state lives OUTSIDE the repo entirely (scripts/run_singer.sh puts it under
+# $SCRATCH), so there is nothing to ignore here: each set needs its own workdir because they
+# race on .snakemake/iocache, and that state is large and regenerable. Which chunks are already
+# finished is recorded by the `.singer.done` sentinels under results/, not by the workdir.
 
 # Tracked despite the blanket rules above.
 !data/human_data/README.md
-!data/human_data/prep.yaml
-!data/human_data/singer_config.yaml
+!data/human_data/drivers/prep.yaml
+!data/human_data/drivers/singer_config.yaml
+!data/human_data/drivers/*.config
 
 # Chimpanzee data preparation (data/chimp_data/). Same shape as the human block above:
 # everything derived or downloaded is ignored, and only the documentation and the scripts

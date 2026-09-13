@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RAW="${ROOT}/resources/raw"
 GRCH38="${ROOT}/resources/grch38"
 HGDP="${ROOT}/resources/hgdp"

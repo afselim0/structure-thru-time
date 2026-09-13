@@ -54,12 +54,12 @@ def main():
 
     parse_sample_bedmask, interval_coverage = load_singer_helpers()
 
-    config_path = os.path.join(args.root, "singer_config.yaml")
+    config_path = os.path.join(args.root, "drivers", "singer_config.yaml")
     config = yaml.safe_load(open(config_path))
     configured = config.get("max-masked-samples", 0)
 
     input_dir = os.path.join(
-        args.root, "SingerSnakemake_SampleSets", args.set_name, "input"
+        args.root, "SingerSnakemake_SampleSets", args.set_name
     )
     bed = os.path.join(input_dir, f"{args.chrom}.sample.mask.bed")
     vcf = os.path.join(input_dir, f"{args.chrom}.vcf.gz")
