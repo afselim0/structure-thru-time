@@ -114,11 +114,14 @@ skip-node-masks: false         # keep imputed spans out of POLEGON dating
 # autocorrelated. And nothing is wasted -- at n=100 with burnin 0.8, POLEGON dated 80 draws
 # that were then deleted.
 #
-# `singer-mcmc-burnin: 0.0` because every draw here is already past iteration 250 and the last
-# is at 5,000. Note the burn-in fraction affects ONLY the statistics and diagnostic plots
-# (Snakefile:426,480) -- merge_chunks writes a tree sequence for every draw regardless, so
-# nothing in the workflow stops a pre-convergence draw reaching CoaSTT.
-# extract_ts_chunks.py enforces that floor instead.
+# `singer-mcmc-burnin: 0.6` drops the first 12 draws, so the statistics and diagnostic plots
+# are built from draws 12-19 -- iterations 3,250 to 5,000, the converged end of the chain.
+#
+# Note the burn-in fraction affects ONLY those statistics and plots (Snakefile:426,480).
+# merge_chunks writes a tree sequence for every draw regardless, so nothing in the workflow
+# stops a pre-convergence draw reaching CoaSTT. extract_ts_chunks.py enforces that separately,
+# and on chain POSITION rather than draw index: it keeps draws at iteration >= 4,000, i.e.
+# draw 15 onward here, and reads draw 19 (iteration 5,000).
 #
 # Read the two iteration counters in a SINGER log carefully, they mean different things:
 #   * the FIRST `Iteration: N` sequence counts ARG CONSTRUCTION, threading in one haplotype at
@@ -131,7 +134,7 @@ skip-node-masks: false         # keep imputed spans out of POLEGON dating
 # iteration. At 5,000 iterations that is ~4.96 h per chunk, ~6,700 CPU-h genome-wide.
 singer-mcmc-samples: 20
 singer-mcmc-thin: 250
-singer-mcmc-burnin: 0.0
+singer-mcmc-burnin: 0.6
 singer-mcmc-resumes: 1000
 singer-skip-failures: true
 
@@ -141,7 +144,7 @@ singer-skip-failures: true
 # are for consistency with the settings above rather than to control cost.
 polegon-mcmc-samples: 20
 polegon-mcmc-thin: 250
-polegon-mcmc-burnin: 0.0
+polegon-mcmc-burnin: 0.6
 polegon-scaling-reps: 5
 polegon-max-step: 10.0
 

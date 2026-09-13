@@ -344,8 +344,10 @@ no per-set config files. `run_singer.sh` overrides only `input-dir`, `output-dir
 MCMC length in that one file and every subsequent run picks it up.
 
 Current settings: 2 Mb chunks, `min-sites: 1500`, **20 MCMC samples × 250 thinning = 5,000
-iterations**. SINGER's supplementary figure 10 puts the burn-in requirement at roughly 4,000
-iterations, so the draw CoaSTT consumes — the last one, at iteration 5,000 — is well past it.
+iterations**, with `singer-mcmc-burnin: 0.6`. SINGER's supplementary figure 10 puts the burn-in
+requirement at roughly 4,000 iterations, so the draw CoaSTT consumes — the last one, at
+iteration 5,000 — is well past it. The burn-in fraction drops the first 12 draws from the
+*statistics and diagnostic plots*, which are then built from iterations 3,250–5,000.
 
 **Why 20 draws at thin 250 rather than 100 at thin 50.** Both give 5,000 iterations, and since
 extraction feeds CoaSTT the highest draw, that draw is at iteration 5,000 either way. But
