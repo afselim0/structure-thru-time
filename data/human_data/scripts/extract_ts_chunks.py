@@ -46,6 +46,11 @@ import pickle
 import tskit
 import tszip
 
+# Burn-in SINGER needs before a draw is usable, in MCMC iterations. From SINGER's supplementary
+# figure 10. Measured on their sample sizes, so treat it as a floor rather than a guarantee:
+# this set's ARGs are larger than most of their test cases.
+MIN_BURNIN_ITERATIONS = 4000
+
 
 def final_replicate(trees_dir, chrom, min_replicate=0):
     """
@@ -111,6 +116,12 @@ def main():
     # singer-snakemake applies singer-mcmc-burnin only to statistics and plots; the tree
     # sequences are written for every draw, so nothing upstream stops a pre-convergence draw
     # from reaching CoaSTT. This is where that is caught.
+    #
+    # The check is on CHAIN POSITION, not draw index. Draw k sits at MCMC iteration
+    # (k + 1) * thin, so what matters is whether that iteration clears the burn-in the chain
+    # needs -- roughly 4,000 per SINGER's supplementary figure 10. Checking the index alone
+    # would be meaningless: at `singer-mcmc-burnin: 0.0` the index floor is 0 and every draw
+    # passes, including draw 0 of a chain that never converged.
     config_path = args.config or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "drivers", "singer_config.yaml",
@@ -120,9 +131,23 @@ def main():
         import yaml
         cfg = yaml.safe_load(open(config_path))
         n = int(cfg["singer-mcmc-samples"])
+        thin = int(cfg["singer-mcmc-thin"])
+        # index floor from the configured burn-in fraction
         min_replicate = int(float(cfg["singer-mcmc-burnin"]) * n)
-        print(f"burn-in floor: replicate >= {min_replicate} of {n} "
-              f"(singer-mcmc-burnin {cfg['singer-mcmc-burnin']})")
+        # ...and the index whose iteration first clears MIN_BURNIN_ITERATIONS
+        iteration_floor = -(-MIN_BURNIN_ITERATIONS // thin) - 1   # ceil division, 0-based
+        if iteration_floor > min_replicate:
+            min_replicate = iteration_floor
+        last_iter = n * thin
+        print(f"chain: {n} draws x thin {thin} = {last_iter:,} iterations; "
+              f"keeping draws >= {min_replicate} (iteration >= {(min_replicate + 1) * thin:,})")
+        if last_iter < MIN_BURNIN_ITERATIONS:
+            raise SystemExit(
+                f"Chain is only {last_iter:,} iterations, shorter than the ~"
+                f"{MIN_BURNIN_ITERATIONS:,} burn-in SINGER's supplementary figure 10 indicates. "
+                f"No draw from this run is usable; raise singer-mcmc-samples or "
+                f"singer-mcmc-thin in {config_path}."
+            )
     else:
         print(f"WARNING: no config at {config_path}; burn-in floor not enforced")
 

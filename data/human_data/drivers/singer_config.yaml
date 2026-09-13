@@ -89,37 +89,59 @@ skip-node-masks: false         # keep imputed spans out of POLEGON dating
 
 # --- SINGER options ---
 #
-# 5,000 MCMC iterations: thin 50 x 100 samples. SINGER's supplementary figure 10 puts the
-# burn-in requirement at roughly 4,000 iterations, so `singer-mcmc-burnin: 0.8` discards the
-# first 80 draws and keeps the last 20 -- draws 80-99, i.e. iterations 4,050-5,000.
+# 5,000 MCMC iterations: thin 250 x 20 samples. SINGER's supplementary figure 10 puts the
+# burn-in requirement at roughly 4,000 iterations, so the draw CoaSTT consumes -- the last one,
+# at iteration 5,000 -- is comfortably past it.
 #
-# This replaces an earlier thin 100 x 16 setting (1,600 iterations). That run was abandoned:
-# every draw it produced fell inside burn-in, so none of its tree sequences were usable.
+# WHY 20 DRAWS AT THIN 250, NOT 100 AT THIN 50. Both give 5,000 iterations and 20 usable draws,
+# and extract_ts_chunks.py feeds CoaSTT the HIGHEST draw either way, which sits at iteration
+# 5,000 in both. The difference is everything downstream of SINGER, because POLEGON runs once
+# per (chunk, draw) and merge_chunks once per (chromosome, draw):
+#
+#                          n=100/thin50     n=20/thin250
+#     SINGER CPU-h            6,634            6,634      (identical -- same 5,000 iterations)
+#     POLEGON jobs          133,700           26,740
+#     merge jobs              2,200              440
+#     tree storage             298 GB            60 GB
+#     wall clock after SINGER  ~38 h             ~7.5 h
+#
+# At n=100 a whole-genome set is 133,700 POLEGON jobs of ~10 s each. That is pathological for
+# SLURM: submission and teardown cost as much as the work, so throughput is set by the job
+# submission rate rather than the partition. Measured at ~3,700 jobs/h, which is ~32 h of wall
+# clock for ~4 h of compute. At n=20 the same phase is ~7 h.
+#
+# Draw spacing is also better: 250 iterations apart rather than 50, so retained draws are less
+# autocorrelated. And nothing is wasted -- at n=100 with burnin 0.8, POLEGON dated 80 draws
+# that were then deleted.
+#
+# `singer-mcmc-burnin: 0.0` because every draw here is already past iteration 250 and the last
+# is at 5,000. Note the burn-in fraction affects ONLY the statistics and diagnostic plots
+# (Snakefile:426,480) -- merge_chunks writes a tree sequence for every draw regardless, so
+# nothing in the workflow stops a pre-convergence draw reaching CoaSTT.
+# extract_ts_chunks.py enforces that floor instead.
 #
 # Read the two iteration counters in a SINGER log carefully, they mean different things:
 #   * the FIRST `Iteration: N` sequence counts ARG CONSTRUCTION, threading in one haplotype at
-#     a time. It runs to (2 x samples - 1) -- 431 for this set's 216 diploids -- and is fixed by
+#     a time. It runs to (2 x samples - 1) -- 431 for a set of 216 diploids -- and is fixed by
 #     sample size, not by any MCMC setting. It is not burn-in.
 #   * the SECOND sequence, restarting at `Iteration: 0` after `rescaled ARG length`, is one
 #     entry per RETAINED DRAW. That is the MCMC.
 #
 # Measured cost per 2 Mb chunk at n=216: 23 min ARG construction (fixed) + 3.3 s per MCMC
 # iteration. At 5,000 iterations that is ~4.96 h per chunk, ~6,700 CPU-h genome-wide.
-#
-# CAUTION: `singer-mcmc-burnin` is applied ONLY to statistics and diagnostic plots
-# (Snakefile:426,480). `merge_chunks` uses range(SINGER_MCMC_SAMPLES), so the workflow builds,
-# dates and stores ALL 100 draws -- ~298 GB genome-wide. scripts/extract_chunks.sh keeps draws
-# 80-99 and drops the rest; do not feed a draw below 80 to CoaSTT.
-singer-mcmc-samples: 100
-singer-mcmc-thin: 50
-singer-mcmc-burnin: 0.8
+singer-mcmc-samples: 20
+singer-mcmc-thin: 250
+singer-mcmc-burnin: 0.0
 singer-mcmc-resumes: 1000
 singer-skip-failures: true
 
 # --- POLEGON options ---
-polegon-mcmc-samples: 16
-polegon-mcmc-thin: 100
-polegon-mcmc-burnin: 0.5
+# Matched to the SINGER chain: 20 samples at thin 250 = 5,000 iterations. POLEGON dates a chunk
+# that SINGER has already built, so its chain is short and cheap (~10 s per draw); these values
+# are for consistency with the settings above rather than to control cost.
+polegon-mcmc-samples: 20
+polegon-mcmc-thin: 250
+polegon-mcmc-burnin: 0.0
 polegon-scaling-reps: 5
 polegon-max-step: 10.0
 

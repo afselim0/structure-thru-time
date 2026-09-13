@@ -9,19 +9,12 @@ ready-to-run input directories, one per sample set. Then run the workflow — se
 SINGER* below. `singer-snakemake` is a git submodule at `../singer-snakemake`, pinned to the
 commit these inputs were built and tested against; `git submodule update --init` after cloning.
 
-> **The submodule carries one local patch.** It is pinned to `dbd1509` on the branch
-> `coastt-batched-polegon`, which forks upstream's `1d6b370` to make `run_polegon` date every
-> MCMC draw of a chunk in one job rather than one job per draw. POLEGON takes ~10 s per draw,
-> so the per-draw form spent more time on SLURM scheduling than on work: at 100 draws a
-> whole-genome set is 133,700 ten-second jobs, which took ~32 h against ~4 h of real compute
-> because the job submission rate — not the partition — capped throughput. Batching gives
-> 1,337 jobs of 7–20 minutes. The dating itself is unchanged and each draw keeps its own seed,
-> so results are statistically identical to upstream.
->
-> That commit exists **only in this checkout**, so `git submodule update --init` on a fresh
-> clone cannot fetch it. Push the branch somewhere reachable (a fork of
-> `nspope/singer-snakemake`) and update `.gitmodules` before anyone else clones this, or they
-> will get upstream's per-draw rule and a POLEGON phase that takes days.
+> **A local fork of the submodule exists but is NOT in use.** Branch
+> `coastt-batched-polegon` (`dbd1509`) makes `run_polegon` date all draws of a chunk in one
+> job instead of one job per draw. It is correct and tested, but the submodule is pinned to
+> upstream `1d6b370` because the same throughput problem is solved more simply by keeping the
+> draw count low (see `singer-mcmc-samples` in `drivers/singer_config.yaml`). Revisit the fork
+> if a future run needs many draws.
 
 ## Layout
 
@@ -350,10 +343,27 @@ no per-set config files. `run_singer.sh` overrides only `input-dir`, `output-dir
 `chromosomes` via `--config`, which snakemake applies after `--configfile`. Change a rate or an
 MCMC length in that one file and every subsequent run picks it up.
 
-Current settings: 2 Mb chunks, `min-sites: 1500`, **100 MCMC samples × 50 thinning = 5,000
-iterations**, with `singer-mcmc-burnin: 0.8` discarding the first 80 draws. SINGER's
-supplementary figure 10 puts the burn-in requirement at roughly 4,000 iterations, so the draws
-kept are 80–99, drawn from iterations 4,050–5,000.
+Current settings: 2 Mb chunks, `min-sites: 1500`, **20 MCMC samples × 250 thinning = 5,000
+iterations**. SINGER's supplementary figure 10 puts the burn-in requirement at roughly 4,000
+iterations, so the draw CoaSTT consumes — the last one, at iteration 5,000 — is well past it.
+
+**Why 20 draws at thin 250 rather than 100 at thin 50.** Both give 5,000 iterations, and since
+extraction feeds CoaSTT the highest draw, that draw is at iteration 5,000 either way. But
+POLEGON runs once per *(chunk, draw)* and `merge_chunks` once per *(chromosome, draw)*, so the
+draw count multiplies everything after SINGER:
+
+| | n=100 / thin 50 | n=20 / thin 250 |
+|---|---|---|
+| SINGER CPU-h | 6,634 | 6,634 *(identical)* |
+| POLEGON jobs | 133,700 | **26,740** |
+| merge jobs | 2,200 | **440** |
+| tree storage | 298 GB | **60 GB** |
+| wall clock after SINGER | ~38 h | **~7.5 h** |
+
+At n=100 a whole-genome set is 133,700 POLEGON jobs of ~10 s each — pathological for SLURM,
+where submission and teardown cost as much as the work, so throughput is capped by the job
+submission rate rather than the partition (measured: ~3,700 jobs/h). Draw spacing is also
+better at thin 250: retained draws are less autocorrelated.
 
 **A SINGER chunk log contains two different `Iteration:` counters**, and reading the first as
 MCMC is how an earlier run was set 3× too short:
@@ -491,7 +501,7 @@ completed chunks and reconcile with wall clock to within 1%:
 
 So a chunk costs `23 min + 3.3 s × iterations`. At the current 5,000 iterations that is **~4.96 h
 per chunk** and **~6,700 CPU-h** genome-wide — about 14 h of wall clock at 500 concurrent jobs,
-before queueing. Storage is ~298 GB, because all 100 draws are written even though 20 are kept.
+before queueing. Storage is ~60 GB.
 
 Memory is measured too: p50 1.90 GB, p90 3.41, p99 4.93, max 6.81 GB over 576 jobs. `run_singer`
 requests 12 GB and escalates to 20 and 28 GB on retry, so a chunk that needs more gets it
