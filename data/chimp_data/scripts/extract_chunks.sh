@@ -77,3 +77,14 @@ python "${ROOT}/../human_data/scripts/extract_ts_chunks.py" \
     --singer-output "$SRC" \
     --out-dir "$OUT" \
     --config "${ROOT}/drivers/singer_config.yaml"
+
+# Now that extraction has SUCCEEDED, the pre-convergence draws are dead weight: merge_chunks
+# writes all 100, of which only the last 20 are past burn-in. Report what could be freed, but
+# do not delete it automatically -- reclaiming disk is not worth doing behind someone's back,
+# and the dry run prints the exact command.
+echo
+python "${ROOT}/../human_data/scripts/prune_burnin_draws.py" \
+    --singer-output "$SRC" \
+    --config "${ROOT}/drivers/singer_config.yaml" \
+    --ts-chunks "$OUT" || true
+echo "To reclaim that space, re-run the command above with --apply"
