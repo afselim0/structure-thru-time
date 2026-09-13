@@ -26,6 +26,11 @@ OUT="${ROOT}/results/${NAME}/ts_chunks"
 
 # --- gate: every chromosome must contribute the SAME replicate -------------------------
 #
+# Two separate things can go wrong with replicate numbering, and this gate covers the one
+# extract_ts_chunks.py cannot see. That script refuses a chromosome whose best draw is still
+# inside burn-in (replicate < 0.8 x 100 = 80 under the current config); what it cannot detect
+# is chromosomes that are past burn-in but disagree with EACH OTHER.
+#
 # extract_ts_chunks.py takes the highest-numbered replicate per chromosome, which is correct
 # only if replicates accumulate in order. A crashed or OOM-killed merge_chunks breaks that:
 # the rule is parameterised per replicate and the jobs run concurrently, so a kill removes
@@ -65,6 +70,10 @@ if [[ ${#BEHIND[@]} -gt 0 ]]; then
 fi
 echo "All ${#TOP[@]} chromosomes at replicate ${MAXTOP}."
 
+# --config is NOT optional here. extract_ts_chunks.py lives under human_data/, and its default
+# config path is relative to its OWN location -- so without this it would read the human
+# burn-in floor and apply it to chimpanzee output.
 python "${ROOT}/../human_data/scripts/extract_ts_chunks.py" \
     --singer-output "$SRC" \
-    --out-dir "$OUT"
+    --out-dir "$OUT" \
+    --config "${ROOT}/drivers/singer_config.yaml"

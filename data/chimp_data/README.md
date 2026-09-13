@@ -10,8 +10,10 @@ The HGDP prep begins with a curated, phased, quality-filtered public release. Th
 with a raw GATK callset: **unphased, unfiltered, no published accessibility mask, and
 variant-only**. Everything the human prep could download, this one has to build.
 
-**Status: inputs complete, ARG inference in progress.** All 23 autosomes are built and pass
-verification (14/14 checks each). The genome-wide SINGER run is under way.
+**Status: inputs complete, ready to infer.** All 23 autosomes are built and pass verification
+(14/14 checks each). The first genome-wide SINGER run was abandoned and its output deleted:
+its 1,600-iteration MCMC budget was entirely inside burn-in. See
+[Burn-in](#burn-in-and-why-5000-iterations).
 
 ## Reproducing this from a fresh clone
 
@@ -368,8 +370,9 @@ from `drivers/slurm_jnovembre.config` (the default) or `drivers/slurm_caslake.co
 
 `singer_config.yaml` sets `mutation-rate: 1.2e-8` (chimpanzee trio-derived, not the human
 value), `stratify-by: subspecies`, and keeps unpolarised sites. The MCMC budget is
-`singer-mcmc-samples: 16` with `singer-mcmc-thin: 100` and `singer-mcmc-resumes: 1000`
--- 1,600 iterations per chunk.
+`singer-mcmc-samples: 100` with `singer-mcmc-thin: 50` -- **5,000 iterations per chunk** --
+and `singer-mcmc-burnin: 0.8`, which keeps only the last 20 draws (80-99, i.e. iterations
+4,050-5,000). Same settings as the human prep.
 
 Run state goes to a scratch workdir **outside the repo** (`$SCRATCH/singer_work/chimp`).
 That state is disposable: which chunks are finished is recorded by the `.singer.done`
@@ -405,13 +408,36 @@ failing permanently. The retry is cheap: `merge_chunks` is parameterised per rep
 the SINGER output it consumes survives on disk, so a re-run redoes minutes of merging rather
 than the hours of inference behind it.
 
+### Burn-in, and why 5,000 iterations
+
+SINGER's supplementary figure 10 puts the burn-in requirement at roughly **4,000 iterations**.
+An earlier run at thin 100 x 16 samples -- 1,600 iterations -- was abandoned after 22 of 23
+chromosomes had started, because **every draw it produced fell inside burn-in**: the chain had
+not converged, so none of its tree sequences were usable no matter how many completed.
+
+The current setting produces 100 draws at thin 50, and `singer-mcmc-burnin: 0.8` treats the
+first 80 as burn-in. Only draws 80-99 are used.
+
+Two traps follow from that, both of which have teeth:
+
+- **`singer-mcmc-burnin` does not reduce what gets built.** It is applied only to statistics
+  and diagnostic plots; `merge_chunks` iterates over all `singer-mcmc-samples`, so the
+  workflow constructs, dates and stores **all 100 draws**. Budget disk accordingly -- the
+  abandoned 16-draw run already held 399 GB.
+- **Nothing upstream stops a pre-convergence draw reaching CoaSTT.** Step 9 is where that is
+  caught: it reads the burn-in floor from `drivers/singer_config.yaml` and refuses any
+  chromosome whose best draw is below it.
+
 ### Timing
 
 Timing is **not linear in the MCMC budget**: there is a fixed setup cost of about 7.7 minutes
-per chunk before the first iteration, then ~7.2 s/iteration. At 1,600 iterations that is
-~3.3 h per chunk, and the genome is ~958 chunks. Expect roughly a day for the whole genome on
-`jnovembre` (192 CPUs, one chunk per core); `slurm_caslake` has 9,120 CPUs and can hold far
-more in flight, at the cost of queueing behind other users.
+per chunk before the first iteration, then ~7.2 s/iteration. At 5,000 iterations that is
+**~10.1 h per chunk** against ~3.3 h at 1,600, so expect roughly 3x the wall time for the same
+~958 chunks. `run_singer` is given a 36 h limit accordingly -- a walltime kill loses the whole
+chunk, where a memory kill retries cheaply.
+
+`jnovembre` has 192 CPUs and runs one chunk per core; `slurm_caslake` has 9,120 and can hold
+far more in flight, at the cost of queueing behind other users.
 
 ### Check the replicates before extracting
 
