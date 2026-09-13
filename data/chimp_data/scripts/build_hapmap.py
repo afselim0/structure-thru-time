@@ -32,7 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "resources" / "raw"
 OUT = ROOT / "resources" / "panTro6" / "hapmap"
-WORK = ROOT / "work"
+WORK = ROOT / "intermediates"
 
 # rho/kb -> cM/Mb, targeting a genome-wide mean of 1.1 cM/Mb. Measured across all 23
 # autosomes: length-weighted mean rho/kb = 0.80044.

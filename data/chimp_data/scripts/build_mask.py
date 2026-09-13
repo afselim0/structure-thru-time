@@ -53,7 +53,7 @@ def main():
             inacc[a:b] = True
             ng += b - a
     # 3. excess heterozygosity within subspecies
-    flags = ROOT/"work"/f"{chrom}_het_flags.npy"
+    flags = ROOT/"intermediates"/f"{chrom}_het_flags.npy"
     nh = 0
     if flags.exists():
         for p in np.load(flags):

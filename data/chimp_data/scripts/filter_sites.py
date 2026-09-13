@@ -126,21 +126,21 @@ def main():
         return 2
     chrom = sys.argv[1]
 
-    # Use the RENAMED VCF (contig == chrom). work/filtered/*.raw.vcf.gz still carries the
+    # Use the RENAMED VCF (contig == chrom). intermediates/filtered/*.raw.vcf.gz still carries the
     # GenBank accession, and a region/target file keyed on `chrom` silently matches nothing
     # against it -- measured: bcftools -T reported 0 sites removed with no error.
     # UNPHASED source, renamed to chrN. Phasing strips AD/DP, so the filters cannot run on
     # the phased file; the pipeline order is filter -> phase, never phase -> filter.
-    src = ROOT / "work" / "filtered" / f"{chrom}.renamed.vcf.gz"
+    src = ROOT / "intermediates" / "filtered" / f"{chrom}.renamed.vcf.gz"
     if not src.exists():
-        raw = ROOT / "work" / "filtered" / f"{chrom}.raw.vcf.gz"
-        rn = ROOT / "work" / f"rename_{chrom}.txt"
+        raw = ROOT / "intermediates" / "filtered" / f"{chrom}.raw.vcf.gz"
+        rn = ROOT / "intermediates" / f"rename_{chrom}.txt"
         acc = run(f"bcftools view -H {raw} | head -1 | cut -f1").strip()
         rn.write_text(f"{acc}\t{chrom}\n")
         run(f"bcftools annotate --rename-chrs {rn} {raw} -Oz -o {src}")
         run(f"bcftools index -t {src}")
-    out_vcf = ROOT / "work" / "filtered" / f"{chrom}.sitefiltered.vcf.gz"
-    out_txt = ROOT / "work" / "filter_positions" / f"{chrom}.txt"
+    out_vcf = ROOT / "intermediates" / "filtered" / f"{chrom}.sitefiltered.vcf.gz"
+    out_txt = ROOT / "intermediates" / "filter_positions" / f"{chrom}.txt"
     out_txt.parent.mkdir(parents=True, exist_ok=True)
 
     total = int(run(f"bcftools index -n {src}").strip())
@@ -212,8 +212,8 @@ def main():
             if tot >= 4 and het / tot > 0.9:
                 het_flag.append(int(parts[0]))
                 break
-    np.save(ROOT / "work" / f"{chrom}_het_flags.npy", np.array(het_flag, dtype=np.int64))
-    print(f"  excess-het sites    : {len(het_flag):,}  -> work/{chrom}_het_flags.npy")
+    np.save(ROOT / "intermediates" / f"{chrom}_het_flags.npy", np.array(het_flag, dtype=np.int64))
+    print(f"  excess-het sites    : {len(het_flag):,}  -> intermediates/{chrom}_het_flags.npy")
 
     # Drop the failing sites from the VCF.
     # Derive the contig name from the file rather than assuming it equals `chrom`.
@@ -223,7 +223,7 @@ def main():
             f"{src} uses contig {contig!r}, expected {chrom!r}; a target file keyed on "
             f"{chrom!r} would silently match nothing"
         )
-    excl = ROOT / "work" / f"{chrom}.exclude.txt"
+    excl = ROOT / "intermediates" / f"{chrom}.exclude.txt"
     with open(excl, "w") as fh:
         for p in removed:
             fh.write(f"{contig}\t{p}\n")

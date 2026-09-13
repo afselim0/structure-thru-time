@@ -18,23 +18,23 @@ export PATH="/project/jnovembre/afselim/shapeit_env/bin:/project/jnovembre/afsel
 export LD_LIBRARY_PATH="/project/jnovembre/afselim/CoaSTT_env/lib:${LD_LIBRARY_PATH:-}"
 
 cd "$SLURM_SUBMIT_DIR"
-mkdir -p work/phased logs
+mkdir -p intermediates/phased logs
 
 # Site-filtered, UNPHASED input. Order is filter -> phase, never the reverse: SHAPEIT5
 # emits GT only, stripping AD/DP, so the depth and allelic-imbalance filters cannot be
 # computed once phasing has run.
-IN=work/filtered/${CHROM}.sitefiltered.vcf.gz
-OUT=work/phased/${CHROM}.vcf.gz
+IN=intermediates/filtered/${CHROM}.sitefiltered.vcf.gz
+OUT=intermediates/phased/${CHROM}.vcf.gz
 LEN=$(awk -v c="$CHROM" '$1==c{print $2}' resources/panTro6/chrom.sizes)
 
 SHAPEIT5_phase_common \
   --input "$IN" \
-  --output work/phased/${CHROM}.bcf \
+  --output intermediates/phased/${CHROM}.bcf \
   --region "${CHROM}:1-${LEN}" \
   --hmm-ne 10000 \
   --thread "$SLURM_CPUS_PER_TASK"
 
-bcftools view -Oz -o "$OUT" work/phased/${CHROM}.bcf
+bcftools view -Oz -o "$OUT" intermediates/phased/${CHROM}.bcf
 bcftools index -t "$OUT"
 
 # SHAPEIT5 drops NON-BIALLELIC records by design -- it phases biallelic sites only. So the
@@ -58,5 +58,5 @@ if [ "$n_unphased" -ne 0 ]; then
   exit 1
 fi
 echo "all $n_bi biallelic records phased; $((n_in - n_bi)) multiallelic dropped by SHAPEIT5"
-rm -f work/phased/${CHROM}.bcf work/phased/${CHROM}.bcf.csi
+rm -f intermediates/phased/${CHROM}.bcf intermediates/phased/${CHROM}.bcf.csi
 echo "phased $CHROM OK"

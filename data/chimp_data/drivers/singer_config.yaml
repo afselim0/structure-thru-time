@@ -8,7 +8,7 @@
 #   snakemake --configfile ../chimp_data/singer_config.yaml --cores all
 
 input-dir: "../chimp_data/SingerSnakemake_Input"
-output-dir: "../chimp_data/results/singer-snakemake_outputs"
+output-dir: "../chimp_data/results/chimp/singer-snakemake_outputs"
 chromosomes: null           # null => glob every {chrom}.vcf.gz in input-dir
 
 # Chimpanzee trio-derived, NOT the human 1.25e-8 default. Venn et al. 2014 (Science) put the

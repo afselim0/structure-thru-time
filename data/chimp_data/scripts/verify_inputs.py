@@ -133,7 +133,7 @@ def verify_vcf(chrom):
     # positions and samples, and is simply wrong.
     #
     # Not hypothetical -- it shipped. chr21 once passed 13/13 while carrying 91.79% unphased
-    # genotypes, because the phased VCF existed in work/phased/ but was never promoted into
+    # genotypes, because the phased VCF existed in intermediates/phased/ but was never promoted into
     # the input directory.
     #
     # The test is restricted to BIALLELIC records. Multiallelic records are deliberately

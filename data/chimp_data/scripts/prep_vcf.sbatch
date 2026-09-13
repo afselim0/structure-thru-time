@@ -17,8 +17,8 @@ CHROM=$(sed -n "${SLURM_ARRAY_TASK_ID}p" resources/panTro6/chrom.sizes | cut -f1
 ACC=$(awk -v c="$CHROM" '$2==c{print $1}' resources/panTro6/accession_to_chrom.txt)
 echo "=== $CHROM ($ACC) ==="
 
-RAW=work/filtered/${CHROM}.raw.vcf.gz
-REN=work/filtered/${CHROM}.renamed.vcf.gz
+RAW=intermediates/filtered/${CHROM}.raw.vcf.gz
+REN=intermediates/filtered/${CHROM}.renamed.vcf.gz
 
 # Split to this chromosome, drop bonobos, drop sites no chimp carries.
 if [ ! -s "$RAW" ]; then
@@ -30,8 +30,8 @@ echo "after bonobo removal: $(bcftools index -n $RAW)"
 
 # Rename the GenBank accession to chrN so every downstream file shares one contig name.
 if [ ! -s "$REN" ]; then
-  printf '%s\t%s\n' "$ACC" "$CHROM" > work/rename_${CHROM}.txt
-  bcftools annotate --rename-chrs work/rename_${CHROM}.txt "$RAW" -Oz -o "$REN"
+  printf '%s\t%s\n' "$ACC" "$CHROM" > intermediates/rename_${CHROM}.txt
+  bcftools annotate --rename-chrs intermediates/rename_${CHROM}.txt "$RAW" -Oz -o "$REN"
   bcftools index -t "$REN"
 fi
 

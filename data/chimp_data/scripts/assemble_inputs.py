@@ -26,12 +26,12 @@ def run(cmd):
 def main():
     chrom = sys.argv[1]
     IN.mkdir(exist_ok=True)
-    filtered = ROOT / "work" / "filtered" / f"{chrom}.sitefiltered.vcf.gz"
-    phased   = ROOT / "work" / "phased" / f"{chrom}.vcf.gz"
+    filtered = ROOT / "intermediates" / "filtered" / f"{chrom}.sitefiltered.vcf.gz"
+    phased   = ROOT / "intermediates" / "phased" / f"{chrom}.vcf.gz"
     out      = IN / f"{chrom}.vcf.gz"
 
     # Multiallelic records from the site-filtered (unphased) VCF.
-    multi = ROOT / "work" / f"{chrom}.multi.vcf.gz"
+    multi = ROOT / "intermediates" / f"{chrom}.multi.vcf.gz"
     run(f"bcftools view -m3 {filtered} -Oz -o {multi}")
     run(f"bcftools index -t {multi}")
 
@@ -59,7 +59,7 @@ def main():
             w.writerow([s, r["subspecies"], r["population"], r["mean_coverage"]])
 
     # filter.txt: positions removed by the site filters, accessible ones only.
-    src_txt = ROOT / "work" / "filter_positions" / f"{chrom}.txt"
+    src_txt = ROOT / "intermediates" / "filter_positions" / f"{chrom}.txt"
     (IN / f"{chrom}.filter.txt").write_text(src_txt.read_text())
 
     # Shared resources as symlinks.

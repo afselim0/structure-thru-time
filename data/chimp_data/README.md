@@ -11,46 +11,87 @@ with a raw GATK callset: **unphased, unfiltered, no published accessibility mask
 variant-only**. Everything the human prep could download, this one has to build.
 
 **Status: inputs complete, ARG inference in progress.** All 23 autosomes are built and pass
-verification (14/14 checks each). The genome-wide SINGER run is under way; see
-[Running SINGER](#running-singer-and-what-comes-out) for the production command and the
-memory caveat that is currently biting it.
+verification (14/14 checks each). The genome-wide SINGER run is under way.
 
-## Full VCF to SINGER trees, start to finish
+## Reproducing this from a fresh clone
 
-Nine commands. Run them in this order from `data/chimp_data/`; each waits on the one before it.
-Steps 1-7 build the inputs, step 8 runs the ARGs, step 9 packages them for CoaSTT.
+Everything is driven by the numbered scripts in `drivers/`. Run them in order; each is a thin
+wrapper that submits the matching script in `scripts/` and waits for it, so the whole pipeline
+is nine commands and no other knowledge.
 
 ```bash
 conda activate CoaSTT_env
+cd data/chimp_data
 
-# --- inputs: raw callset -> SingerSnakemake_Input/ -------------------------------
-sbatch scripts/prep_vcf.sbatch          # 1. split by chromosome, drop bonobos, site filters
-sbatch scripts/genmap_index.sbatch      # 2. whole-genome mappability index      (~40 min, once)
-sbatch scripts/build_resources.sbatch   # 3. recombination maps + ancestral FASTAs
-sbatch scripts/build_mask_all.sbatch    # 4. accessibility masks, restrict filter.txt
-sbatch scripts/phase_all.sbatch         # 5. SHAPEIT5 phasing
-sbatch scripts/assemble_all.sbatch      # 6. assemble the final input directory
-sbatch scripts/verify_all.sbatch        # 7. 14 checks per chromosome -- gate before step 8
-
-# --- ARGs: SingerSnakemake_Input/ -> results/singer-snakemake_outputs/ -----------
-sbatch scripts/run_singer_genome.sbatch # 8. SINGER + POLEGON, one array task per chromosome
-
-# --- packaging: merged trees -> results/ts_chunks/ -------------------------------
-bash   scripts/extract_chunks.sh        # 9. flat per-chunk .trees for CoaSTT (runs in minutes)
+bash drivers/1_prep_vcf.sh         # split by chromosome, drop bonobos, site filters
+bash drivers/2_genmap_index.sh     # whole-genome mappability index          (~40 min, once)
+bash drivers/3_build_resources.sh  # recombination maps + ancestral FASTAs
+bash drivers/4_build_masks.sh      # accessibility masks
+bash drivers/5_phase.sh            # SHAPEIT5 phasing                        (longest step)
+bash drivers/6_assemble.sh         # assemble SingerSnakemake_Input/
+bash drivers/7_verify.sh           # 14 checks per chromosome -- THE GATE
+bash drivers/8_run_singer.sh       # SINGER + POLEGON                        (~1 day)
+bash drivers/9_extract_chunks.sh   # per-chunk .trees for CoaSTT             (minutes)
 ```
 
-Steps 2 and 3 are independent of step 1 and can be submitted at the same time; step 4 needs
-step 2, and everything from step 5 on is strictly sequential. **Do not skip step 7** -- it is
-the gate that catches an unphased or mislabelled input before step 8 spends a day on it.
+Steps 1-7 **block** until their SLURM array finishes, so `bash drivers/1_prep_vcf.sh && bash
+drivers/2_genmap_index.sh && ...` is a valid way to run the whole thing unattended. Step 8
+detaches and returns immediately -- monitor it with `tail -f logs/chimp.snakemake.log`.
 
-Each step is a 23-task array (one task per autosome) except step 2, which is a single
-whole-genome job, and step 9, which is a short serial script. Steps are idempotent: each skips
-work whose output already exists, so a partially-failed array can simply be resubmitted.
+Steps 2 and 3 do not depend on step 1 and can be submitted at the same time. Step 4 needs 1
+and 2; everything from 5 on is sequential. **Do not skip step 7** -- it is the gate that
+catches an unphased or mislabelled input before step 8 spends a day on it.
 
-Everything runs on SLURM (`account=pi-jnovembre`). Steps 1-7 use `partition=caslake`; step 8
-uses `partition=jnovembre`. The login session is capped at an **8 GiB cgroup**, which is not
-enough for Beagle, whole-chromosome `read_vcf`, or even the verification script -- all three
-were OOM-killed there during development, so submit rather than running interactively.
+Useful variants:
+
+```bash
+bash drivers/8_run_singer.sh --pilot --chrom chr21   # smoke test: one chromosome, short MCMC
+bash drivers/8_run_singer.sh -n                      # dry run: print the plan, submit nothing
+bash drivers/8_run_singer.sh --config slurm_caslake  # shared partition instead of jnovembre
+```
+
+## Layout
+
+```
+README.md                   <- the only file at the top level
+
+drivers/                    everything a person runs, and the parameters they run with
+  1_prep_vcf.sh ... 9_extract_chunks.sh    the pipeline, in order
+  singer_config.yaml        scientific parameters for singer-snakemake
+  slurm_jnovembre.config    cluster settings: dedicated partition (the default)
+  slurm_caslake.config      cluster settings: shared partition, higher throughput
+  prep.yaml                 every measurement, decision, and reversal on record
+
+scripts/                    the implementations the drivers call
+resources/                  downloaded and derived reference data (~15 GB + a 28 GB VCF)
+intermediates/              per-chromosome working files (~46 GB, regenerable by steps 1-5)
+SingerSnakemake_Input/      the 161 files singer-snakemake reads
+results/chimp/
+  singer-snakemake_outputs/ SINGER + POLEGON output, one .tsz per MCMC replicate
+  ts_chunks/                flat per-chunk .trees -- THIS is what CoaSTT reads
+logs/                       run logs
+```
+
+### What lands in `intermediates/`
+
+Working files, kept because regenerating them costs a full prep re-run, but safe to delete
+if you need the space back -- nothing downstream of step 6 reads them.
+
+| Path | Written by | What it is |
+|---|---|---|
+| `filtered/<chrom>.raw.vcf.gz` | step 1 | chromosome split out, bonobos dropped |
+| `filtered/<chrom>.renamed.vcf.gz` | step 1 | same, with contigs renamed to UCSC names |
+| `filtered/<chrom>.sitefiltered.vcf.gz` | step 1 | after the three site filters -- the phasing input |
+| `filter_positions/<chrom>.txt` | steps 1, 4 | removed positions, restricted to accessible sequence |
+| `<chrom>_het_flags.npy` | step 1 | excess-heterozygosity sites, consumed by the mask build |
+| `<chrom>_map_{hg18,hg38,p6}.bed` | step 3 | the recombination map at each liftOver stage |
+| `phased/<chrom>.vcf.gz` | step 5 | SHAPEIT5 output -- the most expensive artefact here |
+| `rename_<chrom>.txt` | step 1 | the accession-to-UCSC mapping handed to `bcftools annotate` |
+
+Everything runs on SLURM (`account=pi-jnovembre`). The login session is capped at an **8 GiB
+cgroup**, which is not enough for Beagle, whole-chromosome `read_vcf`, or even the
+verification script -- all three were OOM-killed there during development, so submit rather
+than running interactively.
 
 ## What the panel is
 
@@ -79,7 +120,7 @@ resources/vcf/full.vcf.gz                      28 GB, 61 samples, GenBank access
         │  bcftools annotate --rename-chrs        CM009259.2 → chr21
         ▼
    ── site filters ──────────────────────────────────────────── scripts/filter_sites.py
-        │  GATK hard filters, allelic imbalance, depth       →  work/filter_positions/chrN.txt
+        │  GATK hard filters, allelic imbalance, depth       →  intermediates/filter_positions/chrN.txt
         ▼
    ── phasing ──────────────────────────────────────────────── SHAPEIT5 phase_common
         │  --hmm-ne 10000, no reference panel, no genetic map
@@ -89,15 +130,15 @@ resources/vcf/full.vcf.gz                      28 GB, 61 samples, GenBank access
         ▼
    SingerSnakemake_Input/chrN.{vcf.gz,tbi,filter.txt,meta.csv,mask.bed,hapmap,ancestral.fa.gz}
         │
-        │  ── ARG inference ──────────────────────── scripts/run_singer_genome.sbatch
-        │     SINGER + POLEGON via singer-snakemake, one array task per chromosome
+        │  ── ARG inference ──────────────────────── drivers/8_run_singer.sh
+        │     SINGER + POLEGON via singer-snakemake, one SLURM job per rule
         ▼
-   results/singer-snakemake_outputs/chrN/trees/chrN.<rep>.tsz     one per MCMC replicate
+   results/chimp/singer-snakemake_outputs/chrN/trees/chrN.<rep>.tsz   one per MCMC replicate
         │
-        │  ── packaging ─────────────────────────────── scripts/extract_chunks.sh
+        │  ── packaging ─────────────────────────────── drivers/9_extract_chunks.sh
         │     take the final replicate, re-split into per-chunk tree sequences
         ▼
-   results/ts_chunks/chrN_<start>_<end>.trees                     flat, what CoaSTT reads
+   results/chimp/ts_chunks/chrN_<start>_<end>.trees               flat, what CoaSTT reads
 ```
 
 Built separately, once per chromosome, and symlinked in:
@@ -255,7 +296,7 @@ matters more there than this metric can see.
 
 ## What is verified
 
-`sbatch scripts/verify_all.sbatch` runs 14 checks per chromosome. **All 23 currently pass.**
+`bash drivers/7_verify.sh` runs 14 checks per chromosome. **All 23 currently pass.**
 Each covers a failure that is otherwise silent or surfaces only hours into a SINGER run:
 
 - hapmap length == ancestral FASTA length == `chrom.sizes`, **exactly** — the workflow asserts
@@ -318,67 +359,77 @@ Each of these fails silently. Most were found the hard way.
 ## Running SINGER, and what comes out
 
 ```bash
-sbatch scripts/run_singer_genome.sbatch
+bash drivers/8_run_singer.sh
 ```
 
-**Submit the array; do not run `snakemake` directly.** One snakemake over all 23 chromosomes
-serialises them, and 23 concurrent snakemakes in one directory race on `.snakemake/iocache`
-even with `--nolock`. The array solves both: one task per chromosome, each with its own
-symlink-farm workdir under `runs/work/<chrom>/` pointing back at the shared clone, and a
-per-chromosome config generated by `sed` from `singer_config.yaml`.
+This launches a detached snakemake that submits **one SLURM job per rule** and returns
+immediately. Scientific parameters come from `drivers/singer_config.yaml`; cluster settings
+from `drivers/slurm_jnovembre.config` (the default) or `drivers/slurm_caslake.config`.
 
 `singer_config.yaml` sets `mutation-rate: 1.2e-8` (chimpanzee trio-derived, not the human
 value), `stratify-by: subspecies`, and keeps unpolarised sites. The MCMC budget is
 `singer-mcmc-samples: 16` with `singer-mcmc-thin: 100` and `singer-mcmc-resumes: 1000`
 -- 1,600 iterations per chunk.
 
+Run state goes to a scratch workdir **outside the repo** (`$SCRATCH/singer_work/chimp`).
+That state is disposable: which chunks are finished is recorded by the `.singer.done`
+sentinels under `results/`, not by the workdir, so deleting it loses no completed work and a
+restart picks up where the last one stopped.
+
 A short test run is worth doing first:
 
 ```bash
-sbatch scripts/run_singer_smoke.sbatch    # chr21 only, cut MCMC budget, ~30 min
+bash drivers/8_run_singer.sh --pilot --chrom chr21
 ```
 
-`singer_config_smoke.yaml` is the same config restricted to chr21 with the budget cut (10
-samples, thin 10, 20 resumes) and smaller chunks, so it exercises the whole pipeline quickly.
+`--pilot` cuts the number of MCMC samples but keeps the shared thinning interval, so a pilot
+draw comes from the same chain behaviour as a production one rather than a different regime.
 
-### Sizing the run, and the memory trap in it
+### Why one job per rule, and not an sbatch array
+
+The first genome-wide run used a 23-task array with a flat `--mem=56G`, which forced every
+rule to share one memory number. That number was sized from `run_singer`'s per-chunk cost
+(2.4-4.5 GB) and did not cover `merge_chunks`, whose peak scales with **total chromosome
+size** rather than chunk size. Six of 23 chromosomes were OOM-killed there, each after 12-16
+hours of completed inference.
+
+The margin was nil rather than merely tight: **chr2B survived at 57.1 GB while chr5 died at
+56.6 GB**. Same limit, opposite outcomes. The flat number was not separating well-behaved
+chromosomes from badly-behaved ones -- it was a coin flip on which merge jobs happened to be
+in flight when memory ran out.
+
+Per-rule submission fixes this at the root. `merge_chunks` gets its own allocation (72 GB,
+escalating to 112 and 152 on retry) without inflating the ~958 `run_singer` jobs, and
+`retries: 2` means a chromosome that needs more memory gets it automatically instead of
+failing permanently. The retry is cheap: `merge_chunks` is parameterised per replicate and
+the SINGER output it consumes survives on disk, so a re-run redoes minutes of merging rather
+than the hours of inference behind it.
+
+### Timing
 
 Timing is **not linear in the MCMC budget**: there is a fixed setup cost of about 7.7 minutes
 per chunk before the first iteration, then ~7.2 s/iteration. At 1,600 iterations that is
-~3.3 h per chunk, and the genome is ~958 chunks.
+~3.3 h per chunk, and the genome is ~958 chunks. Expect roughly a day for the whole genome on
+`jnovembre` (192 CPUs, one chunk per core); `slurm_caslake` has 9,120 CPUs and can hold far
+more in flight, at the cost of queueing behind other users.
 
-Task size is a packing problem, not a speed problem. The `jnovembre` partition has a hard
-ceiling of 192 CPUs (3 x 64), and `run_singer` declares no `threads:`, so snakemake runs one
-chunk per core. Smaller tasks pack better:
+### Check the replicates before extracting
 
-| CPUs/task | Concurrent tasks | Makespan |
-|---|---|---|
-| **16** | **12** | **~20 h** |
-| 24 | 8 | 23 h |
-| 48 | 4 | 27 h |
+An OOM or crash takes out whichever `merge_chunks` jobs were in flight, and those need not be
+the last ones. On the first run **chr8 came back missing replicates 1, 6 and 15 while keeping
+14** -- interior gaps, not a truncation.
 
-16 CPUs/task is the current setting, within 20% of the 16.7 h theoretical floor.
+This matters because step 9 takes the *highest-numbered* replicate per chromosome. A
+chromosome missing its top draw would silently contribute a different, less burnt-in
+posterior sample than its neighbours, and nothing downstream could tell: the file is valid,
+the chunk count is right, and CoaSTT has no way to know one contig came from elsewhere in the
+chain.
 
-**The memory limit is the live problem, and 56 GB is too low.** The `merge_chunks` rule --
-the final step, which merges per-chunk output into one tree sequence per replicate -- peaks
-far higher than SINGER itself. Its footprint scales with **total chromosome size**, not with
-per-chunk size, so the 56 GB figure derived from SINGER's per-chunk cost (2.4-4.5 GB x 16
-concurrent) never covered it. Measured: chr2A **succeeded at 50.9 GB**, 9% under the limit;
-chr8, chr10 and chr11 were OOM-killed at ~57 GB.
-
-An OOM here is recoverable and cheap, because `merge_chunks` is parameterised per replicate
-(`{chrom}.{rep}.tsz`) -- one independent job per draw. SINGER and POLEGON outputs survive on
-disk, so a rerun redoes only the missing replicates, in minutes rather than the ~12 h of
-inference. Raise `--mem` and resubmit; snakemake skips everything already done.
-
-**Check for interior gaps before extracting.** A kill takes out whichever merge jobs were in
-flight, which need not be the last ones: chr8 came back missing replicates 1, 6 and 15 while
-keeping 14. Step 9 takes the *highest-numbered* replicate per chromosome, so a chromosome
-missing its top draw silently contributes a different, less burnt-in draw than its neighbours.
-List what is present before packaging:
+Step 9 refuses to build a mixed-replicate dataset and names the chromosomes to re-merge, so
+this cannot pass silently. To inspect by hand:
 
 ```bash
-for c in results/singer-snakemake_outputs/*/; do
+for c in results/chimp/singer-snakemake_outputs/*/; do
   echo "$(basename $c): $(ls $c/trees/*.tsz 2>/dev/null | sed 's/.*\.\([0-9]*\)\.tsz/\1/' | sort -n | tr '\n' ' ')"
 done
 ```
@@ -386,7 +437,7 @@ done
 Results land in two directories, with different consumers:
 
 ```
-results/
+results/chimp/
   singer-snakemake_outputs/       <- singer-snakemake writes here
     chr1/  chr2A/  ...  chr22/       trees/ plots/ stats/ chunks/ per chromosome
   ts_chunks/                      <- CoaSTT reads here
@@ -394,6 +445,9 @@ results/
     chr2A_2952691_5905382.trees
     ...
 ```
+
+`results/chimp/` is named for the sample set, matching `data/human_data/results/<SET>/`. The
+chimpanzee panel is a single set, so there is one such directory; the human side has eight.
 
 `singer-snakemake_outputs/` holds the full per-chromosome output: one tree sequence per MCMC
 replicate, diagnostic plots, and the per-chunk intermediates.
@@ -403,13 +457,12 @@ directory, no subdirectories — because `CountCoalEvents` globs `*.trees` and t
 filename into a contig id. Build it with:
 
 ```bash
-bash scripts/extract_chunks.sh                      # the production run
-bash scripts/extract_chunks.sh results/chr21_smoke  # or any other output tree
+bash drivers/9_extract_chunks.sh               # the production run
+bash drivers/9_extract_chunks.sh chimp_pilot   # a pilot run, or any other results/<name>
 ```
 
-It accepts either the singer output directory itself or the run root containing it, so both
-forms above work. Run it only once every chromosome has its final replicate -- see the gap
-check in [Sizing the run](#sizing-the-run-and-the-memory-trap-in-it).
+It refuses to run if the chromosomes disagree on which replicate is their latest -- see
+[Check the replicates before extracting](#check-the-replicates-before-extracting).
 
 Three details in that step are easy to get wrong, and the shared implementation
 (`../human_data/scripts/extract_ts_chunks.py`, used here rather than duplicated) handles them:

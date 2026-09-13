@@ -97,22 +97,24 @@ data/human_data/.scratch/
 !data/human_data/drivers/*.config
 
 # Chimpanzee data preparation (data/chimp_data/). Same shape as the human block above:
-# everything derived or downloaded is ignored, and only the documentation and the scripts
-# that rebuild it are tracked. resources/vcf/ holds a ~28 GB copy of the raw callset.
+# everything derived or downloaded is ignored, and only the documentation and the drivers
+# that rebuild it are tracked. resources/vcf/ holds a ~28 GB copy of the raw callset, and
+# intermediates/ another ~46 GB of per-chromosome working files.
 data/chimp_data/resources/
-data/chimp_data/work/
+data/chimp_data/intermediates/
 data/chimp_data/SingerSnakemake_Input/
 data/chimp_data/results/
 data/chimp_data/logs/
+# Legacy: the first genome-wide run's per-chromosome snakemake workdirs. Superseded by a
+# scratch workdir outside the repo; drivers/0_cleanup_legacy.sh removes the directory.
+data/chimp_data/runs/
 
-# Per-chromosome snakemake workdirs (symlink farms + a generated config). Same reasoning as
-# the human runs/work/ rule above: regenerable state, and the symlinks are absolute paths.
-data/chimp_data/runs/work/
-
-# Tracked despite the blanket rules above.
+# Tracked despite the blanket rules above. drivers/ is the reproduction path -- the numbered
+# wrappers, the two SLURM profiles, singer_config.yaml and prep.yaml -- so all of it is kept.
+# The profiles are .config rather than .yaml so the blanket rules leave them alone.
 !data/chimp_data/README.md
-!data/chimp_data/prep.yaml
-!data/chimp_data/singer_config.yaml
+!data/chimp_data/drivers/
+!data/chimp_data/drivers/**
 
 # ---------------------------------------------------------------------------
 # Scratch, tests, local-only data
