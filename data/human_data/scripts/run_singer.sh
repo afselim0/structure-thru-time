@@ -7,6 +7,10 @@
 #   bash scripts/run_singer.sh --chrom chr22 OCEANIA              # one set
 #   bash scripts/run_singer.sh OCEANIA                            # one set, all chromosomes
 #   bash scripts/run_singer.sh --pilot --chrom chr22 OCEANIA      # reduced MCMC, for smoke tests
+#   bash scripts/run_singer.sh -n --chrom chr22 OCEANIA           # dry run: show the plan only
+#
+# A real launch detaches and returns immediately; -n stays in the foreground, prints the job
+# plan and submits nothing. Use it to check paths and see how much work is outstanding.
 #
 # ALL scientific parameters come from drivers/singer_config.yaml. This script overrides only
 # the keys that identify a run -- input-dir, output-dir, chromosomes -- plus the two documented
@@ -49,6 +53,7 @@ export PYTHONPATH="${ROOT}/scripts:${PYTHONPATH:-}"
 
 CHROM=""
 PILOT=0
+DRYRUN=0
 # Cluster config, by basename of a drivers/<name>.config file:
 #   slurm_jnovembre = the dedicated jnovembre partition (192 CPUs, 48 h QOS ceiling).
 #   slurm_caslake   = the shared partition: 9120 CPUs, 36 h QOS ceiling, but jobs queue behind
@@ -65,6 +70,7 @@ while [[ $# -gt 0 ]]; do
         --chrom) CHROM=$2; shift 2 ;;
         --config) CLUSTER_CONFIG=$2; shift 2 ;;
         --pilot) PILOT=1; shift ;;
+        -n|--dry-run) DRYRUN=1; shift ;;
         -*) echo "unknown flag: $1" >&2; exit 1 ;;
         *) SETS+=("$1"); shift ;;
     esac
@@ -84,7 +90,7 @@ CLUSTER_FILE="${CLUSTER_FILE%.config}.config"
 # directory per cluster is a poor fit for a drivers/ folder meant to be read at a glance. Stage
 # the chosen flat .config into a throwaway profile directory instead; the contents are byte for
 # byte what snakemake would have read from a committed profile folder.
-PROFILE_DIR="$(mktemp -d)"
+PROFILE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/singer_profile.XXXXXXXX")"
 trap 'rm -rf "$PROFILE_DIR"' EXIT
 cp "$CLUSTER_FILE" "${PROFILE_DIR}/config.yaml"
 
@@ -120,6 +126,20 @@ for s in "${SETS[@]}"; do
 
     overrides+=("${PILOT_OVERRIDES[@]}")
 
+    # --dry-run stays in the FOREGROUND and submits nothing: the point is to see the plan.
+    # Running it detached like a real launch would defeat that.
+    if [[ $DRYRUN -eq 1 ]]; then
+        echo "[${name}] dry run (workdir ${work}, cluster config ${CLUSTER_CONFIG})"
+        snakemake \
+            --snakefile "${SINGER}/workflow/Snakefile" \
+            --configfile "${DRIVERS}/singer_config.yaml" \
+            --config "${overrides[@]}" \
+            --directory "$work" \
+            --profile "$PROFILE_DIR" \
+            -n
+        continue
+    fi
+
     log="${ROOT}/logs/${name}.snakemake.log"
     echo "[${name}] launching (workdir ${work}, cluster config ${CLUSTER_CONFIG})"
     # setsid + disown: without them the driver is a grandchild of the invoking shell and gets
@@ -136,6 +156,12 @@ for s in "${SETS[@]}"; do
     # Stagger: simultaneous starts contend on the shared conda prefix and the submit host.
     sleep 20
 done
+
+if [[ $DRYRUN -eq 1 ]]; then
+    echo
+    echo "Dry run only -- nothing was submitted."
+    exit 0
+fi
 
 # The staged profile must outlive this script: the drivers keep running after it exits and
 # snakemake re-reads the profile in each submitted job.

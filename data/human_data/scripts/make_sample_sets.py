@@ -7,9 +7,12 @@ geographically even subsample: the 4 highest-coverage samples from each of the 5
 
 Per-population caps (REGION_CAPS below):
 
-    MIDDLE_EAST           25 per population    161 -> 98
+    MIDDLE_EAST           25 per population    161 -> 100
     CENTRAL_SOUTH_ASIA    15 per population    197 -> 130
-    EAST_ASIA             10 per population    223 -> 158
+    EAST_ASIA             10 per population    223 -> 168
+
+Resulting set sizes: AFRICA 104, ALL 216, AMERICA 61, CENTRAL_SOUTH_ASIA 130, EAST_ASIA 168,
+EUROPE 155, MIDDLE_EAST 100, OCEANIA 28.
 
 AFRICA, EUROPE, OCEANIA and AMERICA are uncapped; their populations are small enough already.
 A cap only ever removes samples, so a population already at or below its cap is untouched --
