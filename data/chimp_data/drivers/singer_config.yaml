@@ -47,14 +47,37 @@ max-masked-samples: 0
 
 # --- SINGER options ---
 #
-# 5,000 MCMC iterations: thin 50 x 100 samples. SINGER's supplementary figure 10 puts the
-# burn-in requirement at roughly 4,000 iterations, so `singer-mcmc-burnin: 0.8` discards the
-# first 80 draws and keeps the last 20 -- draws 80-99, i.e. iterations 4,050-5,000.
+# 5,000 MCMC iterations: thin 250 x 20 samples. SINGER's supplementary figure 10 puts the
+# burn-in requirement at roughly 4,000 iterations, so the draw CoaSTT consumes -- the last one,
+# at iteration 5,000 -- is comfortably past it.
 #
-# This replaces an earlier thin 100 x 16 setting (1,600 iterations). That run was abandoned
-# after 22 of 23 chromosomes had started: every draw it produced fell inside burn-in, so none
-# of its tree sequences were usable. Matches the human prep exactly -- see
-# ../human_data/drivers/singer_config.yaml, which carries the same reasoning.
+# WHY 20 DRAWS AT THIN 250, NOT 100 AT THIN 50. Both give 5,000 iterations, and
+# extract_ts_chunks.py feeds CoaSTT the HIGHEST draw either way, which sits at iteration 5,000
+# in both. The difference is everything downstream of SINGER, because POLEGON runs once per
+# (chunk, draw) and merge_chunks once per (chromosome, draw). For this panel's 897 chunks:
+#
+#                          n=100/thin50     n=20/thin250
+#     POLEGON jobs            89,700           17,940
+#     merge jobs               2,300              460
+#     snakemake DAG           ~99,900 steps    ~20,000 steps
+#
+# The DAG size is not academic here: at n=100 the driver was OOM-KILLED building the DAG on a
+# midway3 login node (8 GiB cgroup), which is what stranded the first genome-wide run -- its
+# SLURM jobs kept going with nothing left to schedule them. Fewer draws is the fix that
+# addresses the cause rather than the symptom.
+#
+# Draw spacing is also better: 250 iterations apart rather than 50, so retained draws are far
+# less autocorrelated. And nothing is wasted -- at n=100 with burnin 0.8, POLEGON dated 80
+# draws that were then deleted.
+#
+# `singer-mcmc-burnin: 0.6` drops the first 12 draws, so statistics and diagnostic plots are
+# built from draws 12-19 -- iterations 3,250 to 5,000, the converged end of the chain.
+#
+# Note the burn-in fraction affects ONLY those statistics and plots (Snakefile:426,480).
+# merge_chunks writes a tree sequence for every draw regardless, so nothing in the workflow
+# stops a pre-convergence draw reaching CoaSTT. extract_ts_chunks.py enforces that separately,
+# and on chain POSITION rather than draw index: it keeps draws at iteration >= 4,000, i.e.
+# draw 15 onward here, and reads draw 19 (iteration 5,000).
 #
 # Read the two iteration counters in a SINGER log carefully, they mean different things:
 #   * the FIRST `Iteration: N` sequence counts ARG CONSTRUCTION, threading in one haplotype at
@@ -63,25 +86,18 @@ max-masked-samples: 0
 #   * the SECOND sequence, restarting at `Iteration: 0` after `rescaled ARG length`, is one
 #     entry per RETAINED DRAW. That is the MCMC.
 #
-# Cost: the 1,600-iteration run measured ~7.7 min fixed setup per chunk plus ~7.2 s per MCMC
-# iteration. At 5,000 iterations that is ~10.1 h per chunk against the earlier ~3.3 h, so
-# expect roughly 3x the wall time for the same ~958 chunks.
-#
-# CAUTION: `singer-mcmc-burnin` is applied ONLY to statistics and diagnostic plots
-# (Snakefile:426,480). `merge_chunks` uses range(SINGER_MCMC_SAMPLES), so the workflow builds,
-# dates and stores ALL 100 draws, not just the 20 that survive burn-in. Budget disk
-# accordingly -- the abandoned 16-draw run already held 399 GB. scripts/extract_chunks.sh
-# keeps draws 80-99 and drops the rest; do not feed a draw below 80 to CoaSTT.
-singer-mcmc-samples: 100
-singer-mcmc-thin: 50
-singer-mcmc-burnin: 0.8
+# Measured on this panel at 5,000 iterations, n=7,255 completed chunks:
+#     p50 1.3 h | p90 11.5 h | p99 18.3 h per chunk
+singer-mcmc-samples: 20
+singer-mcmc-thin: 250
+singer-mcmc-burnin: 0.6
 singer-mcmc-resumes: 1000
 singer-skip-failures: true
 
 # --- POLEGON options ---
-polegon-mcmc-samples: 16
-polegon-mcmc-thin: 100
-polegon-mcmc-burnin: 0.5
+polegon-mcmc-samples: 20
+polegon-mcmc-thin: 250
+polegon-mcmc-burnin: 0.6
 polegon-scaling-reps: 5
 polegon-max-step: 10.0
 
