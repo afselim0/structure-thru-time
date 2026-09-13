@@ -39,6 +39,17 @@ export PATH="/project/jnovembre/afselim/CoaSTT_env/bin:${PATH}"
 # CoaSTT_env's libstdc++ must lead or numpy fails to import on midway3 compute nodes.
 export LD_LIBRARY_PATH="/project/jnovembre/afselim/CoaSTT_env/lib:${LD_LIBRARY_PATH:-}"
 
+# Guard against a snakemake SLURM-executor bug: one NODE_FAIL makes it cache the literal
+# string "None assigned" as a failed node, after which EVERY submission carries
+# `--exclude=None assigned` and is rejected by SLURM. See scripts/slurm_executor_patch.py.
+# Injected via sitecustomize so it applies to the driver without editing site-packages, which
+# would not survive rebuilding the environment from environment.yml.
+#
+# NOT hypothetical here: the first genome-wide run hit 5 NODE_FAILs and then logged 94,384
+# failed run_polegon submissions, every one "sbatch: error: Unable to open file assigned".
+# POLEGON dating never ran, so merge_chunks could never start.
+export PYTHONPATH="${ROOT}/scripts:${PYTHONPATH:-}"
+
 CHROM=""
 PILOT=0
 DRYRUN=0
