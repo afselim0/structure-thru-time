@@ -2,17 +2,14 @@
 """
 Assemble the final singer-snakemake input directory for one chromosome.
 
-Merges the phased biallelic records back together with the multiallelic records that
-SHAPEIT5 drops. Both are needed and for different reasons:
+The phased VCF is copied straight through. There is no merge-back step: non-biallelic-SNP
+records were removed in step 1 and stay removed, so the file that reaches SINGER is 100%
+biallelic SNPs, every genotype phased, with nothing the workflow has to discard.
 
-  * the phased biallelic records are what SINGER builds haplotypes from;
-  * the multiallelic records must still be PRESENT so the workflow's own filter_biallelic
-    sees them, drops them, and adds them to filtered_positions -- which is what scales
-    adj_mu. Omitting them would inflate the inferred mutation rate by ~8% on chr21 and
-    compress every date.
-
-The multiallelic records keep their unphased genotypes; that is fine, because the workflow
-discards them before any haplotype is built. They exist purely to be counted.
+Their coordinates are not lost -- filter_sites.py wrote them into <chrom>.filter.txt, which
+is what scales adj_mu. That matters more than it looks: the workflow adds multiallelics to
+filtered_positions itself, but only ones it can SEE in the VCF, and it will see none. Listing
+them in filter.txt is what keeps the mutation-rate correction honest.
 """
 import subprocess, sys
 from pathlib import Path
@@ -30,20 +27,17 @@ def main():
     phased   = ROOT / "intermediates" / "phased" / f"{chrom}.vcf.gz"
     out      = IN / f"{chrom}.vcf.gz"
 
-    # Multiallelic records from the site-filtered (unphased) VCF.
-    multi = ROOT / "intermediates" / f"{chrom}.multi.vcf.gz"
-    run(f"bcftools view -m3 {filtered} -Oz -o {multi}")
-    run(f"bcftools index -t {multi}")
-
-    # Concatenate and re-sort: allow-overlaps merges the two coordinate streams.
-    run(f"bcftools concat -a {phased} {multi} -Oz -o {out}")
+    # Straight copy: the phased file already holds every record that should reach SINGER.
+    run(f"bcftools view {phased} -Oz -o {out}")
     run(f"bcftools index -t {out}")
-    multi.unlink(); Path(str(multi) + ".tbi").unlink()
 
     n_ph = int(run(f"bcftools index -n {phased}").strip())
     n_fl = int(run(f"bcftools index -n {filtered}").strip())
     n_out = int(run(f"bcftools index -n {out}").strip())
-    assert n_out == n_fl, f"{chrom}: assembled {n_out} != site-filtered {n_fl}"
+    # Every site-filtered record is biallelic by construction, so phasing must preserve the
+    # count exactly. A mismatch means SHAPEIT5 dropped something, which would be silent.
+    assert n_out == n_ph == n_fl, (
+        f"{chrom}: assembled {n_out}, phased {n_ph}, site-filtered {n_fl} -- all must match")
 
     # meta.csv in VCF order -- the workflow zips by index with no ID matching.
     order = run(f"bcftools query -l {out}").split()
@@ -70,7 +64,7 @@ def main():
             link.unlink()
         link.symlink_to(Path("..") / "resources" / "panTro6" / sub / f"{chrom}.{suffix}")
 
-    print(f"{chrom}: phased {n_ph:,} + multiallelic {n_fl - n_ph:,} = {n_out:,} assembled")
+    print(f"{chrom}: {n_out:,} biallelic phased SNPs assembled")
     return 0
 
 if __name__ == "__main__":

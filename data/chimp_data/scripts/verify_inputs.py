@@ -128,29 +128,31 @@ def verify_vcf(chrom):
     pos = np.array(out, dtype=np.int64)
     check(pos.size == np.unique(pos).size, f"{chrom}: no duplicate VCF positions")
 
+    # Every record must be a biallelic SNP. Non-biallelic records are removed in step 1 and
+    # never reintroduced, so anything here means the filter or the assembly regressed.
+    n_all = int(subprocess.run(["bcftools", "index", "-n", str(path)],
+                               capture_output=True, text=True, check=True).stdout.strip())
+    n_bi = int(subprocess.run(
+        ["bash", "-c", f"bcftools view -H -m2 -M2 -v snps {path} | wc -l"],
+        capture_output=True, text=True, check=True).stdout.strip())
+    check(n_all == n_bi, f"{chrom}: every record is a biallelic SNP",
+          f"{n_all - n_bi:,} of {n_all:,} records are not")
+
     # SINGER consumes HAPLOTYPES. An unphased input is the one error here that is both fatal
     # to the analysis and invisible to every structural check: the file has the right length,
     # positions and samples, and is simply wrong.
     #
     # Not hypothetical -- it shipped. chr21 once passed 13/13 while carrying 91.79% unphased
-    # genotypes, because the phased VCF existed in intermediates/phased/ but was never promoted into
-    # the input directory.
-    #
-    # The test is restricted to BIALLELIC records. Multiallelic records are deliberately
-    # carried through unphased: SHAPEIT5 drops them, and they are merged back only so the
-    # workflow's filter_biallelic can count them into filtered_positions (which scales
-    # adj_mu). They are discarded before any haplotype is built, so their phase is irrelevant
-    # -- and requiring it would fail every correctly-built chromosome.
-    gts = subprocess.run(
-        ["bash", "-c",
-         f"bcftools view -m2 -M2 {path} -Ou | bcftools query -f '[%GT\n]'"],
-        capture_output=True, text=True, check=True).stdout.split()
+    # genotypes, because the phased VCF existed in intermediates/phased/ but was never
+    # promoted into the input directory.
+    gts = subprocess.run(["bcftools", "query", "-f", "[%GT\n]", str(path)],
+                         capture_output=True, text=True, check=True).stdout.split()
     sample = gts[:500_000]
     unphased = sum(1 for g in sample if "/" in g)
     check(unphased == 0,
-          f"{chrom}: all biallelic genotypes phased (must be the SHAPEIT5 output, not the "
+          f"{chrom}: all genotypes phased (must be the SHAPEIT5 output, not the "
           f"pre-phase subset)",
-          f"{unphased:,} of {len(sample):,} sampled biallelic genotypes contain '/'")
+          f"{unphased:,} of {len(sample):,} sampled genotypes contain '/'")
 
     meta = ROOT / "SingerSnakemake_Input" / f"{chrom}.meta.csv"
     if meta.exists():

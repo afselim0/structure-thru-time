@@ -2,13 +2,24 @@
 """
 Build the accessibility mask for one chromosome: INACCESSIBLE intervals.
 
-Union of three signals:
-  * genmap mappability < 1.0 at k=36, e=0 -- the operational criterion (can a read be
-    placed uniquely?), not repeat annotation. RepeatMasker is deliberately excluded: it
-    covers ~87% of the assembly, and most Alu/MIR/L2 sequence is uniquely mappable.
-  * assembly gaps (UCSC gap track, keyed by RefSeq accession)
-  * excess heterozygosity WITHIN subspecies, padded +/-50 bp. Never pooled: the panel is
-    structured, and pooling produces heterozygote deficit by the Wahlund effect.
+Union of two signals:
+  * genmap mappability < 1.0 at k=36, e=0 -- the operational criterion (can a read be placed
+    uniquely?), not repeat annotation. genmap emits 1/(occurrence count), so `< 1.0` means
+    "this 36-mer occurs more than once anywhere in the assembly": the strictest available
+    criterion. k=36 e=0 was chosen by sweep -- k=100 e=2 left 97.85% accessible with a
+    degenerate distribution no threshold could rescue, k=50 e=0 gave 97.29%, k=36 e=0 gives
+    94.97%. Among tracks that say roughly the same thing, prefer the one that errs toward
+    exclusion.
+  * assembly gaps (UCSC gap track, keyed by RefSeq accession).
+
+RepeatMasker is deliberately excluded: it covers 86.81% of chr21, and most Alu/MIR/L2
+sequence is uniquely mappable and perfectly callable. Unique 36-mers are the operational
+criterion. (The gap track adds 0 bp on top of mappability -- runs of N have no unique k-mers
+-- which is the same point in miniature.)
+
+Excess heterozygosity was REMOVED from this mask. It needed >= 4 called samples within a
+subspecies to test, and the panel is too small per subspecies for that to be reliable
+(ellioti n=5). A test that thin produces noise, not paralogue evidence.
 
 Missingness is deliberately NOT included: the workflow strips inaccessible positions out of
 filtered_positions, so masking a missing-genotype site would remove it from the mutation-rate
@@ -19,7 +30,6 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-PAD = 50
 
 def main():
     chrom = sys.argv[1]
@@ -52,14 +62,6 @@ def main():
             a, b = int(p[1]), min(int(p[2]), L)
             inacc[a:b] = True
             ng += b - a
-    # 3. excess heterozygosity within subspecies
-    flags = ROOT/"intermediates"/f"{chrom}_het_flags.npy"
-    nh = 0
-    if flags.exists():
-        for p in np.load(flags):
-            inacc[max(0, p-1-PAD):min(L, p+PAD)] = True
-        nh = len(np.load(flags))
-
     out = ROOT/"resources/panTro6/mask"/f"{chrom}.mask.bed"
     out.parent.mkdir(parents=True, exist_ok=True)
     d = np.diff(inacc.astype(np.int8))
@@ -71,7 +73,7 @@ def main():
         for a, b in zip(starts, ends):
             fh.write(f"{chrom}\t{a}\t{b}\n")
     tot = int(inacc.sum())
-    print(f"{chrom}: mappability {nm:,}  gaps {ng:,}  het-sites {nh:,}  "
+    print(f"{chrom}: mappability {nm:,}  gaps {ng:,}  "
           f"-> inaccessible {tot:,} ({100*tot/L:.2f}%)  accessible {100*(L-tot)/L:.2f}%  "
           f"{len(starts):,} intervals")
 

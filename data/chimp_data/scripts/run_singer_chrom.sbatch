@@ -17,16 +17,25 @@
 # 75 chunks, so a 48-core node keeps every core busy without the chunk count wildly exceeding
 # what one job can drain.
 #
-# Resources are sized from measurement, not assumption:
-#   * run_singer   p50 1.3 h, p90 11.5 h, p99 18.3 h per chunk (n=7,255 completed)
-#   * memory       2.4-4.5 GB per concurrent chunk; 48 x 4.5 GB would exceed a node, so
-#                  --cores is what bounds concurrency and 180 GB is the node's ceiling anyway
-#   * walltime     chr1's 75 chunks over 48 cores is ~2 sequential rounds; at p90 that is
-#                  ~23 h, and the caslake QOS ceiling is 36 h
+# Resources: a WHOLE jnovembre node per chromosome. 64 cores, 252 GB -- about 3.93 GB per
+# core, which is the budget each single-threaded SINGER process gets when all 64 run at once.
+#
+# SINGER is single-threaded and no rule in the workflow declares `threads:`, so one core per
+# chunk is the natural unit and --cores 64 keeps every core busy. Reserving the whole node
+# (--exclusive) rather than 64 shared cores matters because the memory budget above assumes
+# the full 252 GB is ours.
+#
+# Measured at 3 Mb chunks, n=2,580: memory p50 0.67 GB, p99 3.25 GB, MAX 4.00 GB -- the worst
+# case exceeded a core's 3.93 GB share, which is why chunks are now 2 Mb (see the note in
+# drivers/singer_config.yaml). Runtime p50 0.94 h, p90 9.95 h, max 19.81 h; a node's job ends
+# when its SLOWEST chunk does, so 35 h covers the tail with room after the 2 Mb reduction.
 #SBATCH --job-name=chimp_singer
 #SBATCH --account=pi-jnovembre
-#SBATCH --cpus-per-task=48
-#SBATCH --mem=180G
+#SBATCH --partition=jnovembre
+#SBATCH --nodes=1
+#SBATCH --exclusive
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=0
 #SBATCH --time=35:00:00
 #SBATCH --output=logs/chimp_singer-%x-%j.out
 set -euo pipefail

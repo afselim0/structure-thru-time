@@ -37,7 +37,21 @@ stratify-by: "subspecies"
 random-seed: 1
 
 # --- discretization options ---
-max-chunk-size: 3.0e6
+#
+# 2 Mb chunks, matching the human prep. SINGER's cost is roughly linear in chunk LENGTH, in
+# both memory and time, and at 3 Mb the measured peak was 4.00 GB (n=2,580 completed chunks)
+# against a jnovembre core's 3.93 GB share -- the worst case slightly EXCEEDED its budget, so
+# a node running 64 chunks at once had no margin. Halving the chunk roughly halves the peak.
+#
+# It also compresses the runtime tail, which is what actually sets the makespan. Measured at
+# 3 Mb: p50 0.94 h but p90 9.95 h and max 19.81 h, and the slowest 10% of chunks consumed 46%
+# of all CPU-hours. A node's job finishes when its SLOWEST chunk does, not its average, so
+# shortening that tail matters more than the median.
+#
+# Cost: ~897 chunks becomes ~1,800, and more chunk boundaries for merge_chunks to stitch
+# across. `min-sites: 1500` is also marginally harder to clear in a shorter chunk, so expect a
+# few more skipped at chromosome ends.
+max-chunk-size: 2.0e6
 min-chunk-size: 0.5e6
 min-gap-size: 1.0e6
 max-missing: 0.75
