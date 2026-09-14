@@ -16,10 +16,9 @@
 # scheduler overhead exceeds the compute, and throughput is bound by the submission rate
 # rather than by CPUs (measured: ~3,700 jobs/h, ~32 h wall clock for ~4 h of work).
 #
-# So each chromosome gets a WHOLE node (--exclusive) and snakemake schedules its own rules
-# inside it with `--cores all` and no executor. 23 jobs instead of ~20,000. SINGER is
-# single-threaded, so one core per chunk means a node's worth of chunks in parallel per
-# chromosome: 48 on caslake, 64 on jnovembre.
+# So each chromosome gets one 16-CPU job and snakemake schedules its own rules inside it as
+# local subprocesses, with no executor. 23 jobs instead of ~20,000. SINGER is single-threaded,
+# so one core per chunk means 16 chunks in parallel per chromosome.
 #
 # Produces:
 #   results/chimp/singer-snakemake_outputs/<chrom>/   the workflow's own output tree

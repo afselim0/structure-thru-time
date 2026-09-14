@@ -8,9 +8,8 @@
 #
 # Needs step 7. Writes results/chimp/singer-snakemake_outputs/<chrom>/trees/<chrom>.<rep>.tsz
 #
-# Submits ONE whole-node SLURM job per chromosome (caslake: 48 cores, 180 GB, exclusive)
-# and returns immediately. Each job runs the whole workflow for its chromosome with
-# `snakemake --cores all` and no executor, which is how
+# Submits ONE 16-CPU SLURM job per chromosome and returns immediately. Each job runs the
+# whole workflow for its chromosome with `snakemake --cores 16` and no executor, which is how
 # singer-snakemake is designed to be run -- see the note in scripts/run_singer.sh for why
 # per-rule SLURM submission is the wrong granularity for `run_polegon` (17,940 jobs of a few
 # seconds each).

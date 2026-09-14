@@ -17,29 +17,40 @@
 # 75 chunks, so a 48-core node keeps every core busy without the chunk count wildly exceeding
 # what one job can drain.
 #
-# Resources: a WHOLE node per chromosome, reserved exclusively.
+# Resources: 16 CPUs on ONE node, sharing the node with other jobs.
 #
 # SINGER is single-threaded and no rule in the workflow declares `threads:`, so one core per
-# chunk is the natural unit and `--cores all` keeps every core on the node busy. Reserving the
-# node exclusively matters because the memory budget is the node's, not a share of it:
-#   caslake    48 cores / 180 GB -> 3.75 GB per concurrent chunk
-#   jnovembre  64 cores / 252 GB -> 3.93 GB per concurrent chunk
+# chunk is the natural unit: snakemake runs 16 chunks in parallel per chromosome, 23
+# chromosomes at once.
 #
-# Measured at 3 Mb chunks (n=2,580 completed): memory p50 0.67 GB, p99 3.25 GB, MAX 4.00 GB --
-# the worst case exceeded a core's share, which is why chunks are now 2 Mb (see the note in
-# drivers/singer_config.yaml). Runtime at 3 Mb was p50 0.94 h, p90 9.95 h, max 19.81 h, and a
-# node's job ends when its SLOWEST chunk does, so the tail is what the walltime must cover.
+# --cores takes $SLURM_CPUS_PER_TASK, NOT `all`. On a shared node `all` resolves to the
+# node's physical core count (48 on caslake), not the 16 CPUs this job was allocated, so
+# snakemake would start 48 chunks inside a 16-CPU cgroup -- 3x oversubscribed, every chunk
+# slower, and peak memory sized for 48 concurrent chunks rather than 16.
 #
-# 35 h sits just under the caslake QOS ceiling of 1-12:00:00 (36 h); a request AT the ceiling
-# is rejected rather than truncated. jnovembre's 48 h QOS leaves more room.
+# --nodes=1 with --ntasks=1 keeps all 16 CPUs on a single node. Snakemake schedules its rules
+# as local subprocesses, so a split allocation across two nodes would leave half the cores
+# unreachable.
+#
+# Not --exclusive: 16 of a caslake node's 48 cores, so three chromosomes can share a node and
+# the jobs backfill into partial nodes instead of waiting for whole ones. Memory comes from
+# SLURM's per-CPU default for the partition rather than being requested explicitly.
+#
+# Walltime: 20 h. Measured at 3 Mb chunks (n=2,580) the per-chunk runtime was p50 0.94 h,
+# p90 9.95 h, max 19.81 h; chunks are now 2 Mb, and cost is roughly linear in chunk length,
+# so that tail should compress. A job ends when its SLOWEST chunk does.
+#
+# A walltime kill loses the whole chunk rather than retrying, so if chromosomes start hitting
+# this, raise it rather than letting them die -- the caslake QOS allows up to 1-12:00:00
+# (36 h), though a request AT the ceiling is rejected rather than truncated.
 #SBATCH --job-name=chimp_singer
 #SBATCH --account=pi-jnovembre
 #SBATCH --partition=caslake
 #SBATCH --qos=caslake
 #SBATCH --nodes=1
-#SBATCH --exclusive
-#SBATCH --mem=0
-#SBATCH --time=35:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=20:00:00
 #SBATCH --output=logs/chimp_singer-%x-%j.out
 set -euo pipefail
 export PATH="/project/jnovembre/afselim/CoaSTT_env/bin:$PATH"
@@ -51,7 +62,7 @@ SINGER="${ROOT}/../singer-snakemake"
 WORK="$3"
 
 mkdir -p "$WORK"
-echo "START ${CHROM} $(date -Is) on $(hostname) with $(nproc) cores"
+echo "START ${CHROM} $(date -Is) on $(hostname) with ${SLURM_CPUS_PER_TASK} cores"
 
 # No --profile and no --executor: snakemake runs every rule as a local subprocess, scheduling
 # them across --cores. This is the point of the whole arrangement.
@@ -62,7 +73,7 @@ snakemake \
              output-dir="${ROOT}/results/chimp/singer-snakemake_outputs" \
              chromosomes="[\"${CHROM}\"]" \
     --directory "$WORK" \
-    --cores all \
+    --cores "$SLURM_CPUS_PER_TASK" \
     --rerun-incomplete \
     --nolock
 
