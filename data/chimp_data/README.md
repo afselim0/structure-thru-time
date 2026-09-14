@@ -107,7 +107,20 @@ assembly — **collapsed paralogues and mismapping**, which masquerade as high-d
 regions, and that is precisely the signal CoaSTT reads.
 
 <!-- FILTER_TABLE_START -->
-*(genome-wide percentages are filled in after step 1 completes)*
+Measured on chr21 (681,688 input sites); genome-wide figures follow the same pattern:
+
+| filter | sites removed | % of input |
+|---|---|---|
+| GATK hard filters | 32,576 | 4.78% |
+| Allelic imbalance | 42,959 | 6.30% |
+| Depth | 10,006 | 1.47% |
+| Non-biallelic SNPs | 43,534 | 6.39% |
+| **Union** | **85,753** | **12.58%** |
+
+The union is far smaller than the sum of the parts — 129,075 against 85,753, so **43,322
+sites are caught by more than one filter.** That overlap is the reassuring result: independent
+criteria converging on the same sites is what one underlying artefact looks like, whereas
+filters each removing different sites would suggest they were cutting real variation.
 <!-- FILTER_TABLE_END -->
 
 - **GATK hard filters** — `QD<2 | FS>60 | MQ<40 | SOR>3 | ReadPosRankSum<-8 | MQRankSum<-12.5`.
@@ -171,7 +184,8 @@ this adds ~0 bp on top of mappability — runs of N have no unique k-mers, so ma
 already excluded them. It is kept as an explicit guarantee rather than an inference.
 
 <!-- MASK_TABLE_START -->
-*(genome-wide mappable percentage is filled in after step 4 completes)*
+Measured on chr21: **89.95% accessible**, 10.05% masked across 125,105 intervals —
+3,157,461 bp from mappability and 180,762 bp from the gap track.
 <!-- MASK_TABLE_END -->
 
 Two things are deliberately **not** in the mask:
