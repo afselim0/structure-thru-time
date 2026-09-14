@@ -17,24 +17,27 @@
 # 75 chunks, so a 48-core node keeps every core busy without the chunk count wildly exceeding
 # what one job can drain.
 #
-# Resources: a WHOLE jnovembre node per chromosome. 64 cores, 252 GB -- about 3.93 GB per
-# core, which is the budget each single-threaded SINGER process gets when all 64 run at once.
+# Resources: a WHOLE node per chromosome, reserved exclusively.
 #
 # SINGER is single-threaded and no rule in the workflow declares `threads:`, so one core per
-# chunk is the natural unit and --cores 64 keeps every core busy. Reserving the whole node
-# (--exclusive) rather than 64 shared cores matters because the memory budget above assumes
-# the full 252 GB is ours.
+# chunk is the natural unit and `--cores all` keeps every core on the node busy. Reserving the
+# node exclusively matters because the memory budget is the node's, not a share of it:
+#   caslake    48 cores / 180 GB -> 3.75 GB per concurrent chunk
+#   jnovembre  64 cores / 252 GB -> 3.93 GB per concurrent chunk
 #
-# Measured at 3 Mb chunks, n=2,580: memory p50 0.67 GB, p99 3.25 GB, MAX 4.00 GB -- the worst
-# case exceeded a core's 3.93 GB share, which is why chunks are now 2 Mb (see the note in
-# drivers/singer_config.yaml). Runtime p50 0.94 h, p90 9.95 h, max 19.81 h; a node's job ends
-# when its SLOWEST chunk does, so 35 h covers the tail with room after the 2 Mb reduction.
+# Measured at 3 Mb chunks (n=2,580 completed): memory p50 0.67 GB, p99 3.25 GB, MAX 4.00 GB --
+# the worst case exceeded a core's share, which is why chunks are now 2 Mb (see the note in
+# drivers/singer_config.yaml). Runtime at 3 Mb was p50 0.94 h, p90 9.95 h, max 19.81 h, and a
+# node's job ends when its SLOWEST chunk does, so the tail is what the walltime must cover.
+#
+# 35 h sits just under the caslake QOS ceiling of 1-12:00:00 (36 h); a request AT the ceiling
+# is rejected rather than truncated. jnovembre's 48 h QOS leaves more room.
 #SBATCH --job-name=chimp_singer
 #SBATCH --account=pi-jnovembre
-#SBATCH --partition=jnovembre
+#SBATCH --partition=caslake
+#SBATCH --qos=caslake
 #SBATCH --nodes=1
 #SBATCH --exclusive
-#SBATCH --cpus-per-task=64
 #SBATCH --mem=0
 #SBATCH --time=35:00:00
 #SBATCH --output=logs/chimp_singer-%x-%j.out
@@ -48,7 +51,7 @@ SINGER="${ROOT}/../singer-snakemake"
 WORK="$3"
 
 mkdir -p "$WORK"
-echo "START ${CHROM} $(date -Is) on $(hostname) with ${SLURM_CPUS_PER_TASK} cores"
+echo "START ${CHROM} $(date -Is) on $(hostname) with $(nproc) cores"
 
 # No --profile and no --executor: snakemake runs every rule as a local subprocess, scheduling
 # them across --cores. This is the point of the whole arrangement.
@@ -59,7 +62,7 @@ snakemake \
              output-dir="${ROOT}/results/chimp/singer-snakemake_outputs" \
              chromosomes="[\"${CHROM}\"]" \
     --directory "$WORK" \
-    --cores "$SLURM_CPUS_PER_TASK" \
+    --cores all \
     --rerun-incomplete \
     --nolock
 

@@ -3,7 +3,7 @@
 #
 #   bash scripts/run_singer.sh                          # all 23 autosomes
 #   bash scripts/run_singer.sh --chrom chr21            # one chromosome
-#   bash scripts/run_singer.sh --partition caslake      # shared partition instead of jnovembre
+#   bash scripts/run_singer.sh --partition jnovembre    # dedicated partition instead of caslake
 #   bash scripts/run_singer.sh -n                       # dry run: show what would be submitted
 #
 # WHY ONE JOB PER CHROMOSOME, rather than letting snakemake submit each rule as its own job.
@@ -16,9 +16,10 @@
 # scheduler overhead exceeds the compute, and throughput is bound by the submission rate
 # rather than by CPUs (measured: ~3,700 jobs/h, ~32 h wall clock for ~4 h of work).
 #
-# So each chromosome gets a WHOLE jnovembre node (64 cores, 252 GB, --exclusive) and snakemake
-# schedules its own rules inside it with no executor. 23 jobs instead of ~20,000. SINGER is
-# single-threaded, so one core per chunk means 64 chunks running in parallel per chromosome.
+# So each chromosome gets a WHOLE node (--exclusive) and snakemake schedules its own rules
+# inside it with `--cores all` and no executor. 23 jobs instead of ~20,000. SINGER is
+# single-threaded, so one core per chunk means a node's worth of chunks in parallel per
+# chromosome: 48 on caslake, 64 on jnovembre.
 #
 # Produces:
 #   results/chimp/singer-snakemake_outputs/<chrom>/   the workflow's own output tree
@@ -34,7 +35,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CHROM=""
 DRYRUN=0
-PARTITION="jnovembre"
+PARTITION="caslake"
 # $SCRATCH on midway3 is the SHARED root (/scratch/midway3), not a per-user directory, so the
 # user component has to be appended explicitly.
 WORKDIR_ROOT="${WORKDIR_ROOT:-${SCRATCH:-/tmp}/${USER}/singer_work}"

@@ -49,13 +49,13 @@ random-seed: 1
 # shortening that tail matters more than the median.
 #
 # Cost: ~897 chunks becomes ~1,800, and more chunk boundaries for merge_chunks to stitch
-# across. `min-sites: 1500` is also marginally harder to clear in a shorter chunk, so expect a
+# across. `min-sites: 1000` is also marginally harder to clear in a shorter chunk, so expect a
 # few more skipped at chromosome ends.
 max-chunk-size: 2.0e6
 min-chunk-size: 0.5e6
 min-gap-size: 1.0e6
-max-missing: 0.75
-min-sites: 1500
+max-missing: 0.5
+min-sites: 1000
 min-branch-length: 1.0e-7
 max-masked-samples: 0
 
