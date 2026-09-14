@@ -50,10 +50,11 @@ def is_valid_counts_file(path: str, expected_shape: tuple[int, int]) -> bool:
     ----------
     path : str
         Path to the ``.npy`` counts file.
-    expected_shape : tuple[int, int]
-        The ``(num_pairs, num_timepoints)`` shape the array must have. A file
-        that loads but was written under a different sample set or time grid is
-        treated as invalid so that it is recomputed rather than silently summed
+    expected_shape : tuple[int, ...]
+        The shape the array must have: ``(num_pairs, num_timepoints)`` for a
+        counts file, ``(num_pairs,)`` for the coverage file written beside it. A
+        file that loads but was written under a different sample set or time grid
+        is treated as invalid so that it is recomputed rather than silently summed
         into a mismatched total.
 
     Returns
@@ -191,8 +192,11 @@ class CountCoalEvents:
             index=self.sample_ids,
             columns=self.contig_ids
         )
-        self.coverage_df = self._build_coverage_df()
-        self.total_segments_per_pair = self.coverage_df.values.sum(axis=1).astype(self.datatype)
+        # Coverage is MEASURED from the counts, so it cannot exist until counting
+        # has run. Both attributes stay None until count_coal_spans_all_ts (or
+        # compute_coal_time_pdf, which will load it) populates them.
+        self.coverage_df: Optional[pd.DataFrame] = None
+        self.total_segments_per_pair: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------ #
     #  Counting coalescent spans
@@ -233,6 +237,9 @@ class CountCoalEvents:
         coal_segments_total = np.zeros(
             (self.num_pairs, self.num_timepoints), dtype=self.datatype
         )
+        # Per-pair observed span on this contig. Pairs not active here keep 0, so
+        # they contribute neither counts nor coverage.
+        coverage = np.zeros(self.num_pairs, dtype=np.float64)
 
         if len(active_samples) > 0:
             # Simplify the tree sequence down to the active sample set
@@ -250,15 +257,32 @@ class CountCoalEvents:
             global_pair_idx = np.array(global_pair_idxs)
 
             # --- Count pair-coalescence events in each time bin -------------
-            time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
+            # An extra window [max_time, inf) is appended so that every pair's
+            # coalescences are counted, including those older than the time grid.
+            # That final bin is NOT part of the PDF -- it is dropped below -- but
+            # its mass is needed for coverage: summing the finite bins alone would
+            # undercount each pair's observed span by however much of it coalesces
+            # beyond max_time, which is both large (3-4% at the default 95th
+            # percentile) and pair-dependent, and so would bias the normalised PDF.
+            time_windows = np.append(
+                np.linspace(0, self.max_time, self.num_timepoints + 1), np.inf
+            )
             coal_segments = ts.pair_coalescence_counts(
                 sample_sets=[[i] for i in range(len(active_samples))],
                 indexes=local_pairs,
                 span_normalise=False,
                 time_windows=time_windows,
-            ).astype(self.datatype)
+            )
 
-            coal_segments_total[global_pair_idx, :] = coal_segments
+            # Coverage is the span over which each pair actually coalesces anywhere
+            # in time, i.e. the span on which that pair is observed at all. Taken
+            # across ALL bins including the infinite one, before it is discarded.
+            coverage[global_pair_idx] = coal_segments.sum(axis=1)
+
+            # Drop the overflow bin: the PDF covers [0, max_time) only.
+            coal_segments_total[global_pair_idx, :] = (
+                coal_segments[:, :-1].astype(self.datatype)
+            )
 
         # Write to a temporary file and rename into place, so a run killed
         # mid-write leaves no partially-written .npy that a later resume would
@@ -271,6 +295,19 @@ class CountCoalEvents:
         except BaseException:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+            raise
+
+        # Coverage is written second and as its own file, so that a counts file is
+        # never left without one: the resume check below requires both, and a
+        # missing coverage file simply forces this contig to be recounted.
+        cov_path = os.path.join(coal_counts_dir, f"{contig_id}.coverage.npy")
+        cov_tmp = f"{cov_path}.tmp.{os.getpid()}"
+        try:
+            coverage.dump(cov_tmp)
+            os.replace(cov_tmp, cov_path)
+        except BaseException:
+            if os.path.exists(cov_tmp):
+                os.remove(cov_tmp)
             raise
 
     def count_coal_spans_all_ts(
@@ -322,8 +359,16 @@ class CountCoalEvents:
 
             skipped, corrupt = [], []
             for ts_file in tqdm(existing, desc="Validating existing counts files"):
-                path = os.path.join(coal_counts_dir, f"{ts_file.removesuffix('.trees')}.npy")
-                if is_valid_counts_file(path, expected_shape):
+                basename = ts_file.removesuffix(".trees")
+                path = os.path.join(coal_counts_dir, f"{basename}.npy")
+                cov_path = os.path.join(coal_counts_dir, f"{basename}.coverage.npy")
+                # BOTH files must be valid. Counts written before coverage existed
+                # are treated as corrupt so they are recomputed rather than silently
+                # normalised against a coverage figure that was never measured.
+                if (
+                    is_valid_counts_file(path, expected_shape)
+                    and is_valid_counts_file(cov_path, (self.num_pairs,))
+                ):
                     skipped.append(ts_file)
                 else:
                     corrupt.append(ts_file)
@@ -365,7 +410,11 @@ class CountCoalEvents:
 
         # Persist the per-pair, per-contig coverage alongside the counts so that
         # downstream consumers (e.g. CountCoalEvents_admix, variance estimation)
-        # can normalise without recomputing the sub-sampling mask.
+        # can normalise without recounting. Assembled from the per-contig coverage
+        # files just written, which is why this follows the counting loop rather
+        # than being built in __init__.
+        self.coverage_df = self._build_coverage_df(coal_counts_dir)
+        self.total_segments_per_pair = self.coverage_df.values.sum(axis=1)
         self.coverage_df.to_parquet(os.path.join(coal_counts_dir, "coverage.parquet"))
 
     # ------------------------------------------------------------------ #
@@ -440,52 +489,97 @@ class CountCoalEvents:
             index=self.pairs_MultiIndex,
         )
 
-        # Normalise by the total observed genome length for each pair,
-        # respecting the stochastic sub-sampling mask computed in __init__.
-        pdf_df = pdf_df / self.total_segments_per_pair.reshape(-1, 1)
+        # Coverage may not be in memory: this can be called on a fresh instance
+        # pointed at a finished counts directory. Rebuild it from the per-contig
+        # coverage files, which is exactly what count_coal_spans_all_ts did.
+        if self.total_segments_per_pair is None:
+            self.coverage_df = self._build_coverage_df(coal_counts_dir)
+            self.total_segments_per_pair = self.coverage_df.values.sum(axis=1)
+
+        # Normalise by the span each pair is actually observed on -- which already
+        # accounts for the stochastic sub-sampling mask, since a pair that was not
+        # selected on a contig contributes zero coverage there as well as zero
+        # counts.
+        #
+        # A pair observed nowhere would divide by zero. That means it was selected
+        # on no contig (or has no shared ancestry anywhere), so its PDF is
+        # undefined rather than zero, and NaN is the honest value -- silently
+        # emitting zeros would let an unobserved pair enter the likelihood as if
+        # it had coalesced infinitely recently.
+        denom = self.total_segments_per_pair.astype(np.float64)
+        unobserved = denom == 0
+        if np.any(unobserved):
+            print(
+                f"Warning: {int(unobserved.sum())} of {self.num_pairs} pairs have "
+                "zero coverage and will be NaN in the PDF."
+            )
+        pdf_df = pdf_df.div(np.where(unobserved, np.nan, denom), axis=0)
         return pdf_df
 
     # ------------------------------------------------------------------ #
     #  Private helpers
     # ------------------------------------------------------------------ #
 
-    def _build_coverage_df(self) -> pd.DataFrame:
-        """Build the per-file sequence-length coverage dataframe.
+    def _build_coverage_df(self, coal_counts_dir: str) -> pd.DataFrame:
+        """Build the per-pair, per-contig coverage dataframe from the counts run.
 
-        Rows are ``(sample_1, sample_2)`` pairs; columns are the basenames of
-        the ``.trees`` files (without the ``.trees`` suffix).  Each entry is
-        ``ts.sequence_length`` for the contig the file belongs to when *both*
-        samples of that pair were selected on that contig, and zero otherwise.
+        Rows are ``(sample_1, sample_2)`` pairs; columns are the basenames of the
+        ``.trees`` files. Each entry is the genomic span on that contig over which
+        that pair actually coalesces -- i.e. the span on which the pair is
+        observed -- as measured by ``count_coal_spans_single_ts`` and written to
+        ``{contig_id}.coverage.npy``.
+
+        This is measured rather than assumed. It previously used
+        ``ts.sequence_length`` for every pair on a contig, which is wrong on two
+        counts:
+
+        * ``sequence_length`` is the length of the *coordinate space*, not of the
+          data. Tree sequences cut out of a chromosome with ``keep_intervals``
+          (as the human pipeline's ``ts_chunks`` are, to keep positions traceable
+          to their true chromosomal location) report the whole chromosome, so a
+          2 Mb chunk of chr1 claimed 249 Mb of coverage -- a 125x overstatement,
+          and one that varies by chromosome, so it distorted the PDF unevenly.
+        * it assigns every pair the same span, but a pair is only observed where
+          both its samples have ancestry. Regions masked out per individual
+          (imputed genotypes, detached in ``remove_partial_ancestry``) are absent
+          for that individual's pairs and present for all others.
+
+        Summing the pair-coalescence counts recovers both effects exactly and
+        needs no mask files, because a pair coalesces exactly once at every
+        position where it is observed. This is why the counting grid carries an
+        overflow bin to infinity: the finite bins alone miss the 3-4% of span
+        that coalesces beyond ``max_time``, by a margin that differs per pair.
+
+        Parameters
+        ----------
+        coal_counts_dir : str
+            Directory holding ``{contig_id}.coverage.npy`` for every contig, as
+            written by ``count_coal_spans_single_ts``.
 
         Returns
         -------
         pd.DataFrame
             Shape ``(num_pairs, num_ts_files)``.
         """
-        sel = self.samples_selected.values  # (num_samples, num_contigs)
-
-        # Both-samples-selected matrix: (num_samples, num_samples, num_contigs)
-        both_selected = np.logical_and(sel[:, None, :], sel[None, :, :])
-
-        # Index lookup to avoid O(n) list.index() calls inside the loop
-        sample_row = {sid: i for i, sid in enumerate(self.sample_ids)}
-
-        # Flatten to upper-triangle pairs × contigs
-        pair_contig_active = np.array([
-            both_selected[sample_row[s1], sample_row[s2], :]
-            for s1, s2 in self.sample_pairs
-        ])  # shape: (num_pairs, num_contigs)
-
-        # Map each ts_file to its contig index and sequence length
-        contig_id_list = list(self.contig_ids)
-        col_names: list[str] = []
+        col_names = [ts_file.removesuffix(".trees") for ts_file in self.ts_files]
         data = np.zeros((self.num_pairs, len(self.ts_files)), dtype=np.float64)
-        for col_idx, ts_file in enumerate(self.ts_files):
-            contig_id = ts_file.removesuffix(".trees")
-            contig_idx = contig_id_list.index(contig_id)
-            seq_len = float(self.contig_lengths[contig_idx])
-            data[:, col_idx] = pair_contig_active[:, contig_idx] * seq_len
-            col_names.append(ts_file.removesuffix(".trees"))
+        for col_idx, contig_id in enumerate(col_names):
+            cov_path = os.path.join(coal_counts_dir, f"{contig_id}.coverage.npy")
+            try:
+                cov = np.load(cov_path, allow_pickle=True)
+            except Exception as err:
+                raise FileNotFoundError(
+                    f"coverage file '{cov_path}' is missing or unreadable. It is "
+                    "written beside each counts file by count_coal_spans_all_ts; "
+                    "re-run that (resume=True recomputes only what is missing)."
+                ) from err
+            if cov.shape != (self.num_pairs,):
+                raise ValueError(
+                    f"coverage file '{cov_path}' has shape {cov.shape}, expected "
+                    f"{(self.num_pairs,)}. It was written for a different sample "
+                    "set; delete it and re-run count_coal_spans_all_ts."
+                )
+            data[:, col_idx] = cov
 
         return pd.DataFrame(data, index=self.pairs_MultiIndex, columns=col_names)
 def parse_window_edges(LAI_df):
