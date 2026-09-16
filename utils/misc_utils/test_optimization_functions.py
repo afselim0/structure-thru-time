@@ -176,12 +176,13 @@ def test_hessian_null_space_is_translation():
         assert np.linalg.norm(H @ v) < 1e-8 * scale
 
 
-def test_ldl_flip_is_positive_definite_and_descent():
-    """L |D| L^T has the right inertia, so the direction always goes downhill.
+def test_modified_newton_direction_is_always_descent():
+    """Flipping the eigenvalue signs makes the modified Hessian positive definite.
 
-    LDL is a congruence, so by Sylvester's law of inertia flipping the negative
-    eigenvalues of D's 1x1/2x2 blocks yields a positive definite matrix -- which is what
-    makes ``ldl_flip`` usable on an indefinite Hessian without any diagonal shift.
+    The exact Hessian is indefinite away from a minimum, so ``-H^-1 grad`` can point
+    uphill.  Replacing each eigenvalue by ``max(|lambda|, delta)`` makes the matrix
+    positive definite while preserving the curvature magnitude along every eigenvector,
+    which is what guarantees ``grad . p < 0``.
     """
     for seed in (4, 5, 6):
         X, R, W, _, link = _make_problem(n=10, T=1, seed=seed)
@@ -190,52 +191,59 @@ def test_ldl_flip_is_positive_definite_and_descent():
         problem = {"R": R_t, "W": W_t, "link": link}
         _, grad = O.compute_loss_gradient(X_t.ravel(), X_t.shape, problem)
 
-        for method in ("ldl_flip", "eigh_floor"):
-            direction = O.modified_newton_direction(H, grad, method=method)
-            slope = float(np.dot(grad, direction))
-            assert np.all(np.isfinite(direction)), f"{method}: non-finite direction"
-            assert slope < 0, f"{method}: ascent direction, g.p = {slope:.3e} (seed {seed})"
+        direction = O.modified_newton_direction(H, grad)
+        slope = float(np.dot(grad, direction))
+        assert np.all(np.isfinite(direction)), f"non-finite direction (seed {seed})"
+        assert slope < 0, f"ascent direction, g.p = {slope:.3e} (seed {seed})"
 
 
-def test_ldl_flip_reconstructs_a_positive_definite_matrix():
-    """Rebuild L |D| L^T explicitly and check its eigenvalues are all positive."""
-    from scipy.linalg import ldl
+def test_modified_newton_direction_solves_the_modified_system():
+    """``p`` is exactly ``-B^-1 grad`` for ``B = V max(|lambda|, delta) V^T``.
 
+    Checked by rebuilding ``B`` explicitly and confirming ``B p = -grad``, and that ``B``
+    is positive definite even though ``H`` is not.
+    """
     X, R, W, _, link = _make_problem(n=8, T=1, seed=4)
     H = O.compute_exact_hessian(X[:, :, 0], R[:, :, 0], W[:, :, 0], link=link)
     eig_H = np.linalg.eigvalsh(H)
     assert np.sum(eig_H < -1e-12 * np.max(np.abs(eig_H))) > 0, (
         "test needs an indefinite Hessian to be meaningful"
     )
+    problem = {"R": R[:, :, 0], "W": W[:, :, 0], "link": link}
+    _, grad = O.compute_loss_gradient(X[:, :, 0].ravel(), X[:, :, 0].shape, problem)
 
-    lu, d_blocks, perm = ldl(H, lower=True)
-    N = H.shape[0]
-    dm = np.asarray(d_blocks, dtype=float)
-    D_abs = np.zeros((N, N))
-    i = 0
-    while i < N:
-        if (i + 1 < N) and (dm[i + 1, i] != 0.0 or dm[i, i + 1] != 0.0):
-            w, V = np.linalg.eigh(dm[i:i + 2, i:i + 2])
-            D_abs[i:i + 2, i:i + 2] = (V * np.abs(w)) @ V.T
-            i += 2
-        else:
-            D_abs[i, i] = abs(dm[i, i])
-            i += 1
+    delta_ratio = 1e-8
+    evals, evecs = np.linalg.eigh(H)
+    delta = delta_ratio * np.max(np.abs(evals))
+    B = (evecs * np.maximum(np.abs(evals), delta)) @ evecs.T
 
-    L = lu[perm, :]
-    B = L @ D_abs @ L.T                       # = |H| in the Gould et al. (2000) sense
     eig_B = np.linalg.eigvalsh(B)
-    # Positive definite up to round-off in the reconstruction (the factorisation itself is
-    # exact in inertia; forming L |D| L^T explicitly is not).
-    assert eig_B.min() > -1e-12 * eig_B.max(), (
-        f"L |D| L^T is not positive definite: min eig {eig_B.min():.3e} "
-        f"against max {eig_B.max():.3e}"
+    assert eig_B.min() > 0, f"B is not positive definite: min eig {eig_B.min():.3e}"
+
+    p = O.modified_newton_direction(H, grad, delta_ratio=delta_ratio)
+    residual = np.linalg.norm(B @ p + np.ravel(grad)) / np.linalg.norm(grad)
+    assert residual < 1e-8, f"B p != -grad, relative residual {residual:.3e}"
+
+
+def test_eigenvalue_floor_only_lifts_the_gauge_modes():
+    """The floor regularises the rigid-motion null space, not the real curvature.
+
+    The loss is invariant to translating (and, at a stationary point, rotating) the whole
+    configuration, so H has exact zero eigenvalues that would make ``1/|lambda|`` blow up.
+    The floor must catch those while leaving genuine curvature untouched -- if it caught a
+    large share of the spectrum it would be quietly flattening the model.
+    """
+    X, R, W, _, link = _make_problem(n=12, T=1, seed=7)
+    H = O.compute_exact_hessian(X[:, :, 0], R[:, :, 0], W[:, :, 0], link=link)
+    evals = np.linalg.eigvalsh(H)
+    delta = 1e-8 * np.max(np.abs(evals))
+    n_floored = int(np.sum(np.abs(evals) < delta))
+    d = X.shape[1]
+    # d translations always; the rotation only at a stationary point, so d..d(d+1)/2.
+    assert d <= n_floored <= d * (d + 1) // 2 + 1, (
+        f"{n_floored} of {len(evals)} eigenvalues floored; expected about the "
+        f"{d} translation modes plus at most the rotation"
     )
-    # Note that L |D| L^T is *not* |H|: it has the right inertia (all-positive) but not
-    # the same eigenvalues, so its spectrum is deliberately not compared to H's.  See
-    # modified_newton_direction's docstring -- the direction has cos ~ 0.4-0.6 with the
-    # exact |H|^-1 g, which costs nothing empirically but is an approximation.
-    assert eig_B.shape == eig_H.shape
 
 
 def test_laplacian_gradient_identity():

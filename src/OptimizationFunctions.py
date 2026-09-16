@@ -70,7 +70,6 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-from scipy.linalg import ldl, solve_triangular
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
@@ -561,7 +560,6 @@ def compute_exact_hessian(
 def modified_newton_direction(
     H: np.ndarray,
     grad: np.ndarray,
-    method: str = "ldl_flip",
     delta_ratio: float = 1e-8,
 ) -> np.ndarray:
     """Descent direction ``p`` solving ``|H| p = -grad`` for an indefinite Hessian.
@@ -571,80 +569,43 @@ def modified_newton_direction(
     so the raw Newton step ``-H^-1 grad`` can point uphill.  ``H`` must therefore be
     modified into something positive definite before it is inverted.
 
-    ``ldl_flip`` (default) takes the Bunch-Kaufman factorization ``P^T H P = L D L^T``
-    (``scipy.linalg.ldl``) and flips the negative eigenvalues of ``D``'s 1x1 and 2x2
-    blocks.  Because LDL is a *congruence*, Sylvester's law of inertia guarantees that
-    ``L |D| L^T`` is positive definite, hence ``p`` is always a descent direction.  ``D``
-    is block diagonal, so flipping it is O(N) work rather than the O(N^3) of a full
-    eigendecomposition: measured 1.3 ms against 6.1 ms at n=100, 128 ms against 1471 ms
-    at n=1000.
+    The modification is the textbook one: eigendecompose ``H = V diag(lambda) V^T`` and
+    replace each eigenvalue by ``max(|lambda|, delta)``.  Flipping the sign of the negative
+    eigenvalues preserves the curvature magnitude along every eigenvector while making the
+    matrix positive definite, so ``p`` is always a descent direction and the step length
+    along each direction still reflects how sharply the loss curves there.
 
-    Caveat: ``L |D| L^T`` is positive definite with the right inertia, but it is **not**
-    ``|H|``.  The resulting direction has cos ~ 0.4-0.6 with the exact ``|H|^-1 grad``.
-    Empirically this costs nothing -- it converges in slightly fewer iterations than the
-    exact direction, and to a deeper gradient -- but it is an approximation, which is why
-    ``eigh_floor`` is kept available as the validation reference.
+    The floor ``delta`` matters as much as the flip.  The loss is invariant to rigid
+    motions of the whole configuration, so ``H`` has exact zero eigenvalues -- the two
+    translations always, and the rotation at a stationary point -- and ``1/|lambda|`` on
+    those would be infinite.  Flooring at ``delta_ratio * max|lambda|`` caps the effective
+    condition number of the modified matrix at ``1/delta_ratio``.  Measured on a hard
+    slice, exactly 3 of 100 eigenvalues fall below the floor, so it regularises the gauge
+    modes and leaves the genuine curvature untouched.
 
     A Levenberg-Marquardt diagonal shift (``H + mu I``) is deliberately *not* offered.
     On this loss the most negative eigenvalue is up to 4.9x larger in magnitude than the
     largest positive one, so any ``mu`` achieving positive definiteness swamps the good
     curvature and the direction collapses to steepest descent (measured cos(p, -grad) =
-    0.997-0.999).
+    0.997-0.999).  Adding a shift *on top of* the sign flip was also tested, where ``mu``
+    need only lift the near-zero eigenvalues: it improved the conditioning of the modified
+    matrix by up to 100x but was slower at every shift tried, needing ~50% more iterations,
+    so it is not offered either.
 
     Args:
         H: (N, N) symmetric Hessian, N = n*d.
         grad: (N,) flattened gradient.
-        method: "ldl_flip" (default) or "eigh_floor" (the O(N^3) reference).
-        delta_ratio: Eigenvalues of |D| (or of H) are floored at
-            ``delta_ratio * max|lambda|``, which also lifts the translation/rotation
-            null modes.
+        delta_ratio: Eigenvalues are floored at ``delta_ratio * max|lambda|``, which also
+            lifts the translation/rotation null modes.
 
     Returns:
         (N,) direction ``p`` with ``grad . p < 0``.
     """
     grad = np.ravel(grad)
-
-    if method == "eigh_floor":
-        evals, evecs = np.linalg.eigh(H)
-        delta = delta_ratio * max(float(np.max(np.abs(evals))), 1e-300)
-        inv = 1.0 / np.maximum(np.abs(evals), delta)
-        return -(evecs * inv) @ (evecs.T @ grad)
-
-    if method != "ldl_flip":
-        raise ValueError(
-            f"method must be 'ldl_flip' or 'eigh_floor', got {method!r}."
-        )
-
-    lu, d_blocks, perm = ldl(H, lower=True, check_finite=False)
-    N = H.shape[0]
-    dm = np.asarray(d_blocks, dtype=np.float64)
-    scale = float(np.max(np.abs(np.diag(dm)))) or 1.0
-    delta = delta_ratio * scale
-
-    # Eigen-decompose the block-diagonal D one 1x1 or 2x2 block at a time (O(N) total),
-    # inverting |eigenvalues| floored at delta.
-    D_inv = np.zeros((N, N))
-    i = 0
-    while i < N:
-        is_2x2 = (i + 1 < N) and (dm[i + 1, i] != 0.0 or dm[i, i + 1] != 0.0)
-        if is_2x2:
-            w, V = np.linalg.eigh(dm[i:i + 2, i:i + 2])
-            w = np.maximum(np.abs(w), delta)
-            D_inv[i:i + 2, i:i + 2] = (V / w) @ V.T
-            i += 2
-        else:
-            D_inv[i, i] = 1.0 / max(abs(dm[i, i]), delta)
-            i += 1
-
-    # H = P L D L^T P^T  =>  |H|^-1 grad = P L^-T |D|^-1 L^-1 P^T grad
-    L = lu[perm, :]
-    y = solve_triangular(L, grad[perm], lower=True, unit_diagonal=True,
-                         check_finite=False)
-    z = D_inv @ y
-    x = solve_triangular(L.T, z, lower=False, unit_diagonal=True, check_finite=False)
-    p = np.empty_like(x)
-    p[perm] = -x
-    return p
+    evals, evecs = np.linalg.eigh(H)
+    delta = delta_ratio * max(float(np.max(np.abs(evals))), 1e-300)
+    inv = 1.0 / np.maximum(np.abs(evals), delta)
+    return -(evecs * inv) @ (evecs.T @ grad)
 
 
 ############################################################
@@ -1039,15 +1000,14 @@ def optimize_timepoint_newton(
     max_iter: int = MAX_ITER_NEWTON,
     tol: Optional[float] = None,
     tol_factor: float = TOL_FACTOR_NEWTON,
-    hessian_method: str = "ldl_flip",
     delta_ratio: float = 1e-8,
     tol_seed: Optional[int] = None,
 ) -> tuple:
     """Damped-Newton solve for one timepoint, on the exact Hessian.
 
     Per iteration: build the exact Hessian, modify it to positive definite via
-    ``modified_newton_direction`` (``ldl_flip``), and take a strong-Wolfe step.  The
-    factorization is rebuilt every iteration deliberately -- reusing one modified Hessian
+    ``modified_newton_direction``, and take a strong-Wolfe step.  The
+    eigendecomposition is rebuilt every iteration deliberately -- reusing one modified Hessian
     per slice (the Vladymyrov-style trick) was tested and is catastrophic on this loss
     (31,268 iterations against 151, 188x slower at n=100), because the curvature depends
     on X through f(d_ij) and changes fast.
@@ -1071,7 +1031,6 @@ def optimize_timepoint_newton(
         tol: Absolute tolerance on max|grad|; if None it is derived per slice by
             ``_newton_slice_tolerance``, which does not depend on the warm start.
         tol_factor: Multiplier used by that rule.
-        hessian_method: "ldl_flip" (default) or "eigh_floor".
         delta_ratio: Eigenvalue floor ratio for the Hessian modification.
         tol_seed: Seed for the tolerance probe configuration.
 
@@ -1102,7 +1061,7 @@ def optimize_timepoint_newton(
             break
         H = compute_exact_hessian(x.reshape(shape), R_t, W_t, link=link)
         direction = modified_newton_direction(
-            H, g, method=hessian_method, delta_ratio=delta_ratio
+            H, g, delta_ratio=delta_ratio
         )
         alpha, x_new, f_new, g_new, _ = _wolfe_step(
             x, direction, shape, problem, f, g
@@ -1264,7 +1223,7 @@ def coordinate_descent_over_time(
     if solver == "newton":
         newton_max_iter = MAX_ITER_NEWTON if max_iter == MAX_ITER_TIMEPOINT else max_iter
         print(
-            f"Sequential (per-slice) stage: damped Newton (exact Hessian, ldl_flip), "
+            f"Sequential (per-slice) stage: damped Newton (exact Hessian), "
             f"tol=max(tol_factor*|grad| at a random config, {GRAD_FLOOR_EPS:g}*|loss|) "
             f"with tol_factor={tol_factor:g}, max_iter={newton_max_iter}"
         )

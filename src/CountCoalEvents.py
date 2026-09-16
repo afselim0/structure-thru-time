@@ -6,9 +6,19 @@ This module provides the `CountCoalEvents` class, which:
   2. Counts the total genomic span that coalesces in discrete time bins
      for every pair of samples for each tree sequence file, and saves the counts to disk.
   3. Normalises the counts into an empirical PDF of pairwise coalescence
-     times.
+     times, dividing each pair by the span it is actually observed on.
 count files are saved in .npy format, and the final PDF is saved in .parquet format.
 The parquet has multi-index rows for sample IDs and columns for time-bin left edges.
+
+Coverage -- the per-pair denominator -- is MEASURED, by summing each pair's
+coalescence counts over a time grid carrying an overflow bin to infinity. It is
+not the contig's ``sequence_length``, which is the coordinate space rather than
+the data, and not the summed width of local-ancestry windows, which counts
+labelled genome rather than observed genome. The three agree only when every
+base is accessible to every sample; they diverge on inferred ARGs, where
+inaccessible regions and per-individual sample masks leave pairs unobserved over
+part of their span. Each ``{contig}.npy`` of counts therefore has a
+``{contig}.coverage.npy`` written beside it.
 """
 
 from __future__ import annotations
@@ -109,11 +119,22 @@ class CountCoalEvents:
     contig_ids : list[str] | np.ndarray
         Unique contig identifiers extracted from *ts_files*.
     contig_lengths : np.ndarray
-        Sequence length (bp) for each contig.
+        ``sequence_length`` of each contig. This is the size of the coordinate
+        space, which for a tree sequence cut out of a chromosome with
+        ``keep_intervals`` is the whole chromosome rather than the piece held.
+        It is used only to choose a compact counts dtype -- never as coverage,
+        which is measured per pair; see ``_build_coverage_df``.
     sample_pairs : list[tuple[int, int]]
         All unique ordered pairs of sample IDs.
     samples_selected : pd.DataFrame
         Boolean mask indicating which samples are active on each contig.
+    coverage_df : pd.DataFrame | None
+        Per-pair, per-contig observed span. ``None`` until
+        ``count_coal_spans_all_ts`` has run, because it is measured from the
+        counts rather than assumed from the inputs.
+    total_segments_per_pair : np.ndarray | None
+        Row sums of ``coverage_df``; the genome-wide denominator of the PDF.
+        ``None`` until counting has run.
     """
 
     # ------------------------------------------------------------------ #
@@ -443,11 +464,20 @@ class CountCoalEvents:
         pd.DataFrame
             DataFrame indexed by ``(sample_1, sample_2)`` with one column per
             time-bin left-edge.  Values approximate the coalescence-time PDF.
+
+            Rows do not sum to 1: the columns span ``[0, max_time)`` while the
+            normalising coverage counts coalescences at every time, so a row sums
+            to the fraction of that pair's span which coalesces inside the grid.
+            A pair with zero coverage genome-wide -- observed on no contig -- is
+            all-NaN, since its PDF is undefined rather than zero.
         """
         # --- Verify counts exist for every tree-sequence file ------------
         expected_basenames = {ts_file.removesuffix(".trees") for ts_file in self.ts_files}
+        # "{contig}.coverage.npy" also matches *.npy; excluded so it is not taken
+        # for a contig of its own.
         count_files = {
             f.name.removesuffix(".npy") for f in Path(coal_counts_dir).glob("*.npy")
+            if not f.name.endswith(".coverage.npy")
         }
         missing = expected_basenames - count_files
         if missing:
@@ -501,17 +531,22 @@ class CountCoalEvents:
         # selected on a contig contributes zero coverage there as well as zero
         # counts.
         #
-        # A pair observed nowhere would divide by zero. That means it was selected
-        # on no contig (or has no shared ancestry anywhere), so its PDF is
-        # undefined rather than zero, and NaN is the honest value -- silently
+        # Zero coverage on an INDIVIDUAL contig is ordinary and needs no special
+        # handling: that contig adds 0 to both the counts and the coverage, so it
+        # simply does not contribute to the genome-wide totals. A chunk where one
+        # sample of the pair is entirely masked looks exactly like this.
+        #
+        # Zero coverage GENOME-WIDE is different: the pair is observed nowhere, so
+        # its PDF is undefined rather than zero. NaN is the honest value --
         # emitting zeros would let an unobserved pair enter the likelihood as if
-        # it had coalesced infinitely recently.
+        # it had never coalesced, and emitting 0/0 would produce a silent inf.
         denom = self.total_segments_per_pair.astype(np.float64)
         unobserved = denom == 0
         if np.any(unobserved):
             print(
                 f"Warning: {int(unobserved.sum())} of {self.num_pairs} pairs have "
-                "zero coverage and will be NaN in the PDF."
+                "zero coverage genome-wide (observed on no contig) and will be NaN "
+                "in the PDF."
             )
         pdf_df = pdf_df.div(np.where(unobserved, np.nan, denom), axis=0)
         return pdf_df
@@ -678,6 +713,16 @@ class CountCoalEvents_admix:
       * admixed × admixed pairs are counted only over windows where *both*
         samples carry that ancestry label.
 
+    Coverage for every pair is the span over which that pair actually
+    coalesces within its windows, summed from the pair-coalescence counts
+    (including an overflow time bin, so coalescences older than ``max_time``
+    are not missed). It is deliberately *not* the summed width of the local
+    ancestry windows: LAI windows tile the whole contig, but a pair is only
+    observed where both samples have ancestry there, so the two agree only
+    when every base is accessible -- true of simulated data, false of
+    inferred ARGs, where inaccessible regions and per-individual sample masks
+    leave the pair unobserved over part of the window.
+
     Each ancestry label additionally has its own ``pop_labels.csv`` that can
     exclude admixed samples not confidently assigned to it (non-admixed
     samples are always retained). Excluded admixed samples drop out of that
@@ -735,7 +780,13 @@ class CountCoalEvents_admix:
 
         # --- Load base counts/coverage from the CountCoalEvents run -------
         expected_basenames = {ts_file.removesuffix(".trees") for ts_file in cce.ts_files}
-        count_files = {f.name.removesuffix(".npy") for f in Path(coal_counts_dir).glob("*.npy")}
+        # Exclude the per-contig coverage vectors written beside the counts:
+        # "{contig}.coverage.npy" also matches *.npy, and would otherwise be
+        # treated as a contig named "{contig}.coverage".
+        count_files = {
+            f.name.removesuffix(".npy") for f in Path(coal_counts_dir).glob("*.npy")
+            if not f.name.endswith(".coverage.npy")
+        }
         missing = expected_basenames - count_files
         if missing:
             raise FileNotFoundError(
@@ -840,7 +891,13 @@ class CountCoalEvents_admix:
         )
 
         base_counts = np.load(os.path.join(self.coal_counts_dir, f"{contig_id}.npy"), allow_pickle=True)
-        time_windows = np.linspace(0, self.max_time, self.num_timepoints + 1)
+        # As in CountCoalEvents.count_coal_spans_single_ts, an overflow bin
+        # [max_time, inf) is appended so that coverage counts every coalescence,
+        # not just those inside the time grid. It is dropped before the counts are
+        # stored; only its contribution to coverage is kept.
+        time_windows = np.append(
+            np.linspace(0, self.max_time, self.num_timepoints + 1), np.inf
+        )
 
         # --- Initialise per-ancestry output arrays and coverage vectors ---
         counts_per_ancestry = {
@@ -881,17 +938,22 @@ class CountCoalEvents_admix:
                         windows=window_edges[admixed_sample],
                         span_normalise=False,
                         time_windows=time_windows,
-                    ).astype(self.datatype)
-                    label_counts = counts_windowed[window_idxs, :, :].sum(axis=0)
-
-                    edges = window_edges[admixed_sample]
-                    label_span = float(np.sum(edges[window_idxs + 1] - edges[window_idxs]))
+                    )
+                    # Sum over this label's windows, then split the overflow bin
+                    # off: counts keep the finite bins, coverage keeps everything.
+                    label_all = counts_windowed[window_idxs, :, :].sum(axis=0)
+                    label_counts = label_all[:, :-1].astype(self.datatype)
+                    label_coverage = label_all.sum(axis=1)
 
                     for i, non_admixed_sample in enumerate(non_admixed_in_label):
                         pair = (min(admixed_sample, non_admixed_sample), max(admixed_sample, non_admixed_sample))
                         local_idx = pair_to_idx[pair]
                         counts_per_ancestry[label][local_idx, :] = label_counts[i, :]
-                        coverage_per_ancestry[label][local_idx] = label_span
+                        # Measured, not the LAI window width: the pair is observed
+                        # only where BOTH samples have ancestry, which inside a
+                        # label's windows is less than their total width wherever
+                        # either sample is masked or the region is inaccessible.
+                        coverage_per_ancestry[label][local_idx] = label_coverage[i]
 
             # --- Admixed × admixed: windowed by both samples sharing the ancestry
             for i, s1 in enumerate(admixed_in_label):
@@ -909,12 +971,13 @@ class CountCoalEvents_admix:
                         windows=edges,
                         span_normalise=False,
                         time_windows=time_windows,
-                    ).astype(self.datatype)
-                    local_idx = pair_to_idx[admixed_pair]
-                    counts_per_ancestry[label][local_idx, :] = counts_windowed[window_idxs, :].sum(axis=0)
-                    coverage_per_ancestry[label][local_idx] = float(
-                        np.sum(edges[window_idxs + 1] - edges[window_idxs])
                     )
+                    pair_all = counts_windowed[window_idxs, :].sum(axis=0)
+                    local_idx = pair_to_idx[admixed_pair]
+                    counts_per_ancestry[label][local_idx, :] = pair_all[:-1].astype(self.datatype)
+                    # Measured over the shared-ancestry windows, for the same
+                    # reason as the admixed x non-admixed case above.
+                    coverage_per_ancestry[label][local_idx] = pair_all.sum()
 
             # Atomic write, as in CountCoalEvents.count_coal_spans_single_ts:
             # an interrupted run must not leave a half-written counts file.
@@ -1038,5 +1101,18 @@ class CountCoalEvents_admix:
             columns=time_bin_edges[:-1],
             index=self.pairs_MultiIndex_per_ancestry[ancestry_label],
         )
-        pdf_df = pdf_df / total_segments_per_pair.reshape(-1, 1)
+
+        # As in CountCoalEvents.compute_coal_time_pdf: zero coverage on a single
+        # contig is ordinary (it contributes nothing to either total), but a pair
+        # with zero coverage genome-wide is observed nowhere and its PDF is
+        # undefined. That is commoner here than in the base class, because two
+        # samples may simply never share this ancestry label on any contig.
+        denom = total_segments_per_pair.astype(np.float64)
+        unobserved = denom == 0
+        if np.any(unobserved):
+            print(
+                f"Warning: {int(unobserved.sum())} of {denom.size} pairs never share "
+                f"ancestry '{ancestry_label}' on any contig and will be NaN in the PDF."
+            )
+        pdf_df = pdf_df.div(np.where(unobserved, np.nan, denom), axis=0)
         return pdf_df

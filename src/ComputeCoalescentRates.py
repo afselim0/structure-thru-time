@@ -66,8 +66,19 @@ def adaptive_local_linear_filter(
     t_min = minimum_num_idxs // 2
     t_max = n_timepoints - maximum_num_idxs // 2
 
-    if t_max <= t_min:
-        raise ValueError("Time series too short for the requested window sizes.")
+    # The late-boundary rows are written into S[t, start:] with
+    # start = n_timepoints - maximum_num_idxs, so the grid must hold at least one
+    # full maximum window. t_max <= t_min alone does not catch this: for
+    # n_timepoints in [18, 20] with these windows t_max > t_min, but start < 0 and
+    # the slice silently shrinks, raising an opaque numpy broadcast error instead.
+    if n_timepoints < maximum_num_idxs or t_max <= t_min:
+        raise ValueError(
+            "Time series too short for the requested window sizes: "
+            f"n_timepoints={n_timepoints} must be at least maximum_window_size / "
+            f"time_step = {maximum_num_idxs} bins (and more than "
+            f"{minimum_num_idxs // 2 + maximum_num_idxs // 2}). Either lengthen the "
+            "time grid or reduce maximum_window_size."
+        )
 
     # One window size per interior time point; cast to int after linspace to
     # avoid fractional bandwidths.  An extra +1 parity correction is applied
@@ -385,11 +396,13 @@ def compute_between_individual_rates(
         Per-individual-pair rates with a MultiIndex of (individual_1,
         individual_2) and the same time-point columns.
 
-    Notes
-    -----
-    If any cross-individual sample pair is absent from ``rates_df`` (e.g.,
-    because only i < j pairs were computed), it is silently dropped from the
-    mean.  Ensure ``rates_df`` contains all required pairs before calling.
+    Raises
+    ------
+    KeyError
+        If any cross-individual sample pair is absent from ``rates_df``. Every
+        individual pair must average over the same number of sample pairs, so a
+        missing one is an input error rather than something to average around:
+        dropping it would silently change the estimand for that pair alone.
     """
     active_samples_pairs = rates_df.index.values
     active_samples = np.unique([item for pair in active_samples_pairs for item in pair])
@@ -409,7 +422,16 @@ def compute_between_individual_rates(
     for ind1, ind2 in active_individuals_pairs:
         samples_ind1 = sample_individal_ids.loc[sample_individal_ids["individual_id"] == ind1, "sample_id"].values
         samples_ind2 = sample_individal_ids.loc[sample_individal_ids["individual_id"] == ind2, "sample_id"].values
-        pairs = [(s1, s2) for s1 in samples_ind1 for s2 in samples_ind2]
-        # Pairs absent from rates_df are silently dropped; see docstring note.
-        between_individual_rates.loc[(ind1, ind2)] = rates_df.loc[pairs].mean()
+        # rates_df is indexed on sample pairs in (min, max) order, so the lookup
+        # key must be sorted by SAMPLE id. Iterating individuals in order does not
+        # give that: an individual whose samples have the higher ids yields
+        # reversed keys, which are absent from the index.
+        pairs = [
+            (min(s1, s2), max(s1, s2))
+            for s1 in samples_ind1 for s2 in samples_ind2
+        ]
+        # skipna=False: a NaN sample pair (one with zero genome-wide coverage)
+        # must surface as NaN rather than be quietly averaged out, which would
+        # pool this individual pair over fewer sample pairs than the others.
+        between_individual_rates.loc[(ind1, ind2)] = rates_df.loc[pairs].mean(skipna=False)
     return between_individual_rates
