@@ -2,9 +2,10 @@
 #!/usr/bin/env python3
 """Latent-space embeddings of time-varying population structure.
 
-Wraps the two optimization stages in OptimizationFunctions: a sequential,
-unpenalized pass over time slices, followed by a joint pass over all slices with a
-group-fused-lasso temporal smoothing penalty.
+Wraps the two optimization stages in OptimizationFunctions: a sequential, unpenalized
+pass over time slices (damped Newton on the exact Hessian, one slice at a time),
+followed by a joint pass over all slices (L-BFGS-B) with a group-fused-lasso temporal
+smoothing penalty.
 
 The public embeddings array is (n, d, T) with NaN at (sample, time) entries where the
 sample is not yet present.  Internally the joint optimizer works on a packed vector of
@@ -19,16 +20,14 @@ import pandas as pd
 from OptimizationFunctions import (
     LinkFunction,
     compute_difference_operators,
-    compute_distance_df,
     coordinate_descent_over_time,
     optimize_jointly,
-    reconstruct_rates,
+    DEFAULT_WEIGHTS,
     FTOL_JOINT,
-    FTOL_TIMEPOINT,
-    GTOL_FACTOR,
+    GTOL_JOINT,
     MAXCOR_JOINT,
-    MAXCOR_TIMEPOINT,
-    TOL_FACTOR_NEWTON,
+    FTOL_NEWTON,
+    MAX_ITER_NEWTON,
 )
 
 
@@ -44,7 +43,7 @@ class LatentSpaceEmbeddings:
                  n_components:         int                    = 2,
                  l1_strengths:         Optional[dict]         = None,
                  pseudo_huber_factor:  float                  = 1e-3,
-                 default_weights:      int                    = 1_000_000,
+                 default_weights:      float                  = DEFAULT_WEIGHTS,
                  link_function:        str                    = "inverse_distance"):
         """Build the rate and weight tensors from long-format rates.
 
@@ -58,7 +57,8 @@ class LatentSpaceEmbeddings:
             l1_strengths: {order: gamma} dimensionless group-fused-lasso strengths.
             pseudo_huber_factor: eps_k = pseudo_huber_factor * median group norm of
                 the stage-1 solution's k-th differences.
-            default_weights: Uniform weight used when weights_df is None.
+            default_weights: Uniform weight used when weights_df is None; defaults
+                to DEFAULT_WEIGHTS, the same fallback the optimizer applies.
             link_function: Link name.
         """
         # Read the column labels as floats without mutating the caller's DataFrame
@@ -124,6 +124,16 @@ class LatentSpaceEmbeddings:
                 "weights_df; w = S_hat / (dt * sum Phi^2) is strictly positive, so "
                 "this indicates a corrupt or mismatched weights file."
             )
+
+        # --- Mask self-pairs ---
+        # A sample has no rate against itself.  The diagonal is never written above
+        # (rates_df is indexed by unordered pairs, so it holds no (s, s) row), but
+        # NaN it explicitly rather than relying on that: a finite R_ii would reach
+        # the loss with d_ii = 0, pinning each sample to itself.  This mirrors
+        # default_valid_mask, which drops the diagonal on the optimizer's side.
+        diag = np.arange(n)
+        R[diag, diag, :] = np.nan
+        W[diag, diag, :] = np.nan
 
         # --- Mask ancient samples in both R and W ---
         sampled_by_time = self.sample_times[:, np.newaxis] <= self.time_points
@@ -200,12 +210,8 @@ class LatentSpaceEmbeddings:
                                         p:                   float = 1,
                                         link:                str   = "inverse_distance",
                                         compute_uncertainty: bool  = False,
-                                        exact_hessian:       bool  = True,
-                                        target_precision:    float = FTOL_TIMEPOINT,
-                                        gtol_factor:         float = GTOL_FACTOR,
-                                        maxcor:              int   = MAXCOR_TIMEPOINT,
-                                        solver:              str   = "newton",
-                                        tol_factor:          float = TOL_FACTOR_NEWTON,
+                                        max_iter:            int   = MAX_ITER_NEWTON,
+                                        newton_ftol:         float = FTOL_NEWTON,
                                         limit_blas_threads:  bool  = True):
         """Stage 1: sequential, unpenalized coordinate descent over time points.
 
@@ -213,20 +219,12 @@ class LatentSpaceEmbeddings:
             X_init: (n, d, T) initial solution; random if None.
             p: Link function exponent.
             link: Link function name.
-            compute_uncertainty: If True, compute per-sample Laplace covariances.
-            exact_hessian: If True (default), use the exact analytical Hessian for
-                those covariances; if False, the L-BFGS approximation (solver="lbfgs"
-                only -- the Newton path has no L-BFGS inverse Hessian to fall back on).
-            target_precision: ftol, solver="lbfgs" only; 1e-9 for exploratory sweeps,
-                1e-12 for final runs.
-            gtol_factor: gtol is gtol_factor * max|grad| at each slice's start,
-                solver="lbfgs" only.
-            maxcor: L-BFGS memory, solver="lbfgs" only.
-            solver: "newton" (default) for damped Newton on the exact Hessian, or
-                "lbfgs" for the previous scipy L-BFGS-B path.
-            tol_factor: Per-slice tolerance scale, solver="newton" only.
+            compute_uncertainty: If True, compute per-sample Laplace covariances
+                from the exact analytical Hessian.
+            max_iter: Maximum damped-Newton iterations per slice.
+            newton_ftol: Relative loss change at which each slice stops.
             limit_blas_threads: If True (default), pin BLAS to one thread for the
-                duration of the sweep.  The Newton path does dense linear algebra per
+                duration of the sweep.  This stage does dense linear algebra per
                 slice, and this cluster's OpenBLAS (MAX_THREADS=64, NO_AFFINITY)
                 thread-thrashes catastrophically on matrices this small: an 80x80 eigh
                 takes 869 ms unpinned against 0.58 ms pinned.
@@ -245,13 +243,9 @@ class LatentSpaceEmbeddings:
                 n_components           = self.n_components,
                 X_init                 = X_init,
                 sampled_by_time        = self.sampled_by_time,
-                target_precision       = target_precision,
-                gtol_factor            = gtol_factor,
-                maxcor                 = maxcor,
+                max_iter               = max_iter,
                 return_covariances     = compute_uncertainty,
-                exact_hessian          = exact_hessian,
-                solver                 = solver,
-                tol_factor             = tol_factor,
+                newton_ftol            = newton_ftol,
             )
 
         if limit_blas_threads:
@@ -261,8 +255,8 @@ class LatentSpaceEmbeddings:
                     result = _run()
             except ImportError:
                 print("threadpoolctl unavailable; BLAS threads not pinned. On clusters "
-                      "with a many-threaded OpenBLAS this makes the Newton path much "
-                      "slower -- set OMP_NUM_THREADS=1 before starting python.")
+                      "with a many-threaded OpenBLAS this makes the sequential stage "
+                      "much slower -- set OMP_NUM_THREADS=1 before starting python.")
                 result = _run()
         else:
             result = _run()
@@ -281,7 +275,7 @@ class LatentSpaceEmbeddings:
                                    p:                float = 1,
                                    link:             str   = "inverse_distance",
                                    target_precision: float = FTOL_JOINT,
-                                   gtol_factor:      float = GTOL_FACTOR,
+                                   gtol_factor:      float = GTOL_JOINT,
                                    maxcor:           int   = MAXCOR_JOINT):
         """Stage 2: joint optimization over all samples and timepoints, with smoothing.
 
