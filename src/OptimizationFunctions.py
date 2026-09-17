@@ -4,14 +4,16 @@
 
 Model
 -----
-Pairwise coalescent rates ``lambda_ijt`` inferred from ARGs are fitted by a latent
-position model.  Writing ``d_ij = ||X_i - X_j||`` for the latent distance and
+Pairwise coalescent rates ``lambda_ijt`` (nxnxT) estimated from ARGs are fitted by a latent
+position model.  Writing ``d_ij = ||X_i - X_j||`` for the latent distance (X is nxd) and
 ``f_ij = f(d_ij)`` for the link function, the per-slice (unpenalized) loss is
 
     l(X_t) = 0.5 * sum_{i,j} w_ij [ f_ij - lambda_ij ln f_ij ]
 
-optimized with L-BFGS-B: first sequentially over time slices (unpenalized), then
-jointly over all slices with a temporal smoothing penalty.
+Weights are set to ``DEFAULT_WEIGHTS`` if not supplied.
+optimized in two rounds:
+1. Sequential optimization, by a modified Newton method at each time slice
+2. Joint optimization, by L-BFGS-B over the whole trajectory
 
 Laplacian formulation
 ---------------------
@@ -30,40 +32,25 @@ pair is counted once across the full double sum), and therefore the gradient is
 
     grad_X l = L X          with   L = diag(sum_j g_ij) - G,   G = (g_ij)
 
-with **no** factor of 2.  The manuscript appendix writes a loss without the 0.5 and
-so reports ``grad = 2 L X``; the code deliberately does not match the appendix here.
+with **no** factor of 2. 
 
-Convergence tolerances
+Convergence criteria
 ----------------------
-SciPy's L-BFGS-B stops on a *relative* function criterion and an *absolute* gradient
-criterion:
-
-    (f_k - f_{k+1}) / max(|f_k|, |f_{k+1}|, 1) <= ftol
-    max_i |proj g_i|                           <= gtol
-
-Because the weights ``w_ij`` are of order 1e6, the objective and its gradient are of
-that order too, so an absolute ``gtol`` is meaningless unless set absurdly small --
-which is why the historical code carried ``GTOL_TIMEPOINT = 1e-16`` and relied on
-``ftol`` alone.  The objective is deliberately left unnormalized (normalizing would
-change the penalty's relative scale).  Instead ``ftol`` is the primary criterion,
-exposed as ``target_precision``, and ``gtol`` is made scale-aware by setting it to
-``gtol_factor * max|grad|`` evaluated at the initial point.
+1. Sequential optimization: the modified Newton method is run until the relative loss change
+is below the tolerance ``FTOL_NEWTON`` or max iterations ``MAX_ITER_NEWTON`` are reached.
+2. Joint optimization: the L-BFGS-B algorithm is run until the relative loss change is below
+the tolerance ``FTOL_JOINT`` or max iterations ``MAX_ITER_JOINT`` are reached.
 """
 
-FTOL_TIMEPOINT     = 1e-9
-MAX_ITER_TIMEPOINT = 12000
-MAXCOR_TIMEPOINT   = 10
+FTOL_NEWTON        = 1e-6
+FTOL_JOINT         = 1e-6
+GTOL_JOINT         = 1e-12
 
-FTOL_JOINT         = 1e-9
-MAX_ITER_JOINT     = 2500
+MAX_ITER_NEWTON    = 2000
+MAX_ITER_JOINT     = 5000
 MAXCOR_JOINT       = 20
 
-GTOL_FACTOR        = 1e-8
 DEFAULT_WEIGHTS    = 1e6
-
-# --- Sequential stage: damped-Newton path (the default solver) ---
-MAX_ITER_NEWTON    = 1500
-TOL_FACTOR_NEWTON  = 1e-10
 
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -73,11 +60,6 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
-
-# The gradient is a difference of terms of order |loss|, so ~eps*|loss| is its float64
-# noise floor; tolerances below it cannot be met and only burn the iteration budget.
-GRAD_FLOOR_EPS     = 1e2 * np.finfo(float).eps
-
 
 ############################################################
 # Link functions
@@ -202,12 +184,26 @@ def compute_distances(X_t: np.ndarray) -> np.ndarray:
 
 
 def default_valid_mask(R: np.ndarray) -> np.ndarray:
-    """The default validity mask: entries whose rate is not NaN.
+    """The default validity mask: off-diagonal entries whose rate is not NaN.
 
-    This covers both the diagonal and the unsampled ancient-sample entries, since
-    LatentSpaceEmbeddings writes NaN into R at both.
+    Unsampled ancient-sample entries are excluded because LatentSpaceEmbeddings writes
+    NaN into R there.  The diagonal is excluded *structurally* rather than relying on
+    it being NaN: a self-pair has no rate, and a finite R_ii would otherwise enter the
+    loss with d_ii = 0 clamped to link.eps, pinning each sample to itself.
+
+    Args:
+        R: (n, n) rates for one slice, or (n, n, T).
+
+    Returns:
+        Boolean mask of the same shape, False on the i == j diagonal.
     """
-    return ~np.isnan(R)
+    if R.ndim not in (2, 3) or R.shape[0] != R.shape[1]:
+        raise ValueError(f"R must be (n, n) or (n, n, T), got shape {R.shape}.")
+    mask = ~np.isnan(R)
+    # Works for both ranks: indexes the (i, i) diagonal, keeping any trailing time axis
+    idx = np.arange(R.shape[0])
+    mask[idx, idx] = False
+    return mask
 
 
 def compute_gradient_weights(
@@ -258,9 +254,7 @@ def compute_difference_operators(
 
     D_1 is the (T-1, T) forward-difference matrix divided by delta_t; D_k is the
     composition of k such matrices of decreasing height, so D_k has shape (T-k, T)
-    and carries an overall 1/delta_t**k.  No square zero-padding is applied: the
-    padded row of the previous implementation propagated artificial zero rows
-    through the composition.
+    and carries an overall 1/delta_t**k.
 
     Args:
         n_timepoints: Length T of the (uniform) time grid.
@@ -391,9 +385,38 @@ def _iter_slices(
         raise ValueError(f"X must be (n, d) or (n, d, T), got shape {X.shape}.")
 
 
+def _resolve_gtol(grad_init: np.ndarray, gtol_factor: float) -> float:
+    """Scale-aware gradient tolerance: a fraction of the initial gradient's size.
+
+    An absolute gtol is meaningless here because the weights (and hence the
+    gradients) are of order 1e6; see the module docstring.  Used by the joint stage,
+    whose L-BFGS-B call takes a gtol.
+    """
+    scale = float(np.max(np.abs(grad_init)))
+    return gtol_factor * scale if scale > 0 else 0.0
+
+
 def _default_weights_like(R: np.ndarray) -> np.ndarray:
-    """Uniform fallback weights, used when no standard errors are supplied."""
-    return np.ones_like(R, dtype=float) * DEFAULT_WEIGHTS
+    """Uniform fallback weights, used when no standard errors are supplied.
+
+    DEFAULT_WEIGHTS off the diagonal and zero on it: a self-pair carries no
+    information, so it gets no weight.  This mirrors default_valid_mask, which also
+    drops the diagonal structurally; the two agree so that a finite R_ii can never
+    reach the loss through either route.
+
+    Args:
+        R: (n, n) rates for one slice, or (n, n, T).
+
+    Returns:
+        Weights of the same shape, zero on the i == j diagonal.
+    """
+    if R.ndim not in (2, 3) or R.shape[0] != R.shape[1]:
+        raise ValueError(f"R must be (n, n) or (n, n, T), got shape {R.shape}.")
+    W = np.ones_like(R, dtype=float) * DEFAULT_WEIGHTS
+    # Works for both ranks: indexes the (i, i) diagonal, keeping any trailing time axis
+    idx = np.arange(R.shape[0])
+    W[idx, idx] = 0.0
+    return W
 
 
 ############################################################
@@ -562,41 +585,19 @@ def modified_newton_direction(
     grad: np.ndarray,
     delta_ratio: float = 1e-8,
 ) -> np.ndarray:
-    """Descent direction ``p`` solving ``|H| p = -grad`` for an indefinite Hessian.
+    """Descent direction ``p`` solving ``B p = -grad``, with ``B`` a positive definite
+    modification of the indefinite Hessian.
 
-    The exact Hessian is genuinely indefinite away from a minimum -- the repulsive term
-    contributes negative curvature (34 of 120 eigenvalues negative on a typical slice) --
-    so the raw Newton step ``-H^-1 grad`` can point uphill.  ``H`` must therefore be
-    modified into something positive definite before it is inverted.
-
-    The modification is the textbook one: eigendecompose ``H = V diag(lambda) V^T`` and
-    replace each eigenvalue by ``max(|lambda|, delta)``.  Flipping the sign of the negative
-    eigenvalues preserves the curvature magnitude along every eigenvector while making the
-    matrix positive definite, so ``p`` is always a descent direction and the step length
-    along each direction still reflects how sharply the loss curves there.
-
-    The floor ``delta`` matters as much as the flip.  The loss is invariant to rigid
-    motions of the whole configuration, so ``H`` has exact zero eigenvalues -- the two
-    translations always, and the rotation at a stationary point -- and ``1/|lambda|`` on
-    those would be infinite.  Flooring at ``delta_ratio * max|lambda|`` caps the effective
-    condition number of the modified matrix at ``1/delta_ratio``.  Measured on a hard
-    slice, exactly 3 of 100 eigenvalues fall below the floor, so it regularises the gauge
-    modes and leaves the genuine curvature untouched.
-
-    A Levenberg-Marquardt diagonal shift (``H + mu I``) is deliberately *not* offered.
-    On this loss the most negative eigenvalue is up to 4.9x larger in magnitude than the
-    largest positive one, so any ``mu`` achieving positive definiteness swamps the good
-    curvature and the direction collapses to steepest descent (measured cos(p, -grad) =
-    0.997-0.999).  Adding a shift *on top of* the sign flip was also tested, where ``mu``
-    need only lift the near-zero eigenvalues: it improved the conditioning of the modified
-    matrix by up to 100x but was slower at every shift tried, needing ~50% more iterations,
-    so it is not offered either.
+    Eigendecompose ``H = V diag(lambda) V^T`` and replace each eigenvalue by
+    ``max(|lambda|, delta)``, where ``delta = delta_ratio * max|lambda|``.  The sign flip
+    makes ``B`` positive definite while preserving the curvature magnitude along each
+    eigenvector; the floor keeps the rigid-motion null modes (translations always, rotation
+    at a stationary point) from dividing by zero and caps cond(B) at ``1/delta_ratio``.
 
     Args:
         H: (N, N) symmetric Hessian, N = n*d.
         grad: (N,) flattened gradient.
-        delta_ratio: Eigenvalues are floored at ``delta_ratio * max|lambda|``, which also
-            lifts the translation/rotation null modes.
+        delta_ratio: Eigenvalues are floored at ``delta_ratio * max|lambda|``.
 
     Returns:
         (N,) direction ``p`` with ``grad . p < 0``.
@@ -709,51 +710,6 @@ def compute_penalty_loss_gradient(
 
     return loss, grad
 
-
-############################################################
-# Penalized loss + gradient assembly
-############################################################
-
-def compute_penalized_loss_gradient(
-    x_flat: np.ndarray,
-    problem: dict,
-) -> tuple[float, np.ndarray]:
-    """Penalized loss and gradient on the packed coordinate vector.
-
-    This is the callable passed to L-BFGS-B in the joint stage.  It unpacks the
-    present coordinates, evaluates the data term slice by slice and the smoothing
-    penalty per sample on that sample's present time window, then packs the gradient
-    back down so absent entries never enter the optimizer's variable vector.
-
-    Args:
-        x_flat: Packed coordinates (see pack_coordinates).
-        problem: {"R", "W", "link", "sampled_by_time", "shape" (n, d, T),
-            "smoothing_params" (may be None), optionally "valid_mask"}.
-
-    Returns:
-        (loss, packed gradient).
-    """
-    n, d, T = problem["shape"]
-    sampled_by_time = problem["sampled_by_time"]
-    X = unpack_coordinates(x_flat, sampled_by_time, n, d, T)
-
-    # Data term over all slices
-    loss, grad_flat = compute_loss_gradient(X.ravel(), (n, d, T), problem)
-    grad = grad_flat.reshape(n, d, T)
-
-    # Smoothing penalty, per sample, on that sample's present window
-    smoothing_params = problem.get("smoothing_params")
-    if smoothing_params is not None:
-        pen_loss, pen_grad = compute_penalty_over_samples(
-            X, sampled_by_time, smoothing_params
-        )
-        loss += pen_loss
-        grad += pen_grad
-
-    _assert_finite(loss, grad)
-    return loss, pack_coordinates(grad, sampled_by_time)
-
-
 def compute_penalty_over_samples(
     X: np.ndarray,
     sampled_by_time: np.ndarray,
@@ -807,6 +763,49 @@ def compute_penalty_over_samples(
 
     return loss, grad
 
+############################################################
+# Penalized loss + gradient assembly
+############################################################
+
+def compute_penalized_loss_gradient(
+    x_flat: np.ndarray,
+    problem: dict,
+) -> tuple[float, np.ndarray]:
+    """Penalized loss and gradient on the packed coordinate vector.
+
+    This is the callable passed to L-BFGS-B in the joint stage.  It unpacks the
+    present coordinates, evaluates the data term slice by slice and the smoothing
+    penalty per sample on that sample's present time window, then packs the gradient
+    back down so absent entries never enter the optimizer's variable vector.
+
+    Args:
+        x_flat: Packed coordinates (see pack_coordinates).
+        problem: {"R", "W", "link", "sampled_by_time", "shape" (n, d, T),
+            "smoothing_params" (may be None), optionally "valid_mask"}.
+
+    Returns:
+        (loss, packed gradient).
+    """
+    n, d, T = problem["shape"]
+    sampled_by_time = problem["sampled_by_time"]
+    X = unpack_coordinates(x_flat, sampled_by_time, n, d, T)
+
+    # Data term over all slices
+    loss, grad_flat = compute_loss_gradient(X.ravel(), (n, d, T), problem)
+    grad = grad_flat.reshape(n, d, T)
+
+    # Smoothing penalty, per sample, on that sample's present window
+    smoothing_params = problem.get("smoothing_params")
+    if smoothing_params is not None:
+        pen_loss, pen_grad = compute_penalty_over_samples(
+            X, sampled_by_time, smoothing_params
+        )
+        loss += pen_loss
+        grad += pen_grad
+
+    _assert_finite(loss, grad)
+    return loss, pack_coordinates(grad, sampled_by_time)
+
 
 def _operators_for_block(smoothing_params: dict, block_length: int) -> dict:
     """Smoothing params restricted to a present window of a given length.
@@ -835,17 +834,6 @@ def _operators_for_block(smoothing_params: dict, block_length: int) -> dict:
 ############################################################
 # Sequential (per-slice) optimization
 ############################################################
-
-def _resolve_gtol(grad_init: np.ndarray, gtol_factor: float) -> float:
-    """Scale-aware gradient tolerance: a fraction of the initial gradient's size.
-
-    An absolute gtol is meaningless here because the weights (and hence the
-    gradients) are of order 1e6; see the module docstring.
-    """
-    scale = float(np.max(np.abs(grad_init)))
-    return gtol_factor * scale if scale > 0 else 0.0
-
-
 def _wolfe_step(
     x: np.ndarray,
     direction: np.ndarray,
@@ -944,51 +932,6 @@ def _wolfe_step(
     return alpha, x + alpha * direction, f_new, g_new, len(cache)
 
 
-def _newton_slice_tolerance(
-    X_t_init: np.ndarray,
-    problem: dict,
-    tol_factor: float,
-    seed: Optional[int] = None,
-) -> float:
-    """Gradient tolerance that does not depend on the warm start's quality.
-
-    ``_resolve_gtol`` anchors the tolerance to ``max|grad|`` *at the initial point*.  After
-    a warm start that gradient is already small, so the tolerance tightens and loosens with
-    the warm start: a slice that begins close to its optimum is permitted to stop close to
-    where it began.  That is precisely the mechanism that entrenches a residual for the
-    next slice to inherit -- the staircase.
-
-    Instead anchor to the gradient scale of a *random* configuration at the same spatial
-    scale (one extra gradient evaluation per slice), and floor the result at what float64
-    can actually resolve.  The floor is required, not cosmetic: the gradient is a
-    difference of terms of order |loss|, so ~eps*|loss| is its noise floor.  Without it,
-    tolerances landed at 2.8e-17 on the ``split`` run and slices burned their whole
-    iteration budget chasing round-off (92 s for 59 slices; 24x faster with the floor, at
-    100% tolerance attainment).
-
-    Args:
-        X_t_init: (n, d) starting configuration, used only for its spatial scale.
-        problem: {"R", "W", "link"}.
-        tol_factor: Multiplier on the random-configuration gradient scale.
-        seed: Seed for the probe configuration, so a sweep is reproducible.
-
-    Returns:
-        Absolute tolerance on max|grad|.
-    """
-    Xc = X_t_init - X_t_init.mean(axis=0)
-    scale = float(np.sqrt((Xc ** 2).sum(axis=1).mean()))
-    if not np.isfinite(scale) or scale <= 0:
-        scale = 1.0
-
-    probe = scale * np.random.default_rng(seed).standard_normal(X_t_init.shape)
-    _, g_probe = compute_loss_gradient(probe.ravel(), X_t_init.shape, problem)
-    g_scale = float(np.max(np.abs(g_probe)))
-
-    loss_init, _ = compute_loss_gradient(X_t_init.ravel(), X_t_init.shape, problem)
-    floor = GRAD_FLOOR_EPS * abs(float(loss_init))
-    return max(tol_factor * g_scale, floor)
-
-
 def optimize_timepoint_newton(
     X_t_init: np.ndarray,
     R_t: np.ndarray,
@@ -998,28 +941,22 @@ def optimize_timepoint_newton(
     N_max: float = np.inf,
     p: float = 1.0,
     max_iter: int = MAX_ITER_NEWTON,
-    tol: Optional[float] = None,
-    tol_factor: float = TOL_FACTOR_NEWTON,
+    ftol: float = FTOL_NEWTON,
     delta_ratio: float = 1e-8,
-    tol_seed: Optional[int] = None,
 ) -> tuple:
     """Damped-Newton solve for one timepoint, on the exact Hessian.
 
     Per iteration: build the exact Hessian, modify it to positive definite via
-    ``modified_newton_direction``, and take a strong-Wolfe step.  The
-    eigendecomposition is rebuilt every iteration deliberately -- reusing one modified Hessian
-    per slice (the Vladymyrov-style trick) was tested and is catastrophic on this loss
-    (31,268 iterations against 151, 188x slower at n=100), because the curvature depends
-    on X through f(d_ij) and changes fast.
+    ``modified_newton_direction``, and take a strong-Wolfe step.  The eigendecomposition is
+    rebuilt every iteration: the curvature depends on X through ``f(d_ij)`` and changes too
+    fast to reuse one factorisation per slice.
 
-    Against L-BFGS-B on the same problems, Newton reaches its tolerance on 100% of slices
-    where L-BFGS reaches it on 8.5-20.3%: L-BFGS does not merely stop early, it *stalls*,
-    halting at a median 167 of 4000 allowed iterations having missed its tolerance by a
-    median factor of 15x, because a limited-memory curvature model cannot represent this
-    problem's condition number of 1e6-1e9.
+    Stops on the relative loss change, ``|f_k - f_{k-1}| / max(|f_k|, 1) <= ftol``.
+    Gradient- and step-size-based rules were both tried and rejected: neither is monotone
+    near the optimum here, so no single threshold behaves consistently across slices.
 
-    Note that this does dense linear algebra per slice, so BLAS threading matters here in
-    a way it did not for the L-BFGS path; see ``limit_blas_threads``.
+    This does dense linear algebra per slice, so BLAS threading matters in a way it did not
+    for the L-BFGS path; see ``limit_blas_threads``.
 
     Args:
         X_t_init: (n, d) initial coordinates.
@@ -1028,11 +965,8 @@ def optimize_timepoint_newton(
         link: LinkFunction or link name (with N_min/p used to build one).
         N_min, N_max, p: Link parameters, used when ``link`` is a bare name.
         max_iter: Maximum Newton iterations.
-        tol: Absolute tolerance on max|grad|; if None it is derived per slice by
-            ``_newton_slice_tolerance``, which does not depend on the warm start.
-        tol_factor: Multiplier used by that rule.
+        ftol: Relative loss change at which to stop.
         delta_ratio: Eigenvalue floor ratio for the Hessian modification.
-        tol_seed: Seed for the tolerance probe configuration.
 
     Returns:
         (X_opt, loss, n_iterations, message).
@@ -1046,19 +980,13 @@ def optimize_timepoint_newton(
     problem = {"R": R_t, "W": np.asarray(W_t, dtype=np.float64), "link": link}
     shape = X_t_init.shape
 
-    if tol is None:
-        tol = _newton_slice_tolerance(X_t_init, problem, tol_factor, seed=tol_seed)
-
     x = np.asarray(X_t_init, dtype=np.float64).ravel().copy()
     f, g = compute_loss_gradient(x, shape, problem)
     f = float(f)
 
     n_iter = 0
-    message = "converged: max|grad| <= tol"
+    message = f"stopped: reached max_iter ({max_iter})"
     for n_iter in range(1, max_iter + 1):
-        if np.max(np.abs(g)) <= tol:
-            n_iter -= 1
-            break
         H = compute_exact_hessian(x.reshape(shape), R_t, W_t, link=link)
         direction = modified_newton_direction(
             H, g, delta_ratio=delta_ratio
@@ -1067,76 +995,18 @@ def optimize_timepoint_newton(
             x, direction, shape, problem, f, g
         )
         if alpha == 0.0:
+            # A failed line search is reported rather than silently called convergence:
+            # the two are indistinguishable from the step size alone, and conflating them
+            # is how a stalled slice would pass unnoticed.
             message = "stopped: line search failed to find a step"
             break
-        x, f, g = x_new, f_new, g_new
-    else:
-        message = f"stopped: reached max_iter ({max_iter})"
+        dfrac = abs(float(f_new) - f) / max(abs(float(f_new)), 1.0)
+        x, f, g = x_new, float(f_new), g_new
+        if dfrac <= ftol:
+            message = "converged: relative loss change <= ftol"
+            break
 
-    if np.max(np.abs(g)) <= tol:
-        message = "converged: max|grad| <= tol"
     return x.reshape(shape), f, n_iter, message
-
-
-def optimize_timepoint(
-    X_t_init: np.ndarray,
-    R_t: np.ndarray,
-    W_t: Optional[np.ndarray] = None,
-    link: Union[LinkFunction, str] = "inverse_distance",
-    N_min: float = 1.0,
-    N_max: float = np.inf,
-    p: float = 1.0,
-    max_iter: int = MAX_ITER_TIMEPOINT,
-    ftol: float = FTOL_TIMEPOINT,
-    gtol_factor: float = GTOL_FACTOR,
-    maxcor: int = MAXCOR_TIMEPOINT,
-    return_hess_inv: bool = False,
-) -> tuple:
-    """Single L-BFGS-B solve for one timepoint.
-
-    Args:
-        X_t_init: (n, d) initial coordinates.
-        R_t: (n, n) rates.
-        W_t: (n, n) weights; defaults to DEFAULT_WEIGHTS.
-        link: LinkFunction or link name (with N_min/p used to build one).
-        N_min, N_max, p: Link parameters, used when ``link`` is a bare name.
-            1/N_max is added to the rates, so a pair with zero rate still carries
-            weight.
-        max_iter: Maximum L-BFGS-B iterations.
-        ftol: Relative function tolerance (the primary criterion).
-        gtol_factor: gtol is set to gtol_factor * max|grad| at the initial point.
-        maxcor: L-BFGS memory (number of stored correction pairs).
-        return_hess_inv: If True, also return the L-BFGS inverse Hessian.
-
-    Returns:
-        (X_opt, loss, n_iterations, message), plus hess_inv when requested.
-    """
-    link = _as_link(link, N_min=N_min, p=p)
-    if W_t is None:
-        W_t = _default_weights_like(R_t)
-
-    # 1/N_max keeps zero-rate pairs from carrying zero weight
-    R_t = np.asarray(R_t, dtype=np.float64) + 1.0 / N_max
-    problem = {"R": R_t, "W": np.asarray(W_t, dtype=np.float64), "link": link}
-    shape = X_t_init.shape
-
-    _, grad_init = compute_loss_gradient(X_t_init.ravel(), shape, problem)
-    gtol = _resolve_gtol(grad_init, gtol_factor)
-
-    result = minimize(
-        compute_loss_gradient,
-        X_t_init.ravel(),
-        args=(shape, problem),
-        method="L-BFGS-B",
-        jac=True,
-        options={"maxiter": max_iter, "disp": False, "gtol": gtol,
-                 "ftol": ftol, "maxcor": maxcor},
-    )
-    X_opt = result.x.reshape(shape)
-    if return_hess_inv:
-        return X_opt, result.fun, result.nit, result.message, result.hess_inv
-    return X_opt, result.fun, result.nit, result.message
-
 
 def coordinate_descent_over_time(
     R: np.ndarray,
@@ -1149,14 +1019,9 @@ def coordinate_descent_over_time(
     X_init: Optional[np.ndarray] = None,
     sampled_by_time: Optional[np.ndarray] = None,
     direction: str = "backward",
-    max_iter: int = MAX_ITER_TIMEPOINT,
-    target_precision: float = FTOL_TIMEPOINT,
-    gtol_factor: float = GTOL_FACTOR,
-    maxcor: int = MAXCOR_TIMEPOINT,
+    max_iter: int = MAX_ITER_NEWTON,
     return_covariances: bool = False,
-    exact_hessian: bool = True,
-    solver: str = "newton",
-    tol_factor: float = TOL_FACTOR_NEWTON,
+    newton_ftol: float = FTOL_NEWTON,
 ) -> tuple:
     """Single-pass coordinate descent over timepoints (default: backward).
 
@@ -1165,15 +1030,7 @@ def coordinate_descent_over_time(
     slices, so the growing set of ancient samples does not translate the configuration
     for reasons unrelated to structure.
 
-    Two properties of this loss shape the default solver.  It is badly conditioned
-    (per-slice Hessian condition number 1e6-1e9, worsening toward the present, because
-    with ``f = 1/(N_min + d^p)`` the latent distances near the present are large and the
-    curvature ~ d^-p is minute), and its Hessian is indefinite.  L-BFGS-B stalls on that
-    conditioning -- it reaches its tolerance on 8.5-20.3% of slices against Newton's
-    100% -- and since each slice warm-starts from the previous one, the un-converged
-    residual is inherited and discharged in occasional jumps, producing staircase-like
-    trajectories.  ``solver="newton"`` (the default) replaces it with damped Newton on
-    the exact Hessian; ``solver="lbfgs"`` keeps the previous behaviour.
+    Each slice is solved by damped Newton on the exact Hessian (see ``optimize_timepoint_newton``).
 
     Args:
         R: (n, n, T) rate tensor.
@@ -1184,32 +1041,17 @@ def coordinate_descent_over_time(
         X_init: (n, d, T) initial coordinates; random if None.
         sampled_by_time: (n, T) presence mask; all-present if None.
         direction: "backward" (default) or "forward".
-        max_iter: Maximum iterations per slice; the L-BFGS default (MAX_ITER_TIMEPOINT)
-            is used for solver="lbfgs" and MAX_ITER_NEWTON for solver="newton".
-        target_precision: ftol, solver="lbfgs" only; 1e-9 for exploratory sweeps,
-            1e-12 for final runs.
-        gtol_factor: Scale factor for the per-slice gtol, solver="lbfgs" only.
-        maxcor: L-BFGS memory, solver="lbfgs" only.
-        return_covariances: If True, also return per-sample Laplace covariances,
-            shape (n, d, d, T).
-        exact_hessian: If True (default), use the exact analytical Hessian for those
-            covariances; if False, materialise the L-BFGS approximation instead
-            (faster but significantly less accurate).  Only meaningful together with
-            ``return_covariances``; with solver="newton" the L-BFGS inverse Hessian is
-            unavailable, so exact_hessian=False falls back to the exact one.
-        solver: "newton" (default) for damped Newton on the exact Hessian, or "lbfgs"
-            for the previous scipy L-BFGS-B path.
-        tol_factor: Multiplier on the random-configuration gradient scale that sets each
-            slice's tolerance, solver="newton" only (see ``_newton_slice_tolerance``).
+        max_iter: Maximum damped-Newton iterations per slice.
+        return_covariances: If True, also return per-sample Laplace covariances from
+            the exact analytical Hessian, shape (n, d, d, T).
+        newton_ftol: Relative loss change at which each slice stops (see
+            ``optimize_timepoint_newton`` for why this criterion).
 
     Returns:
         (X, loss_df) or (X, loss_df, covariances).
     """
     if direction not in ("backward", "forward"):
         raise ValueError(f"direction must be 'backward' or 'forward', got {direction!r}.")
-    if solver not in ("newton", "lbfgs"):
-        raise ValueError(f"solver must be 'newton' or 'lbfgs', got {solver!r}.")
-
     link = _as_link(link, N_min=N_min, p=p)
     n_samples, _, n_timepoints = R.shape
 
@@ -1220,19 +1062,10 @@ def coordinate_descent_over_time(
     if X_init is None:
         X_init = np.random.rand(n_samples, n_components, n_timepoints)
 
-    if solver == "newton":
-        newton_max_iter = MAX_ITER_NEWTON if max_iter == MAX_ITER_TIMEPOINT else max_iter
-        print(
-            f"Sequential (per-slice) stage: damped Newton (exact Hessian), "
-            f"tol=max(tol_factor*|grad| at a random config, {GRAD_FLOOR_EPS:g}*|loss|) "
-            f"with tol_factor={tol_factor:g}, max_iter={newton_max_iter}"
-        )
-    else:
-        print(
-            f"Sequential (per-slice) stage: L-BFGS-B, ftol={target_precision:g}, "
-            f"gtol=gtol_factor*max|grad_init| with gtol_factor={gtol_factor:g}, "
-            f"maxcor={maxcor}"
-        )
+    print(
+        f"Sequential (per-slice) stage: damped Newton (exact Hessian), "
+        f"stop on relative loss change <= {newton_ftol:g}, max_iter={max_iter}"
+    )
 
     X = np.full((n_samples, n_components, n_timepoints), np.nan)
     loss_before, loss_after, n_iters, messages = [], [], [], []
@@ -1269,30 +1102,16 @@ def coordinate_descent_over_time(
         loss_t_before, _ = compute_loss_gradient(X_t.ravel(), X_t.shape, problem_t)
 
         # --- Optimize ---
-        hess_inv = None
-        if solver == "newton":
-            X_t, loss_t_after, n_iter, message = optimize_timepoint_newton(
-                X_t_init=X_t, R_t=R_t, W_t=W_t, link=link, N_max=N_max,
-                max_iter=newton_max_iter, tol_factor=tol_factor, tol_seed=int(t_idx),
-            )
-        else:
-            need_hess_inv = return_covariances and not exact_hessian
-            X_t, loss_t_after, n_iter, message, *_hess = optimize_timepoint(
-                X_t_init=X_t, R_t=R_t, W_t=W_t, link=link, N_max=N_max,
-                max_iter=max_iter, ftol=target_precision, gtol_factor=gtol_factor,
-                maxcor=maxcor, return_hess_inv=need_hess_inv,
-            )
-            hess_inv = _hess[0] if _hess else None
+        X_t, loss_t_after, n_iter, message = optimize_timepoint_newton(
+            X_t_init=X_t, R_t=R_t, W_t=W_t, link=link, N_max=N_max,
+            max_iter=max_iter, ftol=newton_ftol,
+        )
 
         covs = None
         if return_covariances:
-            # The L-BFGS inverse-Hessian approximation only exists on the L-BFGS path;
-            # with Newton the exact Hessian is the only option available.
-            covs_exact = exact_hessian or solver == "newton"
             try:
                 covs = extract_sample_covariances(
                     X_t, R_t + 1.0 / N_max, W_t, link=link,
-                    hess_inv=hess_inv, exact=covs_exact,
                 )
             except np.linalg.LinAlgError as err:
                 raise np.linalg.LinAlgError(
@@ -1348,7 +1167,7 @@ def coordinate_descent_over_time(
 
 
 ############################################################
-# Joint optimization
+# Joint optimization (with regularized loss)
 ############################################################
 
 def optimize_jointly(
@@ -1363,7 +1182,7 @@ def optimize_jointly(
     sampled_by_time: Optional[np.ndarray] = None,
     max_iter: int = MAX_ITER_JOINT,
     target_precision: float = FTOL_JOINT,
-    gtol_factor: float = GTOL_FACTOR,
+    gtol_factor: float = GTOL_JOINT,
     maxcor: int = MAXCOR_JOINT,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Joint L-BFGS-B optimization over all samples and timepoints, with smoothing.
@@ -1480,10 +1299,12 @@ def extract_sample_covariances(
     link: Union[LinkFunction, str] = "inverse_distance",
     N_min: float = 1.0,
     p: float = 1.0,
-    hess_inv=None,
-    exact: bool = True,
 ) -> np.ndarray:
     """Extract per-sample d x d Laplace covariance blocks at one slice.
+
+    The Hessian is computed exactly and pseudoinverted.  (An L-BFGS inverse-Hessian
+    approximation was accepted here while that solver existed; it was both less
+    accurate and, now that every slice is solved by Newton, unavailable.)
 
     Args:
         X_t: (n, d) coordinates at the optimum.
@@ -1491,28 +1312,20 @@ def extract_sample_covariances(
         W_t: (n, n) weight matrix.
         link: LinkFunction or link name; must match the one used in optimization.
         N_min, p: Link parameters used when ``link`` is a bare name.
-        hess_inv: L-BFGS inverse Hessian (LbfgsInvHessProduct); used when exact=False.
-        exact: If True (default), compute the exact Hessian analytically and
-            pseudoinvert it.  If False, materialise the L-BFGS approximation.
 
     Returns:
         (n, d, d) array of per-sample covariance blocks.
     """
     link = _as_link(link, N_min=N_min, p=p)
     n, d = X_t.shape
-    if exact:
-        H = compute_exact_hessian(X_t, R_t, W_t, link=link)
-        # Eigendecompose (symmetric) and invert only positive eigenvalues.  This
-        # handles both the d translation-invariance zeros and any small negative
-        # eigenvalues arising from numerical imprecision.
-        eigvals, eigvecs = np.linalg.eigh(H)
-        threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
-        inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
-        H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
-    else:
-        if hess_inv is None:
-            raise ValueError("exact=False requires hess_inv from the L-BFGS result.")
-        H_inv = hess_inv @ np.eye(n * d)
+    H = compute_exact_hessian(X_t, R_t, W_t, link=link)
+    # Eigendecompose (symmetric) and invert only positive eigenvalues.  This
+    # handles both the d translation-invariance zeros and any small negative
+    # eigenvalues arising from numerical imprecision.
+    eigvals, eigvecs = np.linalg.eigh(H)
+    threshold = np.max(eigvals) * n * d * np.finfo(float).eps * 1e3
+    inv_eigvals = np.where(eigvals > threshold, 1.0 / eigvals, 0.0)
+    H_inv = (eigvecs * inv_eigvals) @ eigvecs.T
     return np.array([H_inv[i * d:(i + 1) * d, i * d:(i + 1) * d] for i in range(n)])
 
 
