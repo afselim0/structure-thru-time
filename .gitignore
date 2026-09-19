@@ -100,7 +100,19 @@ data/human_data/.scratch/
 # everything derived or downloaded is ignored, and only the documentation and the drivers
 # that rebuild it are tracked. resources/vcf/ holds a ~28 GB copy of the raw callset, and
 # intermediates/ another ~46 GB of per-chromosome working files.
-data/chimp_data/resources/
+# NOTE: the trailing pattern excludes CONTENTS but re-includes the directory itself, because
+# git does not descend into an excluded directory and a negation inside one is never seen.
+data/chimp_data/resources/*
+# ...except the small hand-built sample metadata, which is an INPUT rather than something
+# the drivers regenerate: the population labels/colours CoaSTT reads, and the sample
+# locations, which took a two-step accession -> BioSamples -> de Manuel supplement join to
+# reconstruct (see resources/samples/LOCATIONS.md).
+!data/chimp_data/resources/samples/
+data/chimp_data/resources/samples/*
+!data/chimp_data/resources/samples/*.csv
+!data/chimp_data/resources/samples/*.tsv
+!data/chimp_data/resources/samples/*.txt
+!data/chimp_data/resources/samples/*.md
 data/chimp_data/intermediates/
 data/chimp_data/SingerSnakemake_Input/
 data/chimp_data/results/

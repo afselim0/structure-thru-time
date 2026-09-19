@@ -1,0 +1,55 @@
+individual_name,population,subspecies,latitude,longitude,uncertainty_deg,country,region,demanuel_shortname,match_basis
+PD_0257,Western,verus,,,,,,,no_biosample_record
+PD_0258,Western,verus,,,,,,,no_biosample_record
+PD_0259,Eastern,schweinfurthii,,,,,,,no_biosample_record
+PD_0427,Western,verus,,,,,,,no_biosample_record
+SAMEA4374763,Western,verus,7,-7,,Ivory coast,Ivory coast,A991_Berta,unique_name
+SAMEA4374764,Western,verus,12,-13,,Guinea,Guinea,A992_Annie,unique_name
+SAMEA4374765,Western,verus,10,-14,,Guinea,Guinea,A993_Mike,unique_name
+SAMEA4374766,Western,verus,6,-9,,Liberia,Liberia,B005_SeppToni,unique_name
+SAMEA4374767,Western,verus,6,-9,,Liberia,Liberia,B006_Linda,unique_name
+SAMEA4374768,Western,verus,7,-5.5,,Ivory coast,Ivory coast,N014_Cindy,subspecies_disambiguated
+SAMEA4374769,Western,verus,7,-5.5,,Ivory coast,Ivory coast,N016_Alice,unique_name
+SAMEA4374770,Central,troglodytes,NA,NA,,NA,NA,B025_Marlin - correct name Marina,unique_name_no_coords
+SAMEA4374773,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,B022_Tibe,unique_name
+SAMEA4374774,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,B021_Yogui,unique_name
+SAMEA4374775,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,A990_Noemie,unique_name
+SAMEA4374776,Central,troglodytes,,,,NA,NA,10964_Cindy,subspecies_disambiguated_no_coords
+SAMEA4374777,Central,troglodytes,,,,NA,NA,11352_Mirinda,unique_name_no_coords
+SAMEA4374778,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,12311_Ula,unique_name
+SAMEA4374779,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,12320_Lara,unique_name
+SAMEA4374780,Central,troglodytes,1.5,10.5,,Equatorial Guinea,Equatorial Guinea,12348_Luky,unique_name
+SAMEA4374781,Central,troglodytes,NA,NA,,NA,NA,12420_Gamin,unique_name_no_coords
+SAMEA4374782,Central,troglodytes,NA,NA,,NA,NA,13656_Brigitta,unique_name_no_coords
+SAMEA4374785,Central,troglodytes,NA,NA,,NA,NA,11528_Alfred,unique_name_no_coords
+SAMEA4374787,Eastern,schweinfurthii,-1,28,,DRC,DRC-East,B002_Padda,unique_name
+SAMEA4374788,Eastern,schweinfurthii,2,32,,Uganda,Uganda-West,B007_Cindy,subspecies_disambiguated
+SAMEA4374789,Eastern,schweinfurthii,3,31,,DRC,North-West DRC,B010_Ikuru,unique_name
+SAMEA4374790,Eastern,schweinfurthii,-1.2,29.3,,DRC,DRC,N013_Tongo,unique_name
+SAMEA4374791,Eastern,schweinfurthii,0,20,,DRC,DRC,N015_Cleo,unique_name
+SAMEA4374792,Eastern,schweinfurthii,-2,29,,DRC,DRC,N017_Bihati,unique_name
+SAMEA4374793,Eastern,schweinfurthii,0,26,,DRC- east near Rwanda,DRC-east,N018_Trixie,unique_name
+SAMEA4374794,Eastern,schweinfurthii,-2,30,,Rwanda,Rwanda,B011_Frederike,unique_name
+SAMEA4374795,Eastern,schweinfurthii,-6,24,,DRC,DRC-South,N019_Maya,unique_name
+SAMEA4374796,Eastern,schweinfurthii,0,20,,Zambia,Zambia,B014_Coco,unique_name
+SAMEA4374797,Eastern,schweinfurthii,0.5,29.5,,DRC,DRC-North,B013_Athanga,unique_name
+SAMEA4374798,Eastern,schweinfurthii,-12,27,,DRC,DRC-South,B012_Washu,unique_name
+SAMEA4374799,Eastern,schweinfurthii,,,,DRC,DRC-North/West,Mgbadolite,unique_name_no_coords
+SAMN01920517,NC,ellioti,4.79855,9.2901,,Cameroon,Western Cameroon,Akwaya_Jean,unique_name
+SAMN01920520,NC,ellioti,6.387525,10.6643,,Cameroon,Western Cameroon,Damian,unique_name
+SAMN01920521,NC,ellioti,6.78872,11.53365,,Cameroon,Western Cameroon,Julie,subspecies_disambiguated
+SAMN01920523,NC,ellioti,4.15989,9.14837,,Cameroon,Western Cameroon,Koto,unique_name
+SAMN01920525,NC,ellioti,6.637165,10.9659,,Cameroon,Western Cameroon,Taweh,unique_name
+SAMN01920527,Eastern,schweinfurthii,-5,30,,Tanzania,Tanzania-Gombe National Park,100037_Vincent,unique_name
+SAMN01920528,Eastern,schweinfurthii,-5,30,,Tanzania,Tanzania-Gombe National Park,100040_Andromeda,unique_name
+SAMN01920530,Eastern,schweinfurthii,0,30,,Uganda,Uganda-West,A910_Bwambale,unique_name
+SAMN01920531,Eastern,schweinfurthii,0,20,,DRC,DRC,A911_Kidongo,unique_name
+SAMN01920532,Eastern,schweinfurthii,0,26,,DRC,DRC,A912_Nakuu,unique_name
+SAMN01920533,Central,troglodytes,-1.5,14,,Gabon,Gabon-East,A957_Vaillant,unique_name
+SAMN01920534,Central,troglodytes,-2,10,,Gabon,Gabon-West,A958_Doris,unique_name
+SAMN01920535,Central,troglodytes,-1.5,14,,Gabon,Gabon-East,A959_Julie,subspecies_disambiguated
+SAMN01920537,Western,verus,NA,NA,,NA,NA,9668_Bosco,unique_name_no_coords
+SAMN01920538,Western,verus,NA,NA,,NA,NA,A956_Jimmie,unique_name_no_coords
+SAMN01920539,Western,verus,NA,NA,,NA,NA,X00100_Koby,unique_name_no_coords
+SAMN01920540,Western,verus,,,,Captive Born,Captive Born,Clint,unique_name_no_coords
+SAMN01920541,W x C,verus x troglodytes,NA,NA,,Captive Born,Captive Born,9730_Donald,unique_name_no_coords
