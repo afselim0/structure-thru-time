@@ -111,8 +111,43 @@ sources:
       rows: 8497640
       mapped_length_mb: 2429.5
       length_weighted_mean_rho_per_kb: 0.80044
+      rho_validates_against_publication: >
+        Stevison et al. 2016 (MBE 33:928, "The Time Scale of Recombination Rate Evolution in
+        Great Apes") reports a genome-wide population-scaled mean of 0.8 rho/kb for Nigerian
+        chimpanzee. Our 0.80044, measured independently across all 23 lifted autosomes,
+        matches it. That is a real check on the hg18 -> hg38 -> panTro6 liftover and on the
+        minus1/na parsing: had intervals been dropped or mis-oriented, the length-weighted
+        mean would have drifted off the published figure.
       global_scalar_to_1.1_cM_per_Mb: 1.37424
       global_scalar_to_1.2_cM_per_Mb: 1.49917
+      target_rate_provenance: >
+        OPEN ASSUMPTION, checked 2026-09-18, NOT resolved by the source.
+        The scalar is exactly 1.1 / 0.80044. The denominator is measured (above); the
+        numerator is an ASSUMED genome-wide mean supplied from outside the map, because an
+        LD map estimates rho = 4*Ne*r and carries no absolute scale -- it gives the shape of
+        rate variation, never its level.
+        Where 1.1 came from is not recorded anywhere in this repo or in chimp_args; the
+        README describes it only as "a human-derived figure". That provenance is the open
+        question -- NOT, on the evidence gathered, that the value is wrong.
+        Attempted verification 2026-09-18, mostly unsuccessful:
+          * Stevison et al. 2016 reports rho/kb only and supplies NO cM/Mb calibration, which
+            is why a scale had to be imported at all.
+          * Yu et al. 2001 (Nature 409:951) and Jensen-Seaman et al. 2004 (Genome Res
+            14:528) are both paywalled here; their reported human figures could not be read.
+          * An open secondary source (bionumbers, BNID 107023) gives ~1.0 cM/Mb for human.
+        Published human genome-wide estimates appear to span roughly 1.0-1.26 depending on
+        the map, marker set and whether unplaced distances count, so 1.1 sits INSIDE that
+        range rather than outside it. No verified cM/Mb figure for chimpanzee was obtained.
+        An earlier version of this entry asserted ~1.2 for both species and called 1.1 "~8%
+        low"; that came from a search-result summary, not a source that was read, and is
+        withdrawn. The alternative scalar for a 1.2 target (1.49917) is computed above should
+        the target ever be revisited.
+        CONSEQUENCE IF WRONG: the scalar multiplies every recombination rate handed to
+        SINGER, so it linearly rescales the time axis of every inferred ARG. Relative
+        structure between populations is unaffected; absolute coalescent times move by the
+        same factor. Switching 1.1 -> 1.2 would shorten inferred times by ~8.3%.
+        NOT CHANGED without a decision: the production run was built with 1.37424, and
+        re-scaling would require rebuilding every hapmap and re-running SINGER genome-wide.
       scalar_note: >
         §5 requires ONE global scalar across all chromosomes, never per chromosome: small
         chromosomes genuinely have higher cM/Mb because of the obligate crossover, and
