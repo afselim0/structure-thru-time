@@ -3,7 +3,7 @@ num_threads: 16
 
 # file paths
 output_path: /project/jnovembre/afselim/structure-thru-time/results/outputs/chimps/admix
-trees_dir: /project/jnovembre/afselim/structure-thru-time/data/chimp_data/results/chimp/ts_chunks
+trees_dir: /project/jnovembre/afselim/structure-thru-time/data/chimp_data/results/chimp/ts_chunks/draw_19
 pop_colors: ../data/chimp_data/resources/samples/pop_colors.csv
 pop_labels: ../data/chimp_data/resources/samples/pop_labels.csv
 

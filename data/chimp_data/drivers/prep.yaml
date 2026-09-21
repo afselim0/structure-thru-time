@@ -1455,14 +1455,26 @@ results_layout:
       (src/CountCoalEvents.py:141-151), so every chromosome's chunks go in ONE directory with
       no subdirectories.
     filename: "<chrom>_<start>_<end>.trees"
+    per_draw_subdirectories: >
+      Added 2026-09-21. Step 9 now extracts the last 8 posterior draws by default, one
+      directory each: results/chimp/ts_chunks/draw_<rep>/. Within a draw the layout is
+      unchanged and still flat -- the subdirectory level separates DRAWS, never chromosomes.
+      Draws are never pooled into one directory: they are repeat measurements of the same
+      genome, so CountCoalEvents would read each region as N independent contigs and multiply
+      its weight in the likelihood. One draw is one CoaSTT input; the app configs point at
+      draw_19.
     chr_prefix_kept: >
       Deliberate. A contig id starting with a digit is awkward in Python and pandas, and
       chr2A / chr2B are not numbers at all.
-    replicate: highest index in <chrom>/trees/<chrom>.<rep>.tsz -- the most burnt-in draw
+    replicate: >
+      the N highest indices in <chrom>/trees/<chrom>.<rep>.tsz -- the most burnt-in draws.
+      N defaults to 8, so draws 12-19 of the 20-draw chain.
     implementation: >
       ../human_data/scripts/extract_ts_chunks.py, imported rather than duplicated: its
       --singer-output / --out-dir interface carries no per-set assumption. Driver is
-      scripts/extract_chunks.sh.
+      scripts/extract_chunks.sh, which given --partition and --account submits one
+      scripts/extract_draw.sbatch per draw (~120 GB each, nothing shared between them) and
+      otherwise extracts them sequentially in the calling shell.
   verification_on_smoke_output:
     kept_chunks_in_chunks_p: 34      # of 37 intervals: 3 skipped, 0 nan
     files_written: 34

@@ -22,7 +22,7 @@
 #
 # Produces:
 #   results/chimp/singer-snakemake_outputs/<chrom>/   the workflow's own output tree
-#   results/chimp/ts_chunks/                          built afterwards by scripts/extract_chunks.sh
+#   results/chimp/ts_chunks/draw_<rep>/               built afterwards by scripts/extract_chunks.sh
 #
 # Each chromosome gets its own snakemake workdir under scratch: concurrent snakemakes sharing
 # one directory race on .snakemake/iocache, and --nolock is not sufficient. That state is

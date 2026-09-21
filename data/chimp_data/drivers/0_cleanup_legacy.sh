@@ -36,4 +36,4 @@ fi
 
 echo "Done. Layout is now:"
 echo "  results/chimp/singer-snakemake_outputs/   SINGER output"
-echo "  results/chimp/ts_chunks/                  CoaSTT input (step 9)"
+echo "  results/chimp/ts_chunks/draw_<rep>/        CoaSTT input (step 9)"

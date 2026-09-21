@@ -43,29 +43,48 @@ bash drivers/5_phase.sh           # SHAPEIT5
 bash drivers/6_assemble.sh        # build SingerSnakemake_Input/
 bash drivers/7_verify.sh          # 15 checks per chromosome -- the gate before inference
 bash drivers/8_run_singer.sh      # one SLURM job per chromosome (days)
-bash drivers/9_extract_chunks.sh  # cut ARGs into results/chimp/ts_chunks/ for CoaSTT
+bash drivers/9_extract_chunks.sh \
+     --partition caslake --account pi-jnovembre   # cut ARGs into results/chimp/ts_chunks/
 ```
 
 Steps 1 and 2 are independent and can be submitted together. **Do not skip step 7** — it is the last point at which a malformed input is caught before committing days of compute.
 
-Step 9 loads a whole chromosome at a time and needs ~3 GB free. Login nodes cap a user session at 8 GB total (a running IDE can hold most of it), so if it is OOM-killed, run it per chromosome:
+### Step 9: posterior draws
 
-```bash
-for c in chr1 chr2A chr2B chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 \
-         chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22; do
-    python ../human_data/scripts/extract_ts_chunks.py \
-        --singer-output results/chimp/singer-snakemake_outputs \
-        --out-dir results/chimp/ts_chunks \
-        --config drivers/singer_config.yaml --chromosomes $c
-done
+Step 9 extracts the **last 8 posterior draws** by default — draws 12–19 of the 20-draw chain, the first 12 being burn-in — and writes each into its own directory:
+
+```
+results/chimp/ts_chunks/
+    draw_12/   chr1_0_1997000.trees  chr1_1997000_3994000.trees  ...   (1,334 files)
+    draw_13/   ...
+    ...
+    draw_19/   ...                                                     <- app configs point here
 ```
 
-**3. Reclaim disk when done.** The per-draw SINGER files are the bulk of the output (428 GB here). After step 9 has succeeded, drop the burn-in draws — dry-run by default:
+`--n-draws N` changes how many. Each directory is a **complete, self-contained CoaSTT input**; within one, the layout is flat, with every chromosome's chunks together, because `CountCoalEvents` globs `*.trees` and turns each filename into a contig id.
+
+**The draws are never pooled into one directory.** They are repeat measurements of the same genome, not extra genome — putting eight draws in one directory would enter every region into the likelihood eight times over, which does not average the posterior but multiplies the evidence and falsely shrinks the uncertainty. Point a run at one draw, and compare runs *across* draws to see how much of an embedding is posterior uncertainty rather than signal.
+
+Given `--partition` **and** `--account`, the driver submits one SLURM job per draw:
+
+```bash
+bash drivers/9_extract_chunks.sh --partition caslake --account pi-jnovembre
+bash drivers/9_extract_chunks.sh --n-draws 4 --partition caslake --account pi-jnovembre
+bash drivers/9_extract_chunks.sh --partition caslake --account pi-jnovembre -n   # dry run
+```
+
+This is the way to run it. Extraction decompresses a whole chromosome tree sequence before slicing it, so each job needs ~120 GB — more than the 8 GB a midway3 login node allows a user session, and it will be OOM-killed there. The draws share nothing, so eight in parallel cost the same memory per job as one, and take the wall clock of one rather than eight. The two flags have no portable default, which is why they are opt-in; with neither, the draws are extracted sequentially in the calling shell, which works on any machine with enough memory.
+
+The burn-in floor is enforced differently once you ask for a specific number of draws. Left to itself the extractor **refuses** a draw inside burn-in; given `--n-draws` it **warns** and extracts what you asked for. With this chain, `singer-mcmc-burnin: 0.6` puts the floor at draw 12, but the hard ~4,000-iteration floor from SINGER's supplementary figure 10 puts it at draw 15 — so the default of 8 draws prints a warning for draws 12–14 and proceeds. Treat those three as less converged than the rest.
+
+**3. Reclaim disk when done.** The per-draw SINGER files are the bulk of the output (428 GB here). After step 9 has succeeded, drop the draws below the ones you kept — dry-run by default:
 
 ```bash
 python scripts/prune_chunk_draws.py --singer-output results/chimp/singer-snakemake_outputs \
-    --ts-chunks results/chimp/ts_chunks --keep-from 12 --expect-chunks 1334   # add --apply
+    --ts-chunks results/chimp/ts_chunks/draw_19 --keep-from 12 --expect-chunks 1334  # add --apply
 ```
+
+`--keep-from` must match the lowest draw step 9 extracted (12 at the default `--n-draws 8`), or you will delete the inputs of a draw you are still using.
 
 ### Changing SINGER parameters
 
@@ -80,7 +99,7 @@ Everything tunable lives in `drivers/singer_config.yaml`; no script needs editin
 | `mutation-rate` | per-base per-generation; `recombination-rate` is ignored because a hapmap is supplied |
 | `stratify-by` | column in `resources/samples/subspecies.tsv` used to group samples in the diagnostics |
 
-Note `singer-mcmc-burnin` affects only the pipeline's statistics and plots — `merge_chunks` writes a tree sequence for **every** draw. The burn-in that matters for downstream analysis is enforced in step 9, which refuses any draw below ~4,000 MCMC iterations.
+Note `singer-mcmc-burnin` affects only the pipeline's statistics and plots — `merge_chunks` writes a tree sequence for **every** draw. The burn-in that matters for downstream analysis is applied in step 9, which takes the stricter of this fraction and a ~4,000-MCMC-iteration floor. It refuses a draw below that floor when it is choosing the draw itself, and warns but proceeds when `--n-draws` names how many to take (see [Step 9](#step-9-posterior-draws)).
 
 ### SLURM settings
 
@@ -136,7 +155,7 @@ Two sizing traps worth inheriting: walltime must cover the **tail** of the chunk
 - Accuracy is measured against GATK `PGT`/`PID` read-backed phase blocks, the only independent phase truth in a panel with no trios: **one switch error per ~16–17 kb, against a marginal tree change every 0.146 kb**, so phase error is roughly 0.9% as frequent as tree transitions. Read-backed blocks are short, so this measures _local_ accuracy. It does not bound long-range switch error.
 ### 4. Run Singer
 - Using the [snakemake](https://github.com/nspope/singer-snakemake) pipeline built by Nate Pope and others, and the files prepped above. 
-- 5,000 MCMC total iterations. 20 posterior draws thinned by 250 iterations. The first 12 draws (3250 iterations) are burn-in, and the last 8 are used to compute the analysis stats in the pipeline 
+- 5,000 MCMC total iterations. 20 posterior draws thinned by 250 iterations. The first 12 draws (3250 iterations) are burn-in, and the last 8 are used to compute the analysis stats in the pipeline — and are also the 8 that step 9 extracts for CoaSTT, one directory each 
 - Chromosomes are chopped into 2 Mb chunks. Any chunk with more than 50% masked sites or less than 1,000 polymorphic sites is discarded (these parameters can be changed from a config file)
 - A single SLURM job for each chromosome with 16 cpus (~4 Gb per cpu). Singer run in parallel on each cpu, so 16 chunks are run at a time.
 - Run time:

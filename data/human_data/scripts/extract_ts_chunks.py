@@ -6,20 +6,31 @@ singer-snakemake emits one whole-chromosome tree sequence per MCMC replicate
 flat directory, treating each file as an independent contig -- `CountCoalEvents` globs
 `*.trees` and uses the filename as the contig id (`src/CountCoalEvents.py:141-151`).
 
-This takes the FINAL posterior draw (the highest replicate index, i.e. the most burnt-in
-sample) and cuts it at the chunk boundaries SINGER actually ran on, writing:
-
-Only ONE draw is written per chunk, deliberately. CoaSTT treats every `.trees` file in the
-directory as an independent contig, so writing several posterior draws of the same region
-would enter that region into the likelihood more than once.
-
-The draw is also checked against the burn-in floor implied by `singer-mcmc-samples` and
-`singer-mcmc-burnin`. singer-snakemake applies that burn-in only to its statistics and
-diagnostic plots -- `merge_chunks` writes a tree sequence for every draw, including
-pre-convergence ones -- so this script is the last point at which an unconverged draw can be
-stopped before it reaches CoaSTT.
+By default this takes the FINAL posterior draw (the highest replicate index, i.e. the most
+burnt-in sample) and cuts it at the chunk boundaries SINGER actually ran on, writing:
 
     ts_chunks/<chrom>_<start_pos>_<end_pos>.trees        e.g. chr22_10519382_11519382.trees
+
+`--n-draws N` instead extracts the last N draws, each into its OWN subdirectory:
+
+    ts_chunks/draw_<rep>/<chrom>_<start_pos>_<end_pos>.trees
+
+One directory per draw, never one directory holding several. CoaSTT treats every `.trees`
+file in a directory as an independent contig, so mixing draws would enter the same region
+into the likelihood more than once -- the draws are repeat measurements of one genome, not
+extra genome. Each subdirectory is a complete, self-contained CoaSTT input; point a run at
+one of them and compare runs across them to see posterior uncertainty.
+
+Draws are checked against the burn-in floor implied by `singer-mcmc-samples`,
+`singer-mcmc-burnin` and the ~4,000-iteration floor from SINGER's supplementary figure 10.
+singer-snakemake applies its burn-in only to statistics and diagnostic plots -- `merge_chunks`
+writes a tree sequence for every draw, including pre-convergence ones -- so this script is the
+last point at which an unconverged draw can be stopped before it reaches CoaSTT.
+
+The check REFUSES when this script picks the draw itself (the default single-draw path), and
+only WARNS when a caller names how many draws to take: `--n-draws 8` means eight draws even if
+the floor would allow fewer. The floor is a rule of thumb measured on SINGER's own, smaller
+test cases, and spread across draws is the reason to extract several in the first place.
 
 The chromosome keeps its `chr` prefix deliberately: CoaSTT turns each filename into a contig
 id, and an identifier starting with a digit is awkward in Python, pandas column access and
@@ -52,14 +63,22 @@ import tszip
 MIN_BURNIN_ITERATIONS = 4000
 
 
-def final_replicate(trees_dir, chrom, min_replicate=0):
+def final_replicates(trees_dir, chrom, min_replicate=0, n_draws=1):
     """
-    Path to the highest-numbered replicate, which is the last posterior draw.
+    Paths to the `n_draws` highest-numbered replicates -- the last posterior draws.
 
     `min_replicate` is the burn-in floor: the index of the first draw the chain is considered
-    converged at. It is not used to choose the draw -- the highest is always the most burnt-in
-    -- but to REFUSE a directory whose best draw is still inside burn-in, which is how a run
-    with too short a chain would otherwise reach CoaSTT unnoticed.
+    converged at. It is not used to choose the draws -- the highest are always the most
+    burnt-in -- but to police them.
+
+    How hard it polices depends on who asked. Left to itself (`n_draws == 1`) this REFUSES a
+    draw inside burn-in, which is how a run with too short a chain would otherwise reach
+    CoaSTT unnoticed. An explicit `n_draws` is instead taken at its word and only WARNS: the
+    caller asking for N draws is asking for N draws, and the floor is a rule of thumb read off
+    SINGER's supplementary figure 10 rather than a property of this chain. Posterior spread is
+    the point of extracting several draws, and the early ones still carry it.
+
+    Returned oldest first, so the draw subdirectories are written in increasing order.
     """
     reps = []
     for name in os.listdir(trees_dir):
@@ -69,14 +88,29 @@ def final_replicate(trees_dir, chrom, min_replicate=0):
                 reps.append(int(middle))
     if not reps:
         raise FileNotFoundError(f"No {chrom}.<rep>.tsz in {trees_dir}")
-    best = max(reps)
-    if best < min_replicate:
+    if len(reps) < n_draws:
         raise SystemExit(
-            f"{chrom}: highest replicate is {best}, inside the burn-in region "
-            f"(< {min_replicate}). Every draw here is pre-convergence and must not be used. "
-            f"Check singer-mcmc-samples / singer-mcmc-burnin in drivers/singer_config.yaml."
+            f"{chrom}: asked for {n_draws} draws but only {len(reps)} replicates exist in "
+            f"{trees_dir}. Re-run the merge step, or lower --n-draws."
         )
-    return os.path.join(trees_dir, f"{chrom}.{best}.tsz"), best
+    chosen = sorted(reps)[-n_draws:]
+    if chosen[0] < min_replicate:
+        usable = sum(1 for r in reps if r >= min_replicate)
+        below = [r for r in chosen if r < min_replicate]
+        if n_draws == 1:
+            raise SystemExit(
+                f"{chrom}: highest replicate is {chosen[0]}, inside the burn-in region "
+                f"(< {min_replicate}). Every draw here is pre-convergence and must not be "
+                f"used. Check singer-mcmc-samples / singer-mcmc-burnin in "
+                f"drivers/singer_config.yaml."
+            )
+        print(
+            f"  WARNING: {chrom}: {len(below)} of the {n_draws} requested draws are inside "
+            f"the burn-in region (< {min_replicate}): {', '.join(str(r) for r in below)}. "
+            f"Only {usable} draw(s) clear it. Extracting all {n_draws} as asked -- treat the "
+            f"flagged draws as less converged than the rest."
+        )
+    return [(os.path.join(trees_dir, f"{chrom}.{r}.tsz"), r) for r in chosen]
 
 
 def chunk_intervals(chunks_path):
@@ -110,7 +144,20 @@ def main():
     parser.add_argument("--config", default=None,
                         help="drivers/singer_config.yaml; used to derive the burn-in floor. "
                              "Default: the copy next to this script's parent directory.")
+    parser.add_argument("--n-draws", type=int, default=1,
+                        help="extract the last N posterior draws, each into its own "
+                             "<out-dir>/draw_<rep>/ subdirectory. Default 1, which writes the "
+                             "final draw straight into <out-dir> as it always has.")
+    parser.add_argument("--draw", type=int, default=None,
+                        help="extract this ONE replicate index into <out-dir>/draw_<rep>/. "
+                             "Used to fan the draws of --n-draws out over parallel jobs; the "
+                             "burn-in floor is enforced exactly as it is for --n-draws.")
     args = parser.parse_args()
+
+    if args.draw is not None and args.n_draws != 1:
+        raise SystemExit("--draw and --n-draws are alternatives; pass only one.")
+    if args.n_draws < 1:
+        raise SystemExit(f"--n-draws must be at least 1, got {args.n_draws}")
 
     # Burn-in floor, read from the same config the run used so the two cannot drift apart.
     # singer-snakemake applies singer-mcmc-burnin only to statistics and plots; the tree
@@ -162,44 +209,78 @@ def main():
     if not chroms:
         raise SystemExit(f"No chromosome directories with trees/ under {args.singer_output}")
 
-    # Resolve every chromosome's draw BEFORE writing anything, and require them to agree.
+    # Resolve every chromosome's draws BEFORE writing anything, and require them to agree.
     #
     # A killed merge job leaves one chromosome short of its top draw. Since this takes the
-    # highest replicate present per chromosome, that chromosome would silently contribute a
+    # highest replicates present per chromosome, that chromosome would silently contribute a
     # different, less burnt-in posterior sample than the rest -- and the resulting ts_chunks/
     # directory would look complete. Re-run the inference step to fill the gap; it redoes only
     # the missing merges, not the inference behind them.
+    #
+    # With --draw the replicate is named outright, so there is nothing to resolve and nothing
+    # to disagree about: every chromosome must simply HAVE that draw. The floor is reported
+    # but not enforced, exactly as under --n-draws -- a named draw is a caller who has already
+    # decided.
     resolved = {}
-    for chrom in chroms:
-        trees_dir = os.path.join(args.singer_output, chrom, "trees")
-        resolved[chrom] = final_replicate(trees_dir, chrom, min_replicate=min_replicate)
+    if args.draw is not None:
+        if args.draw < min_replicate:
+            # Named outright, so honoured outright -- this is one task of an explicit
+            # multi-draw extraction, and --n-draws warns rather than refuses for the same
+            # reason. Say so once, loudly, and carry on.
+            print(
+                f"  WARNING: --draw {args.draw} is inside the burn-in region "
+                f"(< {min_replicate}); extracting it as asked, but treat it as less "
+                f"converged than the later draws."
+            )
+        for chrom in chroms:
+            path = os.path.join(args.singer_output, chrom, "trees", f"{chrom}.{args.draw}.tsz")
+            if not os.path.exists(path):
+                raise SystemExit(
+                    f"{chrom}: no replicate {args.draw} at {path}. That usually means a merge "
+                    f"job was killed; re-run the inference step to fill the gap."
+                )
+            resolved[chrom] = [(path, args.draw)]
+    else:
+        for chrom in chroms:
+            trees_dir = os.path.join(args.singer_output, chrom, "trees")
+            resolved[chrom] = final_replicates(
+                trees_dir, chrom, min_replicate=min_replicate, n_draws=args.n_draws)
 
-    reps_seen = {rep for _, rep in resolved.values()}
-    if len(reps_seen) > 1:
-        detail = "\n".join(
-            f"    {c}: replicate {r}" for c, (_, r) in sorted(resolved.items())
-        )
-        raise SystemExit(
-            "Chromosomes disagree on their latest replicate "
-            f"({', '.join(str(r) for r in sorted(reps_seen))}):\n{detail}\n"
-            "That usually means a merge job was killed. Re-run the inference step to fill the "
-            "gap -- it redoes only the missing merges, not the inference behind them."
-        )
+        reps_seen = {tuple(r for _, r in v) for v in resolved.values()}
+        if len(reps_seen) > 1:
+            detail = "\n".join(
+                f"    {c}: replicate(s) {', '.join(str(r) for _, r in v)}"
+                for c, v in sorted(resolved.items())
+            )
+            raise SystemExit(
+                f"Chromosomes disagree on their latest replicates:\n{detail}\n"
+                "That usually means a merge job was killed. Re-run the inference step to fill "
+                "the gap -- it redoes only the missing merges, not the inference behind them."
+            )
+
+    # One draw goes straight into out-dir, preserving the layout every existing config points
+    # at. Several go into draw_<rep>/ subdirectories -- one self-contained CoaSTT input each,
+    # never mixed, since CountCoalEvents would read two draws of one region as two contigs.
+    # --draw writes a subdirectory too: it is one task of a multi-draw extraction.
+    nested = args.n_draws > 1 or args.draw is not None
 
     total = 0
     for chrom in chroms:
         base = os.path.join(args.singer_output, chrom)
-        tsz_path, rep = resolved[chrom]
         intervals = chunk_intervals(os.path.join(base, f"{chrom}.chunks.p"))
 
-        ts = tszip.decompress(tsz_path)
+        for tsz_path, rep in resolved[chrom]:
+            out_dir = os.path.join(args.out_dir, f"draw_{rep}") if nested else args.out_dir
+            os.makedirs(out_dir, exist_ok=True)
 
-        print(f"{chrom}: replicate {rep}, {len(intervals)} kept chunks")
-        for start, end in intervals:
-            chunk = ts.keep_intervals([[start, end]], simplify=False)
-            out = os.path.join(args.out_dir, f"{chrom}_{start}_{end}.trees")
-            chunk.dump(out)
-            total += 1
+            ts = tszip.decompress(tsz_path)
+
+            print(f"{chrom}: replicate {rep}, {len(intervals)} kept chunks -> {out_dir}")
+            for start, end in intervals:
+                chunk = ts.keep_intervals([[start, end]], simplify=False)
+                out = os.path.join(out_dir, f"{chrom}_{start}_{end}.trees")
+                chunk.dump(out)
+                total += 1
 
     print(f"\nWrote {total} chunk tree sequences to {args.out_dir}")
 
