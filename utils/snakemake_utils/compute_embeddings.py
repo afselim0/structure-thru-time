@@ -10,7 +10,7 @@ from OptimizationFunctions import compute_distance_df, reconstruct_rates
 import numpy as np
 
 def _uniform_subsample(unique_times, n_requested):
-    """Subsample timepoints on a uniform stride, preserving even spacing.
+    """Subsample timepoints on a uniform stride, anchored at the most recent one.
 
     Taking np.linspace over indices and rounding gives a grid with two different
     spacings whenever n_requested does not divide the grid evenly (e.g. 1000 -> 100
@@ -18,6 +18,14 @@ def _uniform_subsample(unique_times, n_requested):
     operators assume a single delta_t, so the number of points is adjusted to the
     nearest value that a constant stride can deliver, rather than the spacing being
     allowed to vary.
+
+    The selection starts at ``unique_times[0]`` and steps up by a constant stride, so the
+    most recent timepoint is always kept exactly and any shortfall is taken off the deep
+    end. That asymmetry is deliberate: the recent end carries the most information (rates
+    are best determined where most lineages have yet to coalesce) and is where the
+    embedding changes fastest, whereas the deepest timepoints are near-redundant, so
+    losing a few of them costs least. Clipping equally from both ends, or centring the
+    selection, would discard the part of the grid worth keeping.
     """
     n_available = len(unique_times)
 
@@ -35,6 +43,8 @@ def _uniform_subsample(unique_times, n_requested):
     stride = min(candidates,
                  key=lambda s: (abs((n_available - 1) // s + 1 - n_requested), s))
 
+    # Slicing from index 0 is what anchors the grid at the most recent timepoint; the
+    # trailing points that the stride cannot reach fall off the deep end.
     selected = unique_times[::stride]
     if len(selected) != n_requested:
         print(f"Adjusted {n_requested} -> {len(selected)} timepoints "
@@ -58,10 +68,10 @@ def main():
     parser.add_argument("--n_components", type = int, default=2, help="Number of components for the latent space embeddings")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs for coordinate descent optimization")
     parser.add_argument("--n_timepoints_emb", type=int, default=400, help="Number of timepoints to solve embeddings for (subsampled evenly from rates)")
+    parser.add_argument("--weighted", action="store_true", help="Weight each pair by its loss weight in both stages. The default is unweighted: the survival-based weights are lighter for within-population pairs, which pulls them inward in deep time and manufactures clusters the data does not support.")
     parser.add_argument("--pop_labels", type=str, required=False, help="Path to population labels csv file (with columns sample_id and population and potentially sample time)")
     parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, embeddings are per-haplotype (indexed by sample_id). Otherwise per-individual (individual_id)")
     parser.add_argument("--compute_uncertainty", action="store_true", help="Compute per-sample Laplace covariance ellipses")
-    parser.add_argument("--no_exact_hessian", action="store_true", help="Use L-BFGS inverse Hessian approximation instead of the exact analytical Hessian (not recommended)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
 
     args = parser.parse_args()
@@ -92,7 +102,10 @@ def main():
     # the weight is formed), so they need no conversion here.
     weights_path = os.path.join(os.path.dirname(input), "weights_" + input_filename)
     weights_df = None
-    if os.path.exists(weights_path):
+    if not args.weighted:
+        print("Unweighted fit (the default): every pair is weighted equally in both "
+              "stages; the weights file is not read.")
+    elif os.path.exists(weights_path):
         weights_df = pd.read_parquet(weights_path)
 
         # Ignore a weights file whose pair index does not match the rates (e.g. a
@@ -120,7 +133,9 @@ def main():
         print(f"Subsampled to {len(selected_times)} timepoints "
             f"(requested {args.n_timepoints_emb} of {len(unique_times)}), "
             f"keeping every {(len(unique_times) - 1) // (len(selected_times) - 1)}th point "
-            "so the grid stays uniformly spaced")
+            "so the grid stays uniformly spaced; "
+            f"t={selected_times[0]:g} to {selected_times[-1]:g} "
+            f"(grid ends at {unique_times[-1]:g}, so the clipping is off the deep end)")
 
     # Parsing sample times if they exist in the population labels file, and checking if any sample times are non-zero (which would indicate ancient samples)
     if "sample_time" in pop_labels_df.columns:
@@ -141,7 +156,7 @@ def main():
     if weights_df is not None:
         print("weights dataframe found, will use for weighting")
 
-    LSE = LatentSpaceEmbeddings(rates_df=rates_df, weights_df=weights_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties)
+    LSE = LatentSpaceEmbeddings(rates_df=rates_df, weights_df=weights_df, sample_times=sample_times, n_components=args.n_components, N_min=args.N_min, N_max=args.N_max, l1_strengths=l1_penalties, unweighted=not args.weighted)
     X_init = None
 
     if args.seed is not None:
