@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from itertools import combinations
 
-from plotting_style import setup_plotting_style
+from plotting_style import setup_plotting_style, set_time_xlim
 
 INDIVIDUAL_LINE_WIDTH = 0.2
 INDIVIDUAL_LINE_ALPHA = 0.2
@@ -169,7 +169,7 @@ def plot_relative_divergence(rates_df, pop_colors, pop_labels,
         ax.set_title(f"{popA} vs {popB}")
         ax.set_xscale(time_scale)
         ax.set_yscale("log")
-        ax.set_xlim(float(min_time), times.max())
+        set_time_xlim(ax, min_time, times, time_scale)
         ax.set_ylim(ymin, ymax)
 
     # Summary panel: all pairs as mean lines with distinct color+linestyle
@@ -188,7 +188,7 @@ def plot_relative_divergence(rates_df, pop_colors, pop_labels,
     ax_summary.set_title("All pairs")
     ax_summary.set_xscale(time_scale)
     ax_summary.set_yscale("log")
-    ax_summary.set_xlim(float(min_time), times.max())
+    set_time_xlim(ax_summary, min_time, times, time_scale)
     ax_summary.set_ylim(ymin, ymax)
     ax_summary.legend(handles=summary_handles, title="Pair",
                       bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
@@ -212,7 +212,7 @@ def plot_relative_divergence(rates_df, pop_colors, pop_labels,
     ax_s.axhline(1.0, color="black", lw=1, linestyle="--", alpha=0.5)
     ax_s.set_xscale(time_scale)
     ax_s.set_yscale("log")
-    ax_s.set_xlim(float(min_time), times.max())
+    set_time_xlim(ax_s, min_time, times, time_scale)
     ax_s.set_ylim(ymin, ymax)
     ax_s.set_xlabel("Time (generations ago)")
     ax_s.set_ylabel(r"$\rho_{AB}$ (between / within)")

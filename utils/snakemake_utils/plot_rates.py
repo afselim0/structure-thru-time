@@ -94,7 +94,7 @@ def plot_rates_multi_figs(rates_df, pop_colors, pop_labels, min_time=0, max_rate
         ax[i].set_xscale(time_scale)
         if max_rate_plot is not None:
             ax[i].set_ylim(top=max_rate_plot)
-        ax[i].set_xlim(float(min_time), times.max())
+        set_time_xlim(ax[i], min_time, times, time_scale)
         for j in range(len(populations)):
             pop1 = populations[i]
             pop2 = populations[j]
@@ -139,7 +139,7 @@ def plot_rates_single_fig(rates_df, min_time = 0, max_rate_plot = None, ylabel="
     ax.set_xscale(time_scale)
     if max_rate_plot is not None:
         ax.set_ylim(top=max_rate_plot)
-    ax.set_xlim(float(min_time), times.max())
+    set_time_xlim(ax, min_time, times, time_scale)
     for pair in rates_df.index.values:
         ax.plot(times, rates_df.loc[pair,:].values, color="grey", lw=INDIVIDUAL_LINE_WIDTH, alpha=INDIVIDUAL_LINE_ALPHA)
     mean_rates = np.mean(rates_df.values, axis=0)

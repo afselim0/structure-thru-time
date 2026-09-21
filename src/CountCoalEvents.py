@@ -101,12 +101,16 @@ class CountCoalEvents:
     sample_ids : list, optional
         Subset of sample node IDs to analyse. If *None*, every sample in the
         first tree sequence is used.
-    max_time : float, optional
-        Upper bound of the time grid (in generations). If *None*, defaults to
-        the 95th percentile of node times in the first tree sequence.
-    num_timepoints : int, optional
-        Number of equally-spaced time bins between 0 and *max_time*.
-        Defaults to 100.
+    pdf_min_time : float, optional
+        Lower bound of the time grid (in generations). Only 0 is supported; see
+        ``__init__``. Defaults to 0.
+    pdf_max_time : float, optional
+        Upper bound of the time grid (in generations), and the label of the LAST
+        pdf column. If *None*, defaults to the 95th percentile of node times in
+        the first tree sequence.
+    pdf_bin_size : float, optional
+        Width of each time bin. Must divide ``pdf_max_time - pdf_min_time``
+        exactly. Defaults to 1.0.
     fraction_samples : float, optional
         Probability that a given sample is included for a given contig.
         Setting this below 1.0 introduces stochastic sub-sampling to reduce
@@ -145,13 +149,27 @@ class CountCoalEvents:
         self,
         ts_dir: str,
         sample_ids: Optional[List[int]] = None,
-        max_time: Optional[float] = None,
-        num_timepoints: int = 100,
+        pdf_min_time: float = 0.0,
+        pdf_max_time: Optional[float] = None,
+        pdf_bin_size: float = 1.0,
         fraction_samples: float = 1.0,
     ) -> None:
         self.ts_dir = ts_dir
-        self.num_timepoints = num_timepoints
         self.fraction_samples = fraction_samples
+
+        self.pdf_min_time = float(pdf_min_time)
+        self.pdf_bin_size = float(pdf_bin_size)
+        if self.pdf_min_time != 0.0:
+            raise NotImplementedError(
+                f"pdf_min_time={self.pdf_min_time} is not supported yet (only 0). "
+                "The survival S = 1 - cumsum(pdf) would be missing the coalescent "
+                f"mass in [0, {self.pdf_min_time}), so the survival -- and every "
+                "rate derived from it -- would be wrong. The parameter exists and "
+                "is carried in filenames so the grid is self-describing, but a "
+                "nonzero value must be implemented before it can be used."
+            )
+        if self.pdf_bin_size <= 0:
+            raise ValueError(f"pdf_bin_size must be positive (got {self.pdf_bin_size}).")
 
         print("Preprocessing tree-sequence files …")
 
@@ -189,9 +207,29 @@ class CountCoalEvents:
         self.num_samples = len(self.sample_ids)
 
         # --- Time grid --------------------------------------------------
-        if max_time is None:
-            max_time = float(np.quantile(ts_first.nodes_time, 0.95))
-        self.max_time = max_time
+        # Columns are the bin LEFT edges, pdf_min_time ... pdf_max_time INCLUSIVE:
+        # column t holds the coalescent mass in [t, t + pdf_bin_size). The grid
+        # therefore carries one more bin than the half-open [min, max) convention,
+        # and its last column is labelled pdf_max_time rather than max - bin.
+        if pdf_max_time is None:
+            pdf_max_time = float(np.quantile(ts_first.nodes_time, 0.95))
+        span = float(pdf_max_time) - self.pdf_min_time
+        if span <= 0:
+            raise ValueError(
+                f"pdf_max_time ({pdf_max_time}) must exceed pdf_min_time ({self.pdf_min_time})."
+            )
+        n_bins = round(span / self.pdf_bin_size)
+        if abs(n_bins * self.pdf_bin_size - span) > 1e-9 * max(1.0, span):
+            raise ValueError(
+                f"(pdf_max_time - pdf_min_time) = {span} is not an exact multiple of "
+                f"pdf_bin_size = {self.pdf_bin_size} (would need {span / self.pdf_bin_size} "
+                "bins). Choose a bin size that divides the span exactly."
+            )
+        self.pdf_max_time = self.pdf_min_time + n_bins * self.pdf_bin_size
+        # num_timepoints keeps its name and meaning -- the number of pdf columns --
+        # so every shape check against it stays correct; only its value gains the
+        # one extra bin that makes pdf_max_time itself a column.
+        self.num_timepoints = n_bins + 1
 
         # --- All unique sample pairs ------------------------------------
         self.sample_pairs = [
@@ -220,6 +258,33 @@ class CountCoalEvents:
         self.total_segments_per_pair: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------ #
+    #  Time grid
+    # ------------------------------------------------------------------ #
+    #
+    # Both grids are built as min + arange(k) * bin rather than with linspace, so
+    # every label is an exact multiple of the bin size. The labels survive a
+    # round-trip through str (parquet column names) and satisfy the uniform-grid
+    # check in ComputeCoalescentRates._assert_uniform_grid; linspace's accumulated
+    # endpoint error does not reliably do either.
+
+    @property
+    def time_bin_left_edges(self) -> np.ndarray:
+        """Pdf column labels: bin left edges, pdf_min_time … pdf_max_time inclusive."""
+        return self.pdf_min_time + np.arange(self.num_timepoints) * self.pdf_bin_size
+
+    @property
+    def counting_time_windows(self) -> np.ndarray:
+        """Bin edges for ``ts.pair_coalescence_counts``, with the overflow bin.
+
+        ``num_timepoints + 1`` finite edges (pdf_min_time … pdf_max_time +
+        pdf_bin_size) followed by inf. The final ``[pdf_max_time + pdf_bin_size,
+        inf)`` bin is used only for per-pair coverage and is dropped from the pdf;
+        see ``count_coal_spans_single_ts``.
+        """
+        finite = self.pdf_min_time + np.arange(self.num_timepoints + 1) * self.pdf_bin_size
+        return np.append(finite, np.inf)
+
+    # ------------------------------------------------------------------ #
     #  Counting coalescent spans
     # ------------------------------------------------------------------ #
 
@@ -231,8 +296,9 @@ class CountCoalEvents:
         """Count total genomic spans where a coalescent event occurs between each pair of samples in time bins for one tree sequence.
 
         For every selected sample pair, the function records how many base-pairs
-        coalesce within each time bin (defined by a regular grid from 0 to
-        ``self.max_time``), and saves the result to disk. Nothing is returned;
+        coalesce within each time bin (defined by a regular grid of width
+        ``self.pdf_bin_size`` from ``self.pdf_min_time`` to ``self.pdf_max_time``
+        inclusive), and saves the result to disk. Nothing is returned;
         results are saved as a .npy file at ``{coal_counts_dir}/{basename}.npy``
         (array of shape ``(num_pairs, num_timepoints)``, dtype ``self.datatype``,
         rows in the same order as ``self.sample_pairs``), where ``basename`` is
@@ -278,16 +344,15 @@ class CountCoalEvents:
             global_pair_idx = np.array(global_pair_idxs)
 
             # --- Count pair-coalescence events in each time bin -------------
-            # An extra window [max_time, inf) is appended so that every pair's
-            # coalescences are counted, including those older than the time grid.
-            # That final bin is NOT part of the PDF -- it is dropped below -- but
-            # its mass is needed for coverage: summing the finite bins alone would
-            # undercount each pair's observed span by however much of it coalesces
-            # beyond max_time, which is both large (3-4% at the default 95th
-            # percentile) and pair-dependent, and so would bias the normalised PDF.
-            time_windows = np.append(
-                np.linspace(0, self.max_time, self.num_timepoints + 1), np.inf
-            )
+            # An extra window [pdf_max_time + pdf_bin_size, inf) is appended so that
+            # every pair's coalescences are counted, including those older than the
+            # time grid. That final bin is NOT part of the PDF -- it is dropped below
+            # -- but its mass is needed for coverage: summing the finite bins alone
+            # would undercount each pair's observed span by however much of it
+            # coalesces beyond the grid, which is both large (3-4% at the default
+            # 95th percentile) and pair-dependent, and so would bias the normalised
+            # PDF.
+            time_windows = self.counting_time_windows
             coal_segments = ts.pair_coalescence_counts(
                 sample_sets=[[i] for i in range(len(active_samples))],
                 indexes=local_pairs,
@@ -300,7 +365,8 @@ class CountCoalEvents:
             # across ALL bins including the infinite one, before it is discarded.
             coverage[global_pair_idx] = coal_segments.sum(axis=1)
 
-            # Drop the overflow bin: the PDF covers [0, max_time) only.
+            # Drop the overflow bin: the PDF covers
+            # [pdf_min_time, pdf_max_time + pdf_bin_size) only.
             coal_segments_total[global_pair_idx, :] = (
                 coal_segments[:, :-1].astype(self.datatype)
             )
@@ -465,7 +531,8 @@ class CountCoalEvents:
             DataFrame indexed by ``(sample_1, sample_2)`` with one column per
             time-bin left-edge.  Values approximate the coalescence-time PDF.
 
-            Rows do not sum to 1: the columns span ``[0, max_time)`` while the
+            Rows do not sum to 1: the columns span
+            ``[pdf_min_time, pdf_max_time + pdf_bin_size)`` while the
             normalising coverage counts coalescences at every time, so a row sums
             to the fraction of that pair's span which coalesces inside the grid.
             A pair with zero coverage genome-wide -- observed on no contig -- is
@@ -511,11 +578,9 @@ class CountCoalEvents:
             coal_segments_total += counts
 
         # --- Normalise counts into a PDF --------------------------------
-        time_bin_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
-
         pdf_df = pd.DataFrame(
             coal_segments_total,
-            columns=time_bin_edges[:-1],
+            columns=self.time_bin_left_edges,
             index=self.pairs_MultiIndex,
         )
 
@@ -583,7 +648,7 @@ class CountCoalEvents:
         needs no mask files, because a pair coalesces exactly once at every
         position where it is observed. This is why the counting grid carries an
         overflow bin to infinity: the finite bins alone miss the 3-4% of span
-        that coalesces beyond ``max_time``, by a margin that differs per pair.
+        that coalesces beyond the grid, by a margin that differs per pair.
 
         Parameters
         ----------
@@ -617,6 +682,42 @@ class CountCoalEvents:
             data[:, col_idx] = cov
 
         return pd.DataFrame(data, index=self.pairs_MultiIndex, columns=col_names)
+def read_LAI_df(path):
+    """Read a local-ancestry parquet, dropping intervals with no ancestry call.
+
+    A null ``ancestry_label`` means the painter had no genealogical information
+    over that span -- the empty flanking trees outside an inferred chunk, or a
+    sample locally unattached to any reference panel. Such an interval belongs to
+    no panel and must not contribute to any panel's counts.
+
+    Dropping the rows here, rather than relying on the comparisons downstream to
+    ignore them, is deliberate. ``parse_intersecting_window_edges`` matches
+    labels with ``labels_1 == label``, and whether a null survives that depends
+    on which null it is: ``NaN != NaN`` so a NaN interval can never match, but
+    ``None == None`` is True, so a None-valued label would make every uncalled
+    interval of one sample match every uncalled interval of another and be
+    counted as shared ancestry. Today the parquet round-trip happens to yield
+    NaN, which makes the current behaviour correct by accident of dtype rather
+    than by construction; this makes it explicit.
+
+    Args:
+        path (str): path to a per-contig local ancestry parquet.
+
+    Returns:
+        pd.DataFrame: the called intervals only, with a guaranteed-null-free
+        ``ancestry_label`` column.
+    """
+    LAI_df = pd.read_parquet(path)
+    called = LAI_df[LAI_df["ancestry_label"].notna()]
+    labels = called["ancestry_label"].unique()
+    if any(pd.isna(label) for label in labels):
+        raise ValueError(
+            f"null ancestry labels survived filtering in {path}; they would be "
+            "treated as an ancestry panel by the window-intersection logic."
+        )
+    return called
+
+
 def parse_window_edges(LAI_df):
     """Parses the dataframe with local ancestry information to find bp positions where ancestry switches
 
@@ -715,7 +816,7 @@ class CountCoalEvents_admix:
 
     Coverage for every pair is the span over which that pair actually
     coalesces within its windows, summed from the pair-coalescence counts
-    (including an overflow time bin, so coalescences older than ``max_time``
+    (including an overflow time bin, so coalescences older than the time grid
     are not missed). It is deliberately *not* the summed width of the local
     ancestry windows: LAI windows tile the whole contig, but a pair is only
     observed where both samples have ancestry there, so the two agree only
@@ -768,8 +869,15 @@ class CountCoalEvents_admix:
         self.ts_files = cce.ts_files
         self.contig_ids = cce.contig_ids
         self.datatype = cce.datatype
-        self.max_time = cce.max_time
+        self.pdf_min_time = cce.pdf_min_time
+        self.pdf_max_time = cce.pdf_max_time
+        self.pdf_bin_size = cce.pdf_bin_size
         self.num_timepoints = cce.num_timepoints
+        # Copied as plain attributes rather than recomputed: this class is a pure
+        # consumer of the parent's grid, and sharing the arrays makes a divergence
+        # between the whole-genome and per-ancestry pdfs impossible by construction.
+        self.time_bin_left_edges = cce.time_bin_left_edges
+        self.counting_time_windows = cce.counting_time_windows
         self.ancestry_count_dirs = ancestry_count_dirs
 
         # --- Input validation --------------------------------------------
@@ -806,7 +914,7 @@ class CountCoalEvents_admix:
         # Ancestry labels and the admixed-sample set are assumed fixed across
         # contigs; a contig whose LAI file disagrees raises loudly rather than
         # silently reshaping the pair sets (see count_coal_spans_single_ts).
-        first_LAI_df = pd.read_parquet(os.path.join(LAI_dir, f"{cce.contig_ids[0]}.parquet"))
+        first_LAI_df = read_LAI_df(os.path.join(LAI_dir, f"{cce.contig_ids[0]}.parquet"))
         self.admixed_samples = np.sort(first_LAI_df["sample_id"].unique())
         self.ancestry_labels = list(pop_labels_paths.keys())
         self.non_admixed_samples = np.setdiff1d(cce.sample_ids, self.admixed_samples)
@@ -875,7 +983,7 @@ class CountCoalEvents_admix:
         """
         contig_id = ts_file.removesuffix(".trees")
         ts = tskit.load(os.path.join(self.ts_dir, ts_file))
-        LAI_df = pd.read_parquet(os.path.join(LAI_dir, f"{contig_id}.parquet"))
+        LAI_df = read_LAI_df(os.path.join(LAI_dir, f"{contig_id}.parquet"))
 
         contig_admixed_samples = np.sort(LAI_df["sample_id"].unique())
         if not np.array_equal(contig_admixed_samples, self.admixed_samples):
@@ -892,12 +1000,10 @@ class CountCoalEvents_admix:
 
         base_counts = np.load(os.path.join(self.coal_counts_dir, f"{contig_id}.npy"), allow_pickle=True)
         # As in CountCoalEvents.count_coal_spans_single_ts, an overflow bin
-        # [max_time, inf) is appended so that coverage counts every coalescence,
-        # not just those inside the time grid. It is dropped before the counts are
-        # stored; only its contribution to coverage is kept.
-        time_windows = np.append(
-            np.linspace(0, self.max_time, self.num_timepoints + 1), np.inf
-        )
+        # [pdf_max_time + pdf_bin_size, inf) is appended so that coverage counts
+        # every coalescence, not just those inside the time grid. It is dropped
+        # before the counts are stored; only its contribution to coverage is kept.
+        time_windows = self.counting_time_windows
 
         # --- Initialise per-ancestry output arrays and coverage vectors ---
         counts_per_ancestry = {
@@ -1095,10 +1201,9 @@ class CountCoalEvents_admix:
         coverage_df = pd.read_parquet(os.path.join(ancestry_dir, "coverage.parquet"))
         total_segments_per_pair = coverage_df.values.sum(axis=1)
 
-        time_bin_edges = np.linspace(0, self.max_time, self.num_timepoints + 1)
         pdf_df = pd.DataFrame(
             coal_segments_total,
-            columns=time_bin_edges[:-1],
+            columns=self.time_bin_left_edges,
             index=self.pairs_MultiIndex_per_ancestry[ancestry_label],
         )
 

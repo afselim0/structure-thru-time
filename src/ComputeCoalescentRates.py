@@ -119,6 +119,159 @@ def adaptive_local_linear_filter(
     return S
 
 
+def _odd_window_bins(window_size: float, time_step: float) -> int:
+    """Window size in whole, odd bins -- the same rounding the filter applies.
+
+    Mirrors ``adaptive_local_linear_filter``'s own conversion so that callers can
+    predict the bandwidth it will use without rebuilding the matrix.
+    """
+    n = int(window_size // time_step)
+    if n % 2 == 0:
+        n += 1
+    return max(n, 3)
+
+
+def slice_pdf_for_rates(
+    pdf_df: pd.DataFrame,
+    rates_min_time: float,
+    rates_max_time: float,
+    minimum_window_size: float,
+    maximum_window_size: float,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Widen the rate interval by the filter's boundary width, for later clipping.
+
+    ``adaptive_local_linear_filter`` has three regimes: rows below ``t_min`` all
+    share one fixed minimum window, rows at or above ``t_max`` all share one fixed
+    maximum window, and only the rows between get a symmetric window whose
+    bandwidth ramps from ``minimum_window_size`` to ``maximum_window_size``. Rates
+    on the boundary rows are therefore constant-bandwidth artefacts of where the
+    grid happens to stop, not estimates at the requested bandwidth.
+
+    Padding the slice by the two boundary half-widths and discarding the pad
+    afterwards makes every KEPT timepoint an interior, symmetric-window row, with
+    bandwidth ``minimum_window_size`` at ``rates_min_time`` and
+    ``maximum_window_size`` at ``rates_max_time``. That is what lets one expensive
+    pdf serve many rate intervals: the interval's ends are no longer special.
+
+    The pads are ``min_bins // 2`` young and ``max_bins // 2`` old, in whole bins.
+    The old pad is HALF the maximum window, not the full window: a full window
+    pushes ``t_max`` about ``max_bins / 2`` rows past the last kept row, so the
+    bandwidth ramp is still climbing where the kept region ends and the last kept
+    row never reaches ``maximum_window_size``. Measured support width at the last
+    kept row, target in brackets -- full window vs. this half window:
+
+        dt=40  max_ws=4000   91 [101]  vs  101 [101]
+        dt=4   max_ws=200     49 [51]  vs   51 [51]
+        dt=4   max_ws=200 (short interval)
+                              43 [51]  vs   51 [51]
+
+    Do not "fix" this back to the full window; it is half the padding and the only
+    one of the two that hits the requested bandwidth.
+
+    When the pdf does not extend far enough the slice is truncated to what exists
+    and a message names the short end; the filter's boundary rows then leak into
+    the kept region at that end, which is the pre-existing behaviour rather than an
+    error. Asking for rates from the very start of the pdf is the ordinary case of
+    this -- the young pad has nowhere to go -- so it is reported as a note rather
+    than a warning.
+
+    Survival baseline
+    -----------------
+    Downstream, ``S(t) = 1 - cumsum(pdf)``. A plain slice would restart that cumsum
+    from zero and so report every pair as having not yet coalesced at the start of
+    the slice, inflating S by the mass below it. That does NOT cancel in the hazard
+    ``-d/dt log S``: the inflation factor differs per pair AND across time within a
+    pair (measured spread 0.089 over one slice), leaving errors ~6e-5 in the rates.
+
+    So the mass dropped below the slice is folded into its first bin. Survival
+    depends only on CUMULATIVE mass, so this makes ``1 - cumsum`` exact at every
+    column of the slice, while keeping the grid uniform -- which prepending a
+    baseline column would not. Only the first column's own bin mass is altered, and
+    that column is inside the pad, never kept. Verified against full-grid rates at
+    a constant bandwidth: 1.6e-18.
+
+    Parameters
+    ----------
+    pdf_df : pd.DataFrame
+        Estimated PDF of pairwise coalescent times, columns being float time
+        points on a uniform grid.
+    rates_min_time, rates_max_time : float
+        The interval rates are wanted on. Both should land on the pdf grid; the
+        nearest grid point is used.
+    minimum_window_size, maximum_window_size : float
+        Local-linear bandwidths at ``rates_min_time`` and ``rates_max_time``
+        respectively, in the same time units as the columns.
+
+    Returns
+    -------
+    padded_pdf : pd.DataFrame
+        ``pdf_df`` restricted to the padded interval, columns unchanged, with the
+        mass below the slice folded into its first bin (see above). It is a valid
+        input to ``compute_coal_rates`` / ``compute_coal_rate_weights`` but its
+        first bin is no longer that bin's own mass, so it is not a pdf of the
+        interval and should not be interpreted as one.
+    keep_mask : np.ndarray of bool, shape ``(padded_pdf.shape[1],)``
+        True on the columns inside ``[rates_min_time, rates_max_time]``. Apply the
+        SAME mask to the rates and to the weights -- the embeddings loss pairs a
+        rate with its weight by position, so a divergence would be silent.
+    """
+    times = np.asarray(pdf_df.columns, dtype=float)
+    if len(times) < 2:
+        raise ValueError(f"pdf must have at least two time columns (got {len(times)}).")
+    time_step = times[1] - times[0]
+    _assert_uniform_grid(times, time_step)
+
+    min_bins = _odd_window_bins(minimum_window_size, time_step)
+    # Mirrors the filter's own clamp (maximum_num_idxs < minimum_num_idxs).
+    max_bins = max(_odd_window_bins(maximum_window_size, time_step), min_bins)
+    pad_young, pad_old = min_bins // 2, max_bins // 2
+
+    lo = int(np.argmin(np.abs(times - rates_min_time)))
+    hi = int(np.argmin(np.abs(times - rates_max_time)))
+    if hi <= lo:
+        raise ValueError(
+            f"rates interval [{rates_min_time}, {rates_max_time}] selects "
+            f"{hi - lo + 1} pdf column(s) on a grid spanning "
+            f"[{times[0]:g}, {times[-1]:g}]; it must span at least two."
+        )
+
+    start, stop = lo - pad_young, hi + pad_old + 1      # stop exclusive
+    short_young, short_old = max(0, -start), max(0, stop - len(times))
+
+    if short_young:
+        # Wanting rates from the very start of the pdf is the ordinary case: the
+        # pad is unobtainable by construction, not by misconfiguration.
+        lead = ("Note" if lo - pad_young < 0 and lo == 0 else "Warning")
+        print(
+            f"{lead}: the pdf starts at t={times[0]:g}, which is "
+            f"{short_young * time_step:g} short of the {pad_young * time_step:g} "
+            f"of padding wanted below rates_min_time={rates_min_time:g}. Padding as "
+            "far as the pdf allows; the youngest kept timepoints will use the "
+            "filter's fixed minimum window instead of a symmetric one."
+        )
+    if short_old:
+        print(
+            f"Warning: the pdf ends at t={times[-1]:g}, which is "
+            f"{short_old * time_step:g} short of the {pad_old * time_step:g} of "
+            f"padding wanted above rates_max_time={rates_max_time:g}. Padding as far "
+            "as the pdf allows; the oldest kept timepoints will use the filter's "
+            "fixed maximum window, i.e. less smoothing than max_window_size asks for."
+        )
+
+    start, stop = max(0, start), min(len(times), stop)
+
+    padded_pdf = pdf_df.iloc[:, start:stop].copy()
+    if start > 0:
+        # Carry the survival baseline (see "Survival baseline" above). NaN rows --
+        # pairs observed nowhere genome-wide -- stay NaN, as they must.
+        dropped_mass = pdf_df.iloc[:, :start].sum(axis=1)
+        padded_pdf.iloc[:, 0] += dropped_mass
+
+    keep_mask = np.zeros(stop - start, dtype=bool)
+    keep_mask[lo - start : hi - start + 1] = True
+    return padded_pdf, keep_mask
+
+
 def _assert_uniform_grid(times: np.ndarray, time_step: float) -> None:
     """The derivative filter is built on a constant bin width; enforce it.
 

@@ -11,8 +11,9 @@ def main():
     parser.add_argument("--input_path", required=True, help="Path to tree sequence directory")
     parser.add_argument("--output_path", required=True, help="Output directory for pdf data")
     parser.add_argument("--output_name", required=True, help="Output filename for pdf parquet file")
-    parser.add_argument("--max_time", type=int, required=True, help="Maximum time for rate calculation")
-    parser.add_argument("--n_timepoints", type=int, required=True, help="Number of timepoints for rate calculation")
+    parser.add_argument("--pdf_min_time", type=float, default=0.0, help="Start of the pdf time grid (only 0 is supported)")
+    parser.add_argument("--pdf_max_time", type=float, required=True, help="End of the pdf time grid; the LAST pdf column is labelled with this time")
+    parser.add_argument("--pdf_bin_size", type=float, required=True, help="Width of each pdf time bin; must divide (pdf_max_time - pdf_min_time) exactly")
     parser.add_argument("--fraction_samples", type=float, default=1, help="Fraction of samples to use for coalescence counting")
     parser.add_argument("--pop_labels", type=str, help="Path to population labels file (already sliced to the samples used in this run)")
     parser.add_argument("--num_threads", type=int, default=1, help="Number of threads to use for computation")
@@ -22,8 +23,9 @@ def main():
     args = parser.parse_args()
     input_path = args.input_path
     output_path = args.output_path
-    max_time = args.max_time
-    n_timepoints = args.n_timepoints
+    pdf_min_time = args.pdf_min_time
+    pdf_max_time = args.pdf_max_time
+    pdf_bin_size = args.pdf_bin_size
     num_threads = args.num_threads
     fraction_samples = args.fraction_samples
     pop_labels_path = args.pop_labels
@@ -42,7 +44,8 @@ def main():
     coal_counts_dir = os.path.join(output_path, "counts_dir")
     coal_counts_dir = os.path.join(coal_counts_dir, f"{args.output_name.removesuffix('.parquet')}")
     os.makedirs(coal_counts_dir, exist_ok=True)
-    CCE = CountCoalEvents(ts_dir=input_path ,max_time=max_time, num_timepoints=n_timepoints,fraction_samples=fraction_samples, sample_ids=chosen_samples)
+    CCE = CountCoalEvents(ts_dir=input_path, pdf_min_time=pdf_min_time, pdf_max_time=pdf_max_time,
+                          pdf_bin_size=pdf_bin_size, fraction_samples=fraction_samples, sample_ids=chosen_samples)
     CCE.count_coal_spans_all_ts(coal_counts_dir=coal_counts_dir, num_threads=num_threads)
     pdf_df = CCE.compute_coal_time_pdf(coal_counts_dir=coal_counts_dir)
     pdf_df.columns = pdf_df.columns.astype(str)
