@@ -1,0 +1,7 @@
+population_1,population_2,pair_label,color
+Western,Eastern,Western-Eastern,#4A2E83
+Western,Central,Western-Central,#9B7FD4
+Western,NC,Western-NC,#0B5B3B
+Eastern,Central,Eastern-Central,#E8A33D
+Eastern,NC,Eastern-NC,#2E9E6B
+Central,NC,Central-NC,#7FD1A8

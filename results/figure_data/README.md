@@ -49,6 +49,7 @@ whose tables are missing.
 | `avg_distance_vs_Nmin_n/` | `avg_distance_vs_Nmin_n.py` | Average embedded pairwise distance sweeping `N_min` and sweeping the sample count, at several Ne. |
 | `badmix_WG/` | `badmix_WG.py` | Whole-genome embeddings for the three hard admixture examples, aligned to the `recent_bottleneck` frame, plus labels and the shared population palette. |
 | `badmix_ancestry/` | `badmix_ancestry.py` | Per-ancestry (B, C, D) embeddings for those three examples under GNN and RFmix, all aligned to one reference panel. |
+| `chimp_dataset/` | `chimp_dataset.py` | The chimpanzee dataset: sample origins and Natural Earth outlines for the map, the genotype PCA, and the per-subspecies Ne(t) and per-pair relative diversity, each as a mean curve plus every individual pair's trajectory. The trajectory tables are thinned in time; the mean curves are not. |
 | `coal_rate_mig_rate/` | `coal_rate_mig_rate.py` | Within/between coalescence-rate trajectories at four Nm, and the plateau and rate constant over a finer migration-rate grid. |
 | `complex_4_pops/` | `complex_4_pops.py` | Embeddings, estimated and reconstructed rates, and the p scan for the four-population example. |
 | `complex_4_pops_singer/` | `complex_4_pops_singer.py` | The four-population example on simulated versus SINGER-inferred trees: aligned embeddings, and the analytic/simulated/SINGER mean rates within and between populations. |
