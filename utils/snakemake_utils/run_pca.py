@@ -1,91 +1,146 @@
+#!/usr/bin/env python3
+"""Genotype PCA over a directory of tree sequences.
+
+The genotype matrix of the whole dataset is never materialised. Each tree
+sequence contributes its sites to a running genetic relatedness matrix
+
+    G = sum_chunks Z_c^T Z_c,     Z_c = (g_c - mean) / sd
+
+(columns mean-centred and scaled to unit variance, as requested), and the
+principal components are the eigenvectors of G / n_sites. This is exact — it
+is the same decomposition a single-shot PCA on the stacked matrix would give —
+but it costs O(n^2) memory instead of O(sites x n).
+
+The alternative of concatenating the chunks and calling TreeSequence.pca() is
+not used, for two reasons: tskit 1.0.3's pca() only implements mode="branch"
+(site mode raises TSK_ERR_UNSUPPORTED_STAT_MODE), which is a different
+estimand from a genotype PCA; and these chunks each carry the full chromosome
+coordinate space, so concatenating them yields a sequence length equal to
+n_chunks x chromosome_length rather than a contiguous genome.
+"""
 import argparse
-from plotting_style import setup_plotting_style
-import demes
-import msprime
-import numpy as np
-import matplotlib.pyplot as plt
 import os
+
+# This cluster's OpenBLAS thread-thrashes on the small (n x n) products below,
+# and the per-chunk work is already parallelised across processes, so pin BLAS
+# to one thread before numpy is imported.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
+import glob
+from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
 import pandas as pd
+import tskit
+from tqdm import tqdm
 
-def run_pca(demes_file_path,n_samples_per_pop,sequence_length=1e7,recombination_rate=1e-8,num_components=2):
-    graph = demes.load(demes_file_path)
-    demography = msprime.Demography.from_demes(graph)
-    pops = [pop.name for pop in demography.populations if pop.default_sampling_time == 0]
-    samples = {pop: n_samples_per_pop for pop in pops}
-    ts = msprime.sim_ancestry(
-        samples=samples,
-        demography=demography,
-        sequence_length=sequence_length,
-        recombination_rate=recombination_rate,
-        ploidy=2,
-        random_seed=42
-    )
-    pca=ts.pca(num_components=num_components).factors
-    sample_ids = np.arange(pca.shape[0])
-    data = np.hstack((sample_ids[:,None],pca))
-    pca_df = pd.DataFrame(data,columns=["sample_id"]+[f"PC{i+1}" for i in range(num_components)])
-    pca_df["sample_id"] = pca_df["sample_id"].astype(int)
-    return pca_df
 
-def plot_pca(pca_df, pop_labels, pop_colors, id_label="sample_id"):
-    setup_plotting_style()
-    pc_cols = [c for c in pca_df.columns if c.startswith("PC")]
-    # When unphased, average the per-haplotype PCA coordinates within each
-    # individual so that one point is plotted per diploid individual.
-    if id_label != "sample_id":
-        pca_df = (
-            pca_df.merge(pop_labels[["sample_id", id_label]], on="sample_id")
-            .groupby(id_label, as_index=False)[pc_cols].mean()
-        )
-    label_cols = pop_labels[[id_label, "population"]].drop_duplicates(subset=id_label)
-    merged_df = pca_df.merge(label_cols, on=id_label).merge(pop_colors, on="population")
-    fig, ax = plt.subplots(figsize=(6,6))
-    pops = merged_df['population'].unique()
-    for pop in pops:
-        pop_data = merged_df[merged_df['population'] == pop]
-        ax.scatter(
-            pop_data['PC1'],
-            pop_data['PC2'],
-            label=pop,
-            color=pop_data['color'].iloc[0],
-            s=10
-        )
+def _chunk_grm(args):
+    """Return (Z^T Z, n_sites_used) for one tree sequence.
 
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    if len(pops) <= 10:
-        ax.legend(title="Population", bbox_to_anchor=(1.05, 1), loc='upper left')
-    return fig
+    Monomorphic sites carry no information and would divide by a zero standard
+    deviation, so they are dropped rather than scaled.
+    """
+    ts_path, sample_ids = args
+    ts = tskit.load(ts_path)
+    g = ts.genotype_matrix(samples=sample_ids).astype(np.float32)  # (sites, samples)
+    if g.shape[0] == 0:
+        n = len(sample_ids)
+        return np.zeros((n, n)), 0
+
+    # A site is monomorphic when it has no variance *across samples*, i.e. along
+    # axis 1 of this (sites, samples) matrix. Such sites carry no information and
+    # would divide by zero when standardised, so drop them first.
+    site_sd = g.std(axis=1)
+    polymorphic = site_sd > 0
+    if not polymorphic.any():
+        n = len(sample_ids)
+        return np.zeros((n, n)), 0
+    g = g[polymorphic]
+
+    # Standardise each site (row) to mean 0 / unit variance across samples, so
+    # every site contributes equally to the relatedness matrix.
+    z = (g - g.mean(axis=1, keepdims=True)) / g.std(axis=1, keepdims=True)
+    return (z.T @ z).astype(np.float64), g.shape[0]
+
+
+def compute_pca(ts_dir, sample_ids, num_components=2, num_threads=1):
+    """Accumulate the GRM across every tree sequence in ts_dir, then decompose it."""
+    ts_paths = sorted(glob.glob(os.path.join(ts_dir, "*.trees")))
+    if not ts_paths:
+        raise ValueError(f"No .trees files found in {ts_dir}")
+    print(f"running PCA over {len(ts_paths)} tree sequences ({len(sample_ids)} samples)")
+
+    n = len(sample_ids)
+    G = np.zeros((n, n))
+    n_sites = 0
+    work = [(p, sample_ids) for p in ts_paths]
+
+    if num_threads > 1:
+        with ProcessPoolExecutor(max_workers=num_threads) as pool:
+            for G_c, s_c in tqdm(pool.map(_chunk_grm, work), total=len(work),
+                                 desc="Accumulating GRM"):
+                G += G_c
+                n_sites += s_c
+    else:
+        for item in tqdm(work, desc="Accumulating GRM"):
+            G_c, s_c = _chunk_grm(item)
+            G += G_c
+            n_sites += s_c
+
+    if n_sites == 0:
+        raise ValueError(f"No polymorphic sites found across the tree sequences in {ts_dir}")
+    G /= n_sites
+
+    # G is symmetric PSD, so eigh is both correct and cheaper than an SVD.
+    eigenvalues, eigenvectors = np.linalg.eigh(G)
+    order = np.argsort(eigenvalues)[::-1][:num_components]
+    eigenvalues = eigenvalues[order]
+    factors = eigenvectors[:, order]
+
+    total_variance = np.trace(G)
+    explained = eigenvalues / total_variance if total_variance > 0 else np.full(num_components, np.nan)
+    print(f"used {n_sites} polymorphic sites; "
+          f"variance explained: {np.round(explained * 100, 2)}%")
+
+    pca_df = pd.DataFrame(factors, columns=[f"PC{i + 1}" for i in range(num_components)])
+    pca_df.insert(0, "sample_id", np.asarray(sample_ids, dtype=int))
+    return pca_df, explained
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Run PCA on simulated genetic data")
-    parser.add_argument("--demes_file_path", required=True, help="Path to the demes YAML file", type=str)
-    parser.add_argument("--output_path", required=True, help="Output directory for PCA results", type=str)
-    parser.add_argument("--colors", required=True, help="path to colors file", type=str)
-    parser.add_argument("--labels", required=True, help="path to labels file", type=str)
-    parser.add_argument("--n", required=True, help="Number of samples per population", type=int)
-    parser.add_argument("--per-haplotype", dest="per_haplotype", action="store_true", help="If set, PCA coordinates are plotted per haplotype (sample_id). Otherwise they are averaged per diploid individual (individual_id)")
+    parser = argparse.ArgumentParser(description="Run genotype PCA on a directory of tree sequences")
+    parser.add_argument("--input_path", required=True, type=str, help="Directory containing the .trees files")
+    parser.add_argument("--output_path", required=True, type=str, help="Output directory for the PCA csv")
+    parser.add_argument("--output_name", required=True, type=str, help="Output csv filename")
+    parser.add_argument("--pop_labels", required=True, type=str,
+                        help="Path to population labels csv (already sliced to the samples used in this run)")
+    parser.add_argument("--num_components", type=int, default=2, help="Number of principal components to retain")
+    parser.add_argument("--num_threads", type=int, default=1, help="Number of worker processes")
 
     args = parser.parse_args()
-    demes_file_path = args.demes_file_path
-    output_path = args.output_path
-    n = args.n
-    colors_path = args.colors
-    labels_path = args.labels
-    colors = pd.read_csv(colors_path)
-    labels = pd.read_csv(labels_path)
-    per_haplotype = args.per_haplotype
-    id_label = "sample_id" if per_haplotype else "individual_id"
+    pop_labels = pd.read_csv(args.pop_labels)
+    sample_ids = pop_labels["sample_id"].values
 
-    sequence_length = 1e7
-    recombination_rate = 1e-8
-    num_components = 2
+    os.makedirs(args.output_path, exist_ok=True)
+    pca_df, explained = compute_pca(
+        ts_dir=args.input_path,
+        sample_ids=sample_ids,
+        num_components=args.num_components,
+        num_threads=args.num_threads,
+    )
 
-    pca_df = run_pca(demes_file_path, n, sequence_length, recombination_rate, num_components)
-    pca_fig = plot_pca(pca_df,labels,colors,id_label=id_label)
+    # The plotting rule reads the explained variance back off these columns for
+    # its axis labels, so they travel with the coordinates in the same csv.
+    for i, frac in enumerate(explained):
+        pca_df[f"PC{i + 1}_explained"] = frac
 
-    pca_fig.savefig(os.path.join(output_path, "pca.png"), dpi=500)
-    # pca_df.to_parquet(os.path.join(output_path, "pca_results.parquet"))
+    out = os.path.join(args.output_path, args.output_name)
+    pca_df.to_csv(out, index=False)
+    print(f"saved PCA coordinates to {out}")
+
 
 if __name__ == "__main__":
     main()
