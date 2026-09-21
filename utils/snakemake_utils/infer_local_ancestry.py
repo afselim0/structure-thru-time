@@ -1,5 +1,6 @@
 #%%
 import argparse
+import json
 import pandas as pd
 import demes
 import msprime
@@ -16,6 +17,11 @@ from LocalAncestryGNN import LocalAncestryInference
 # Genome-wide ancestry proportions, written alongside the per-contig LAI files
 # in LAI/<method>/ and skipped when those per-contig files are enumerated.
 TOTAL_ANCESTRY_PROPORTIONS_FILE = "total_ancestry_proportions.parquet"
+
+# Provenance record of which exact samples formed each reference panel, written
+# beside the proportions in LAI/<method>/. A .csv deliberately: every consumer of
+# that directory enumerates "*.parquet", so this file is invisible to them.
+REFERENCE_PANELS_FILE = "reference_panels.csv"
 
 
 def compute_total_ancestry_proportions(lai_dir: str, admixed_sample_ids, reference_pops: list[str]) -> pd.DataFrame:
@@ -70,13 +76,189 @@ def compute_total_ancestry_proportions(lai_dir: str, admixed_sample_ids, referen
         span_totals = contig_totals if span_totals is None else contig_totals.add(span_totals, fill_value=0.0)
 
     span_wide = span_totals.unstack("ancestry_label", fill_value=0.0)
+
+    # Guard the reindex below against a label-set mismatch between what the LAI
+    # files actually contain and the panels we were told to report. Without this
+    # a mismatch yields an all-zero frame, zero row sums, and a silent NaN from
+    # the division that survives all the way to the plots.
+    observed = set(span_wide.columns)
+    requested = set(reference_pops)
+    if not (observed & requested):
+        raise ValueError(
+            f"None of the requested reference labels {sorted(requested)} appear in the local "
+            f"ancestry calls in {lai_dir} (which contain {sorted(observed)}). Composite "
+            "reference_pops are incompatible with LAI_method='True', whose ancestry labels are "
+            "always atomic deme names."
+        )
+    if requested - observed:
+        print(f"WARNING: reference labels with no assigned segments: {sorted(requested - observed)}")
+    if observed - requested:
+        print(f"WARNING: LAI files contain unrequested labels (dropped): {sorted(observed - requested)}")
+
+    # Positional column assignment below is only correct because this reindex
+    # forces the column order to match reference_pops.
     span_wide = span_wide.reindex(index=admixed_sample_ids, columns=reference_pops, fill_value=0.0)
 
     total_span = span_wide.sum(axis=1)
+    if (total_span <= 0).any():
+        bad = total_span.index[total_span <= 0].tolist()
+        raise ValueError(
+            f"{len(bad)} admixed sample(s) have zero total assigned ancestry span "
+            f"(e.g. sample_id={bad[:5]}); their proportions would be NaN."
+        )
     prop_df = span_wide.div(total_span, axis=0)
     prop_df.columns = [f"{pop}_prop" for pop in reference_pops]
     prop_df.insert(0, "sample_id", prop_df.index)
     return prop_df.reset_index(drop=True)
+
+
+def resolve_reference_panels(
+    pop_labels: pd.DataFrame,
+    reference_spec: dict | None,
+    admix_pops: list[str],
+    pops: list[str] | None = None,
+) -> dict[str, list[int]]:
+    """Resolve the reference-panel spec into label -> haploid sample_ids.
+
+    This is the one place where a reference population stops being a name and
+    becomes a set of samples; everything downstream is string plumbing on the
+    labels returned here.
+
+    Three input forms, one output shape:
+
+    * ``reference_spec is None`` -- default: one panel per non-admixed population
+      in ``pop_labels`` (optionally restricted to ``pops``), each using all of
+      that population's samples. This is the historical behaviour.
+    * ``{"A": None, "B": None}`` -- one panel per named population, all samples.
+      What a plain ``reference_pops: [A, B]`` list normalises to.
+    * ``{"G": {"P": n, ...}}`` -- a COMPOSITE panel ``G`` built from the first
+      ``n`` DIPLOID INDIVIDUALS of each source population ``P``. Both haplotypes
+      of each chosen individual are included, so the panel holds
+      ``2 * sum(n)`` haploid sample_ids. This is what lets panels be size-matched
+      across populations of different sizes.
+
+    Selection is deterministic and seedless by design: panels must be
+    reproducible across reruns and comparable across LAI methods. "First n"
+    means lowest ``individual_id`` -- keyed on the individual rather than on
+    ``sample_id`` so that both haplotypes of an individual are always taken
+    together, even if the rows are unsorted or an individual's haplotypes are
+    not adjacent. Note this makes the choice SYSTEMATIC rather than random: if
+    ``individual_id`` order correlates with anything (accession order, batch),
+    so does the panel.
+
+    Parameters
+    ----------
+    pop_labels : pd.DataFrame
+        Needs columns ``sample_id`` (haploid; two rows per individual),
+        ``population`` and ``individual_id``.
+    reference_spec : dict or None
+        Normalised spec as produced by the snakefile's ``_to_reference_spec``.
+    admix_pops : list[str]
+        Populations treated as admixed: excluded from the default, and rejected
+        as composite sources.
+    pops : list[str] or None
+        Optional run-wide population restriction. Applied only to the ``None``
+        default; explicit specs are validated in the snakefile.
+
+    Returns
+    -------
+    dict[str, list[int]]
+        Insertion-ordered label -> sorted haploid sample_ids.
+    """
+    required = {"sample_id", "population", "individual_id"}
+    missing_cols = required - set(pop_labels.columns)
+    if missing_cols:
+        raise ValueError(f"pop_labels is missing required column(s): {sorted(missing_cols)}")
+
+    if reference_spec is None:
+        labels = [p for p in pop_labels["population"].unique() if p not in admix_pops]
+        if pops is not None:
+            labels = [p for p in labels if p in pops]
+        print(f"reference_pops not specified; defaulting to: {labels}")
+        reference_spec = {label: None for label in labels}
+
+    known_pops = set(pop_labels["population"].unique())
+    panels: dict[str, list[int]] = {}
+    claimed: dict[str, str] = {}      # source population -> the label that took it
+
+    for label, members in reference_spec.items():
+        # A group with no member mapping means "all samples of the population
+        # that shares the label's name" -- the legacy one-pop-one-panel form.
+        sources = {label: None} if members is None else members
+
+        sample_ids: list[int] = []
+        for source, n_individuals in sources.items():
+            if source not in known_pops:
+                raise ValueError(
+                    f"reference_pops['{label}'] draws from population {source!r}, which is not "
+                    f"present in pop_labels (populations: {sorted(known_pops)})."
+                )
+            if source in admix_pops:
+                raise ValueError(
+                    f"reference_pops['{label}'] draws from {source!r}, which is listed in "
+                    "admixed_pops; a reference panel cannot contain admixed samples."
+                )
+            if source in claimed:
+                raise ValueError(
+                    f"Source population {source!r} is claimed by both '{claimed[source]}' and "
+                    f"'{label}'; reference panels must be disjoint. GNN takes an argmax over the "
+                    "panels and RFmix assigns one label per individual, so overlapping panels are "
+                    "undefined rather than merely redundant."
+                )
+            claimed[source] = label
+
+            sub = pop_labels[pop_labels["population"] == source]
+
+            if n_individuals is None:
+                chosen = sub
+            else:
+                # np.sort on an integer column is numeric, so individual 2 comes
+                # before individual 10 (a lexicographic sort would not).
+                individuals = np.sort(sub["individual_id"].unique())
+                if len(individuals) < n_individuals:
+                    raise ValueError(
+                        f"reference_pops['{label}'] requests {n_individuals} individuals from "
+                        f"{source!r}, but only {len(individuals)} are present in pop_labels. "
+                        "Lower the count, or drop it to use all of them."
+                    )
+                chosen = sub[sub["individual_id"].isin(individuals[:n_individuals])]
+
+            sample_ids.extend(chosen["sample_id"].tolist())
+
+        if not sample_ids:
+            raise ValueError(f"reference_pops['{label}'] resolved to zero samples.")
+        if len(set(sample_ids)) != len(sample_ids):
+            raise ValueError(f"reference_pops['{label}'] resolved to duplicate sample_ids.")
+        panels[label] = sorted(int(s) for s in sample_ids)
+
+    if len(panels) < 2:
+        raise ValueError(
+            f"Local ancestry inference needs at least 2 reference panels; resolved "
+            f"{len(panels)}: {list(panels)}."
+        )
+    return panels
+
+
+def write_reference_panels_manifest(panels: dict[str, list[int]], pop_labels: pd.DataFrame,
+                                    out_path: str) -> pd.DataFrame:
+    """Record which samples formed each reference panel, for provenance.
+
+    Long format, one row per haploid sample, so "is this balanced?" is a
+    one-line groupby. Also records what the ``None`` default actually resolved
+    to, which otherwise exists only in stdout.
+    """
+    cols = [c for c in ("sample_id", "population", "individual_id", "sample_name")
+            if c in pop_labels.columns]
+    frames = []
+    for label, sample_ids in panels.items():
+        rows = pop_labels[pop_labels["sample_id"].isin(sample_ids)][cols].copy()
+        rows.insert(0, "ancestry_label", label)
+        frames.append(rows)
+    manifest = pd.concat(frames, ignore_index=True).rename(
+        columns={"population": "source_population"}
+    )
+    manifest.to_csv(out_path, index=False)
+    return manifest
 
 
 def run_local_ancestry(
@@ -155,7 +337,12 @@ def main():
     parser.add_argument("--r", type=float, default=1.2e-8, help="recombination_rate")
     parser.add_argument("--mu", type=float, default=1.2e-8, help="mutation_rate")
     parser.add_argument("--admix_pops", nargs='+',default=None, help="population labels to compute local ancestry for")
-    parser.add_argument("--reference_pops", nargs='+',default=None, help="population labels to use as reference populations for local ancestry inference")
+    # Two spellings of the same thing: a flat list of population names, or the
+    # composite form carrying per-source individual counts. The composite cannot
+    # be space-joined onto a command line, so it crosses as one JSON object.
+    ref_group = parser.add_mutually_exclusive_group()
+    ref_group.add_argument("--reference_pops", nargs='+', default=None, help="population labels to use as reference populations for local ancestry inference")
+    ref_group.add_argument("--reference_spec", default=None, help="JSON object mapping reference-panel label -> {source_population: n_individuals}, or null for 'all samples of the population named by the label'. Counts are DIPLOID INDIVIDUALS; both haplotypes of each chosen individual enter the panel.")
     parser.add_argument("--LAI_method", choices=["RFmix", "GNN", "True"], default="RFmix", help="Local ancestry method: RFmix (RFMix2), GNN (genealogical nearest neighbours), or True (ground-truth calls written by simulate_trees.py)")
     parser.add_argument("--num_threads", type=int, default=1, help="number of tree sequences to process in parallel (one rfmix process each)")
     parser.add_argument("--pops", nargs='+', default=None, help="Optional restriction: population labels the whole analysis is scoped to (used to filter the default reference_pops when --reference_pops is not given).")
@@ -176,24 +363,40 @@ def main():
     if admix_samples is None or len(admix_samples) == 0:
         raise ValueError(f"No samples found for admix_pops={admix_pops} in {args.pop_labels}")
 
-    if reference_pops is None:
-        # Default to every population in pop_labels.csv that isn't an admixed
-        # population, optionally further restricted to --pops if given.
-        reference_pops = [p for p in pop_labels["population"].unique() if p not in admix_pops]
-        if args.pops is not None:
-            reference_pops = [p for p in reference_pops if p in args.pops]
-        print(f"--reference_pops not specified; defaulting to: {reference_pops}")
+    # Normalise whichever spelling arrived into the one internal form, then
+    # resolve it to actual samples. The None default (every non-admixed
+    # population, all samples) lives inside the resolver so it is unit-testable.
+    if args.reference_spec is not None:
+        reference_spec = json.loads(args.reference_spec)
+    elif reference_pops is not None:
+        reference_spec = {p: None for p in reference_pops}
+    else:
+        reference_spec = None
 
-    reference_samples_dict = {pop_label: pop_labels[pop_labels["population"] == pop_label]["sample_id"].values for pop_label in reference_pops}
-    if len(reference_samples_dict) == 0:
-        raise ValueError(f"No reference populations resolved (reference_pops={reference_pops}) in {args.pop_labels}")
+    reference_samples_dict = resolve_reference_panels(
+        pop_labels=pop_labels,
+        reference_spec=reference_spec,
+        admix_pops=admix_pops,
+        pops=args.pops,
+    )
+    reference_pops = list(reference_samples_dict.keys())
+    for label, ids in reference_samples_dict.items():
+        print(f"  reference panel {label}: {len(ids)} haplotypes ({len(ids) // 2} individuals)")
+
+    # Written before inference so it survives a later failure, and so a long
+    # RFmix run can be checked for panel balance while it is still going.
+    os.makedirs(LAI_path, exist_ok=True)
+    write_reference_panels_manifest(
+        reference_samples_dict, pop_labels, os.path.join(LAI_path, REFERENCE_PANELS_FILE)
+    )
+    print(f"Saved reference panel manifest to: {os.path.join(LAI_path, REFERENCE_PANELS_FILE)}")
 
     run_local_ancestry(
         LAI_method=args.LAI_method,
         input_path=input_path,
         LAI_path=LAI_path,
         admix_samples=admix_samples.tolist(),
-        reference_samples_dict={label: samples.tolist() for label, samples in reference_samples_dict.items()},
+        reference_samples_dict=reference_samples_dict,
         recomb_rate=recomb_rate,
         mut_rate=mut_rate,
         num_threads=num_threads,
