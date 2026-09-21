@@ -118,6 +118,49 @@ mem_for_set() {
     echo "$mb"
 }
 
+# Cores to reserve per concurrent SINGER task, for the per-chromosome job layout.
+#
+# A jnovembre node is 64 cores and 251.6 GB, i.e. 3.93 GB per core. SINGER holds the whole
+# sample's ARG in memory (~15.76 MB per haplotype, measured), so a task that needs more than
+# one core's share of RAM must reserve more than one core -- not because it uses the CPU, but
+# because the memory has to come from somewhere.
+#
+#     set                  dip   GB/task   cores   budget   margin   chunks/node
+#     OCEANIA               28      0.88       1     3.93    4.45x            64
+#     AMERICA               61      1.92       1     3.93    2.04x            64
+#     MIDDLE_EAST          100      3.15       1     3.93    1.25x            64
+#     AFRICA               104      3.28       2     7.86    2.40x            32
+#     CENTRAL_SOUTH_ASIA   130      4.10       2     7.86    1.92x            32
+#     EUROPE               155      4.89       2     7.86    1.61x            32
+#     EAST_ASIA            168      5.30       2     7.86    1.48x            32
+#     ALL                  216      6.81       3    11.79    1.73x            21
+#
+# ALL gets 3 rather than the 2 its 6.81 GB peak would just fit in: at 2 cores the margin is
+# only 1.15x, and an 8 GB request against that same peak previously killed ~7.5% of jobs. The
+# measured distribution is tight (p50 1.90, p99 4.93) but the tail is what matters here.
+# The allocation is a TABLE, not a formula, because two entries deliberately take more than the
+# arithmetic requires. AFRICA's 3.28 GB technically fits one 3.93 GB core (1.20x) and ALL's
+# 6.81 GB fits two (1.15x) -- but a 1.15-1.20x margin is what produced ~7.5% OOM kills earlier
+# in this project, since the measured peak over a few hundred jobs is not the true tail. Both
+# are rounded up one step.
+#
+# Sets are keyed by diploid count so an unlisted set still gets a sane answer: anything larger
+# than the biggest listed set takes the largest allocation.
+cores_per_chunk_for_set() {
+    local set_name=$1
+    local list="${ROOT}/resources/hgdp/sets/${set_name}.csv"
+    [[ -f "$list" ]] || { echo 3; return; }            # unknown set: assume the largest
+    local diploids
+    diploids=$(grep -c . "$list")
+    #   <= 100 diploids (<= 3.15 GB/task): 1 core
+    #   <= 168 diploids (<= 5.30 GB/task): 2 cores
+    #   above  (ALL, 216 dip, 6.81 GB):    3 cores
+    if   (( diploids <= 100 )); then echo 1
+    elif (( diploids <= 168 )); then echo 2
+    else                             echo 3
+    fi
+}
+
 # The pilot exists to exercise the pipeline quickly, not to produce usable posteriors, so it is
 # the one place MCMC lengths deviate from the shared config.
 PILOT_OVERRIDES=()
