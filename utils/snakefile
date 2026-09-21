@@ -1,4 +1,8 @@
+import json
+import math
 import os
+import re
+import shlex
 from pathlib import Path
 from itertools import combinations
 def read_config(parameter, default, params = config):
@@ -34,10 +38,93 @@ sim_trees_dir                     = read_config("sim_trees_dir", default=tree_ou
 
 # Rate Inference Parameters
 fraction_samples                  = read_config("fraction_samples", default = 1.0)   # Fraction of samples taken into account in pdf computation at each contig
-min_window_size                   = read_config("min_window_size", default = 50)    # Window size for local linear regression at t=0
-max_window_size                   = read_config("max_window_size", default = 500)   # Window size for local linear regression at t=max_time
-max_time                          = read_config("max_time", default = 10000)
-n_timepoints                      = read_config("n_timepoints", default = max_time)
+
+# --- Coalescent-time PDF grid -------------------------------------------------
+# The pdf is the expensive product, and one pdf supports many cheap rate slices,
+# so its extent is specified independently of the interval rates are wanted on.
+# Columns are the bin LEFT edges pdf_min_time, +bin, ..., pdf_max_time INCLUSIVE;
+# column t holds the coalescent mass in [t, t + pdf_bin_size).
+_REMOVED_TIME_KEYS = {
+    "max_time":     "replaced by pdf_max_time; set pdf_bin_size = old max_time / old n_timepoints",
+    "n_timepoints": "removed; set pdf_bin_size = old max_time / old n_timepoints instead",
+    "min_time":     "renamed to embeddings_min_time (it was always plotting-only)",
+}
+_stale_time_keys = [k for k in _REMOVED_TIME_KEYS if k in config]
+if _stale_time_keys:
+    raise ValueError(
+        "Config uses removed time keys: "
+        + "; ".join(f"{k!r} ({_REMOVED_TIME_KEYS[k]})" for k in _stale_time_keys)
+        + ". See data/configs/ for migrated examples."
+    )
+
+pdf_min_time                      = read_config("pdf_min_time", default = 0)
+pdf_max_time                      = read_config("pdf_max_time", default = 10000)
+pdf_bin_size                      = read_config("pdf_bin_size", default = 1)
+
+if pdf_min_time != 0:
+    raise NotImplementedError(
+        f"pdf_min_time={pdf_min_time} is not supported yet (only 0). The survival "
+        "S = 1 - cumsum(pdf) would be missing the coalescent mass in "
+        f"[0, {pdf_min_time}), so the survival -- and every rate derived from it -- "
+        "would be wrong. The parameter exists and is carried in filenames so the "
+        "grid is self-describing, but a nonzero value must be implemented first."
+    )
+if pdf_bin_size <= 0:
+    raise ValueError(f"pdf_bin_size must be positive (got {pdf_bin_size}).")
+if pdf_max_time <= pdf_min_time:
+    raise ValueError(f"pdf_max_time ({pdf_max_time}) must exceed pdf_min_time ({pdf_min_time}).")
+_pdf_span = pdf_max_time - pdf_min_time
+_n_pdf_bins = round(_pdf_span / pdf_bin_size)
+if abs(_n_pdf_bins * pdf_bin_size - _pdf_span) > 1e-9 * max(1.0, abs(_pdf_span)):
+    raise ValueError(
+        f"(pdf_max_time - pdf_min_time) = {_pdf_span} is not an exact multiple of "
+        f"pdf_bin_size = {pdf_bin_size} (would need {_pdf_span / pdf_bin_size} bins). "
+        "Choose a bin size that divides the span exactly."
+    )
+n_pdf_timepoints                  = _n_pdf_bins + 1   # inclusive of pdf_max_time
+
+# --- Rate estimation interval -------------------------------------------------
+# min_window_size is the local-linear bandwidth AT rates_min_time and
+# max_window_size the bandwidth AT rates_max_time. compute_rates pads the pdf
+# slice beyond this interval before filtering and clips the pad off afterwards,
+# so every saved timepoint is an interior (symmetric-window) row rather than a
+# constant-rate artefact of where the grid stops.
+rates_min_time                    = read_config("rates_min_time", default = pdf_min_time)
+rates_max_time                    = read_config("rates_max_time", default = pdf_max_time)
+min_window_size                   = read_config("min_window_size", default = 50)    # bandwidth at rates_min_time
+max_window_size                   = read_config("max_window_size", default = 500)   # bandwidth at rates_max_time
+
+def _snap_to_pdf_grid(value, name):
+    """Round a rate bound up onto the pdf grid, reporting any move.
+
+    The rate interval is a slice of the pdf's columns, so its bounds have to be
+    pdf timepoints. Rather than rejecting a bound that falls between two columns,
+    it is rounded UP to the next one: that is the nearest grid point which does
+    not ask for rates outside the requested interval. The move is at most one bin
+    and is printed, because it silently changes the filename tag (and so which
+    outputs a run reuses).
+    """
+    steps = (value - pdf_min_time) / pdf_bin_size
+    if abs(steps - round(steps)) <= 1e-9 * max(1.0, abs(steps)):
+        return value
+    snapped = pdf_min_time + math.ceil(steps - 1e-9) * pdf_bin_size
+    # Rounding up grows the interval at the old end, which can walk off the grid;
+    # step back one bin there rather than leave the pdf.
+    if snapped > pdf_max_time:
+        snapped -= pdf_bin_size
+    print(f"note: {name}={value} is not on the pdf grid (pdf_min_time={pdf_min_time}, "
+          f"pdf_bin_size={pdf_bin_size}); using {snapped}.")
+    return snapped
+
+rates_min_time                    = _snap_to_pdf_grid(rates_min_time, "rates_min_time")
+rates_max_time                    = _snap_to_pdf_grid(rates_max_time, "rates_max_time")
+
+if not (pdf_min_time <= rates_min_time < rates_max_time <= pdf_max_time):
+    raise ValueError(
+        f"the rates interval [{rates_min_time}, {rates_max_time}] must be a non-empty "
+        f"sub-interval of the pdf grid [{pdf_min_time}, {pdf_max_time}]."
+    )
+n_rates_timepoints                = round((rates_max_time - rates_min_time) / pdf_bin_size) + 1
 per_haplotype                     = str(read_config("per_haplotype", default = "False")).lower() == "true" # If True, coalescent rates (and embeddings, plots) are per-haplotype rather than per-individual
 
 # STT Parameters
@@ -47,15 +134,19 @@ p                                 = read_config("p", default = 1)
 link                              = read_config("link", default = "inverse_distance")
 l1_penalties                      = read_config("l1", default = "None")
 n_components                      = read_config("n_components", default = 2) 
+unweighted                        = str(read_config("unweighted", default = "True")).lower() == "true" # Weight every pair equally in both optimization stages, ignoring the loss weights entirely
 rates_time_stride                 = read_config("rates_time_stride", default = "auto") # dash bundle: thin rate-parquet timepoints ("auto"|N|1)
 if isinstance(l1_penalties, list): l1_penalties = ",".join(str(x) for x in l1_penalties)
 
 # Plotting parameters
-min_time                          = read_config("min_time", default = 1) # For plotting purposes only
-n_timepoints_emb                  = read_config("n_timepoints_emb", default = n_timepoints) # For plotting purposes only
+embeddings_min_time               = read_config("embeddings_min_time", default = rates_min_time) # For plotting purposes only; defaults to the shallowest timepoint the rates actually carry
+n_timepoints_emb                  = read_config("n_timepoints_emb", default = n_rates_timepoints) # Timepoints the embeddings are solved on (both stages); defaults to every rate timepoint
 embeddings_plot_lims              = read_config("embeddings_plot_lims", default="None") 
 max_rate_plot                     = read_config("max_rate_plot", default = 1/10000)
-embeddings_max_time               = read_config("embeddings_max_time", default = max_time)
+max_Ne_plot                       = read_config("max_Ne_plot", default = "None") # Upper limit of the effective-size plot
+Ne_plot_scale                     = read_config("Ne_plot_scale", default = "log") # y-axis scale of the effective-size plot, linear or log
+generation_time                   = read_config("generation_time", default = "None") # Years per generation; adds a years axis to the effective-size plot
+embeddings_max_time               = read_config("embeddings_max_time", default = rates_max_time) # Defaults to the deepest timepoint the rates actually carry
 time_scale                        = read_config("time_scale", default = "linear")
 
 # Empirical dataset parameters
@@ -73,7 +164,7 @@ pop_labels                        = os.path.join(output_path, "data/pop_labels.c
 admixed_pops                      = read_config("admixed_pops", default=None)
 reference_pops                    = read_config("reference_pops", default=None)
 significant_ancestry_threshold    = read_config("significant_ancestry_threshold", default=0.1)
-LAI_method                        = str(read_config("LAI_method", default="RFmix"))
+LAI_method                        = str(read_config("LAI_method", default="GNN"))
 
 # Local ancestry inference method: RFmix (src/LocalAncestryRFmix.py), GNN
 # (src/LocalAncestryGNN.py), or True (ground-truth calls emitted by
@@ -83,25 +174,136 @@ LAI_METHODS = ["RFmix", "GNN", "True"]
 if LAI_method not in LAI_METHODS:
     raise ValueError(f"LAI_method={LAI_method!r} is not one of {LAI_METHODS}.")
 
+# Reference-panel labels become directory names under ancestry_STT/, snakemake
+# {ancestry} wildcards, "<label>_prop" parquet columns and fields in RFmix's
+# tab-delimited sample map, so the charset has to satisfy all four at once.
+_LABEL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
 def _to_list(x):
     if x is None: return None
     if isinstance(x, list): return [str(v).strip() for v in x]
+    if isinstance(x, dict):
+        raise TypeError("_to_list received a dict; reference_pops goes through _to_reference_spec.")
     return [v.strip() for v in str(x).replace(",", " ").split() if v.strip()]
 
+def _to_reference_spec(x):
+    """Normalize reference_pops into {label: {source_pop: n_individuals} | None} | None.
+
+    Three accepted spellings collapse to one internal form, so there is a single
+    code path downstream:
+
+        None                        -> None   (default: every non-admixed population,
+                                                all samples; resolved at runtime)
+        ["A", "B"] / "A B" / "A,B"  -> {"A": None, "B": None}
+        {"G": {"P": n, ...}}        -> itself
+
+    A value of None inside the dict means "all samples of the population named by
+    the key", i.e. the legacy meaning for that one group. Mixing the two is legal
+    and useful: balance the groups that need it, take everything for the rest.
+    Counts are DIPLOID INDIVIDUALS; both haplotypes of each enter the panel.
+    """
+    if x is None:
+        return None
+    # `--config reference_pops='{...}'` arrives as a string, not a mapping.
+    if isinstance(x, str) and x.lstrip().startswith("{"):
+        x = json.loads(x)
+    if isinstance(x, dict):
+        spec = {}
+        for label, members in x.items():
+            label = str(label).strip()
+            if members is None:
+                spec[label] = None
+            elif isinstance(members, dict):
+                if not members:
+                    raise ValueError(f"reference_pops['{label}'] is an empty mapping.")
+                spec[label] = {str(p).strip(): n for p, n in members.items()}
+            else:
+                raise TypeError(
+                    f"reference_pops['{label}'] must map source_population -> number of "
+                    f"individuals (or be empty for 'all samples of {label}'); got "
+                    f"{type(members).__name__}: {members!r}"
+                )
+        return spec
+    return {p: None for p in _to_list(x)}
+
 admixed_pops_list   = _to_list(admixed_pops)
-reference_pops_list = _to_list(reference_pops)   # stays None if unspecified — infer_local_ancestry.py defaults it at runtime
+reference_pops_spec = _to_reference_spec(reference_pops)   # stays None if unspecified — infer_local_ancestry.py defaults it at runtime
+reference_pops_list = None if reference_pops_spec is None else list(reference_pops_spec.keys())
 admix_mode          = admixed_pops_list is not None and len(admixed_pops_list) > 0
 pops_list           = None if pops == "all" else pops.split()   # reuse existing `pops` var (already space-joined)
+
+if reference_pops_spec is not None:
+    if not reference_pops_spec:
+        raise ValueError("reference_pops is empty; omit the key to default to all non-admixed populations.")
+    _claimed_sources = {}   # source population -> the label that already took it
+    for _label, _members in reference_pops_spec.items():
+        if not _LABEL_RE.match(_label):
+            raise ValueError(
+                f"reference_pops label {_label!r} must match [A-Za-z0-9_.-]+ . Labels become "
+                "directory names under ancestry_STT/, snakemake {ancestry} wildcards, "
+                "'<label>_prop' parquet columns and tab-delimited RFmix sample-map fields, so "
+                "'/', whitespace and tabs are not usable."
+            )
+        if _label.endswith("_prop"):
+            raise ValueError(
+                f"reference_pops label {_label!r} must not end in '_prop': select_ancestry_samples.py "
+                "recovers the labels by stripping that suffix from the '<label>_prop' columns of "
+                "total_ancestry_proportions.parquet."
+            )
+        # A group with no member mapping draws from the one population it names.
+        _sources = [_label] if _members is None else list(_members)
+        if _members is not None:
+            for _p, _n in _members.items():
+                # bool is an int subclass, so `True` would otherwise pass as 1.
+                if isinstance(_n, bool) or not isinstance(_n, int) or _n <= 0:
+                    raise ValueError(
+                        f"reference_pops['{_label}']['{_p}'] must be a positive integer number of "
+                        f"diploid individuals; got {_n!r}."
+                    )
+        if pops_list is not None:
+            _bad = [p for p in _sources if p not in pops_list]
+            if _bad:
+                raise ValueError(
+                    f"reference_pops['{_label}'] draws from {_bad}, which are not in pops={pops_list}; "
+                    "every source population must be a subset of pops."
+                )
+        if admixed_pops_list:
+            _bad = [p for p in _sources if p in admixed_pops_list]
+            if _bad:
+                raise ValueError(
+                    f"reference_pops['{_label}'] draws from admixed populations {_bad}; a reference "
+                    "panel cannot contain admixed samples."
+                )
+        for _p in _sources:
+            if _p in _claimed_sources:
+                raise ValueError(
+                    f"reference_pops: source population {_p!r} appears in both "
+                    f"'{_claimed_sources[_p]}' and '{_label}'. Reference panels must be disjoint: GNN "
+                    "takes an argmax over the panels and RFmix assigns one label per individual, so "
+                    "overlapping panels are undefined rather than merely redundant."
+                )
+            _claimed_sources[_p] = _label
 
 if admix_mode and pops_list is not None:
     _bad_admixed = [p for p in admixed_pops_list if p not in pops_list]
     if _bad_admixed:
         raise ValueError(f"admixed_pops {_bad_admixed} not in pops={pops_list}; admixed_pops must be a subset of pops.")
-    if reference_pops_list is not None:
-        _bad_ref = [p for p in reference_pops_list if p not in pops_list]
-        if _bad_ref:
-            raise ValueError(f"reference_pops {_bad_ref} not in pops={pops_list}; reference_pops must be a subset of pops.")
-    # if reference_pops_list is None, the subset restriction is deferred to infer_local_ancestry.py via --pops
+    # reference_pops source populations are checked above; when reference_pops is
+    # None the restriction is deferred to infer_local_ancestry.py via --pops.
+
+# Ground-truth ancestry labels come from msprime census nodes and are always
+# atomic deme names, so a composite label would never appear in the LAI parquets:
+# every proportion would be 0 and the normalisation would produce NaN.
+_is_composite_reference = (
+    reference_pops_spec is not None and any(v is not None for v in reference_pops_spec.values())
+)
+if admix_mode and LAI_method == "True" and _is_composite_reference:
+    raise ValueError(
+        "LAI_method='True' cannot be combined with composite reference_pops. The composite labels "
+        f"{[k for k, v in reference_pops_spec.items() if v is not None]} would never appear in the "
+        "ground-truth local ancestry calls, whose labels are always atomic deme names. Use "
+        "LAI_method='RFmix' or 'GNN', or give reference_pops as a plain list of deme names."
+    )
 
 # True local ancestry only exists for simulated trees: it is derived from the
 # msprime census nodes written by simulate_trees.py, so it requires a demes
@@ -140,16 +342,35 @@ param_label = (
 
 # Filename Tags
 SIM_TAG                           = f".NC{num_contigs}.CL{contig_length}.NPP{n_sim_per_pop}"
-PDF_TAG                           = f".V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
-RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}" + PDF_TAG
+PDF_TAG                           = f".V{version}.FS{fraction_samples}.pdf_minT{pdf_min_time}.pdf_maxT{pdf_max_time}.pdf_bin{pdf_bin_size}"
+# per_haplotype changes what a row IS -- a haplotype pair rather than an individual
+# pair -- by changing where _pooled_survival pools, so the rates, their weights, the
+# embeddings and every plot downstream all differ. It belongs from RATES_TAG down
+# rather than in PDF_TAG: the pdf is per-sample-pair either way, which is what lets
+# one pdf serve both settings.
+PHASE_TAG                         = ".perHap" if per_haplotype else ""
+RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_size}.rates_minT{rates_min_time}.rates_maxT{rates_max_time}{PHASE_TAG}" + PDF_TAG
+# True rates are an analytic function of the demography on the rates grid: they
+# depend on that grid and on per_haplotype (which sets whether rows are sample or
+# individual pairs), but on none of the estimation parameters (window sizes, the
+# pdf extent, the embedding). Tagging them with only what they depend on keeps a
+# grid change from silently reusing a stale file, which it did when untagged.
+TRUE_RATES_TAG                    = f".rates_minT{rates_min_time}.rates_maxT{rates_max_time}.pdf_bin{pdf_bin_size}{PHASE_TAG}"
+# PCA is a genotype GRM over the tree sequences and takes no time argument at all,
+# so it is deliberately NOT tagged with the time grid; doing so only forced
+# pointless recomputes whenever the grid moved.
+PCA_TAG                           = f".V{version}"
 # STT_TAG (and everything built on it) is penalty-free: it tags the *unsmoothed* embeddings, which
 # are always computed regardless of whether smoothing is requested. Smoothed outputs use SMOOTH_TAG,
 # which is identical but carries the actual L1 penalties.
 STT_TAG                           = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
 SMOOTH_TAG                        = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1_penalties}].nTe{n_timepoints_emb}" + RATES_TAG
-PLOT_TAG                          = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
-SMOOTH_PLOT_TAG                   = f".minTPlot{min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + SMOOTH_TAG
-TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + STT_TAG
+PLOT_TAG                          = f".minTPlot{embeddings_min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + STT_TAG
+SMOOTH_PLOT_TAG                   = f".minTPlot{embeddings_min_time}.maxTPlot{embeddings_max_time}.xylims{embeddings_plot_lims}" + SMOOTH_TAG
+# Built on TRUE_RATES_TAG rather than STT_TAG: embeddings of the true rates use no
+# window sizes and no pdf, so carrying minWS/maxWS/nTe/p/link in their names was
+# claiming a dependence that does not exist.
+TRUE_TAG                          = f".d{n_components}.Nmin{N_min}.Nmax{N_max}" + TRUE_RATES_TAG
 # STT_TAG with the swept field omitted, for use by the scan_p/scan_d rules (the value varies within the rule, so it can't appear in a single output filename). Scans run unsmoothed, so these are penalty-free too.
 STT_TAG_NO_P                      = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
 STT_TAG_NO_D                      = f".Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[None].nTe{n_timepoints_emb}" + RATES_TAG
@@ -160,6 +381,9 @@ smoothing_on                      = l1_penalties != "None"
 # Directory holding the wrapper scripts this workflow invokes. All paths in this file are
 # resolved against the working directory, which is always utils/.
 UTILS_DIR                         = "snakemake_utils"
+# Absolute form of UTILS_DIR, baked into the generated dash launchers so they can be
+# run from any directory rather than only from utils/.
+UTILS_DIR_ABS                     = os.path.abspath(UTILS_DIR)
 
 # Main scripts
 COUNT_COAL_EVENTS_SCRIPT          = "../src/CountCoalEvents.py"
@@ -174,6 +398,8 @@ preprocess_demography_script           = os.path.join(UTILS_DIR, "preprocess_dem
 preprocess_samples_script              = os.path.join(UTILS_DIR, "preprocess_samples.py")
 plot_demography_script                 = os.path.join(UTILS_DIR, "plot_demography.py")
 pca_script                             = os.path.join(UTILS_DIR, "run_pca.py")
+plot_pca_script                        = os.path.join(UTILS_DIR, "plot_pca.py")
+plot_effective_size_script             = os.path.join(UTILS_DIR, "plot_effective_size.py")
 compute_rates_true_script              = os.path.join(UTILS_DIR, "compute_rates_true.py")
 simulate_trees_script                  = os.path.join(UTILS_DIR, "simulate_trees.py")
 infer_trees_script                     = os.path.join(UTILS_DIR, "infer_trees.py")
@@ -210,11 +436,24 @@ ancestry_STT_path                       = os.path.join(output_path, "ancestry_ST
 # TOTAL_ANCESTRY_PROPORTIONS_FILE in infer_local_ancestry.py.
 ancestry_proportions                    = os.path.join(LAI_path, "total_ancestry_proportions.parquet")
 
+# Ancestry/reference-panel labels are directory names under ancestry_STT_path and
+# appear as a wildcard in every per-ancestry rule below. Constrain them to the same
+# charset the reference_pops validation enforces, so a label can never eat a path
+# separator: snakemake's default wildcard regex is greedy and matches across "/",
+# which would silently mis-resolve rather than fail.
+wildcard_constraints:
+    ancestry = r"[A-Za-z0-9_.-]+",
+    label    = r"[A-Za-z0-9_.-]+",
+
 # Target file names
-pca_plot_file_name                                      = "pca.png"
+pca_data_file_name                                      = f"pca{PCA_TAG}.csv"
+# The PCA table itself is a genotype GRM and does not depend on per_haplotype, but
+# the plot does: plot_pca.py colours by sample_id vs individual_id. So only the plot
+# carries PHASE_TAG, and both settings still share the one expensive PCA.
+pca_plot_file_name                                      = f"pca{PCA_TAG}{PHASE_TAG}.png"
 demography_plot_file_name                               = "demography.png"
-rates_true_file_name                                    = "rates_true.parquet"
-rates_true_plot_file_name                               = "rates_true.png"
+rates_true_file_name                                    = f"rates_true{TRUE_RATES_TAG}.parquet"
+rates_true_plot_file_name                               = f"rates_true{TRUE_RATES_TAG}.png"
 embeddings_true_file_name                               = f"embeddings_true{TRUE_TAG}.parquet"
 embeddings_true_plot_file_name                          = f"embeddings_true{TRUE_TAG}.html"
 reconstructed_rates_true_file_name                      = f"reconstructed_rates_true{TRUE_TAG}.parquet"
@@ -237,6 +476,7 @@ pdf_data_file_name                     = f"coal_pdf{PDF_TAG}.parquet"
 rates_data_file_name                   = f"rates{RATES_TAG}.parquet"
 weights_data_file_name                 = f"weights_rates{RATES_TAG}.parquet"
 rates_plot_file_name                   = f"rates{RATES_TAG}.png"
+effective_size_plot_file_name          = f"effective_size{RATES_TAG}.png"
 relative_div_plot_file_name            = f"relative_div{RATES_TAG}.png"
 relative_div_plot_summary_file_name    = f"relative_div{RATES_TAG}_summary.png"
 
@@ -268,6 +508,7 @@ scan_p_file_name                                          = f"scan_p{STT_TAG_NO_
 scan_d_file_name                                          = f"scan_d{STT_TAG_NO_D}.csv"
 
 # Target file paths
+pca_data                          = os.path.join(data_output_path, pca_data_file_name)
 pca_plot                          = os.path.join(plot_output_path, pca_plot_file_name)
 demography_plot                   = os.path.join(plot_output_path, demography_plot_file_name)
 rates_true                        = os.path.join(data_output_path, rates_true_file_name)
@@ -284,6 +525,7 @@ pdf_data                          = os.path.join(data_output_path, pdf_data_file
 rates_data                        = os.path.join(data_output_path, rates_data_file_name)
 weights_data                      = os.path.join(data_output_path, weights_data_file_name)
 rates_plot                        = os.path.join(plot_output_path, rates_plot_file_name)
+effective_size_plot               = os.path.join(plot_output_path, effective_size_plot_file_name)
 relative_div_plot                 = os.path.join(plot_output_path, relative_div_plot_file_name)
 relative_div_plot_summary         = os.path.join(plot_output_path, relative_div_plot_summary_file_name)
 
@@ -356,7 +598,8 @@ sim_targets = [sim_finished] + ([] if is_SS_demography else [demography_plot])
 
 STT_targets = [
     pdf_data,
-    rates_data, rates_plot,
+    pca_data, pca_plot,
+    rates_data, rates_plot, effective_size_plot,
     embeddings_data, embeddings_plot,
     slice_2d,
     reconstructed_rates, input_vs_reconstructed_rates_plot, input_vs_reconstructed_rates_interactive,
@@ -457,8 +700,8 @@ if demes_file_path: # A demes file path is specified
             demography_plot
         params:
             outdir = plot_output_path,
-            min_time = min_time,
-            max_time = max_time,
+            min_time = embeddings_min_time,
+            max_time = embeddings_max_time,
             time_scale = time_scale
         shell:
             """
@@ -499,26 +742,54 @@ else: # No demes file path: this is an empirical run, slice the user-supplied po
                 --seed {params.seed}
             """
 
+# Genotype PCA over the run's tree sequences: a structure summary independent of
+# the coalescent-rate machinery, drawn with the same labels/colours as the
+# embeddings plots. run_pca accumulates the GRM chunk by chunk rather than
+# stacking the genome-wide genotype matrix (see run_pca.py for why).
 rule run_pca:
     input:
+        pop_labels = pop_labels,
+        trees_ready = trees_ready,
+        script = pca_script
+    output:
+        pca_data
+    params:
+        trees_dir = trees_dir,
+        outdir = data_output_path,
+        output_name = pca_data_file_name,
+        num_threads = num_threads
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input_path {params.trees_dir} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --pop_labels {input.pop_labels} \
+            --num_threads {params.num_threads}
+        """
+
+rule plot_pca:
+    input:
+        pca = pca_data,
         pop_colors = pop_colors,
         pop_labels = pop_labels,
-        demes_file_path = demes_file_path,
-        script = pca_script
+        script = plot_pca_script
     output:
         pca_plot
     params:
         outdir = plot_output_path,
-        n_per_pop = n_sim_per_pop,
+        output_name = pca_plot_file_name,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
+        mkdir -p {params.outdir}
         python {input.script} \
-            --demes_file_path {input.demes_file_path} \
+            --input {input.pca} \
             --colors {input.pop_colors} \
             --labels {input.pop_labels} \
             --output_path {params.outdir} \
-            --n {params.n_per_pop} \
+            --output_name {params.output_name} \
             {params.per_haplotype}
         """
 
@@ -531,8 +802,10 @@ rule compute_rates_true:
         rates_true
     params:
         outdir = data_output_path,
-        max_time = max_time,
-        n_timepoints = n_timepoints,
+        output_name = rates_true_file_name,
+        rates_min_time = rates_min_time,
+        rates_max_time = rates_max_time,
+        pdf_bin_size = pdf_bin_size,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
@@ -540,8 +813,10 @@ rule compute_rates_true:
         python {input.script} \
             --demes_file_path {input.demes_file_path} \
             --output_path {params.outdir} \
-            --max_time {params.max_time} \
-            --n_timepoints {params.n_timepoints} \
+            --output_name {params.output_name} \
+            --rates_min_time {params.rates_min_time} \
+            --rates_max_time {params.rates_max_time} \
+            --pdf_bin_size {params.pdf_bin_size} \
             --labels {input.pop_labels} \
             {params.per_haplotype}
         """
@@ -556,7 +831,7 @@ rule plot_rates_true:
     params:
         outdir = plot_output_path,
         output_name = rates_true_plot_file_name,
-        min_time = min_time,
+        min_time = rates_min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
@@ -621,9 +896,10 @@ rule plot_embeddings_true:
         embeddings_true_plot,
         dash_script = dash_launch_true,
     params:
+        utils_abs = UTILS_DIR_ABS,
         outdir = plot_output_path,
         output_name = embeddings_true_plot_file_name,
-        min_time = min_time,
+        min_time = embeddings_min_time,
         embeddings_plot_lims = embeddings_plot_lims,
         embeddings_max_time = embeddings_max_time,
         time_scale = time_scale,
@@ -647,8 +923,8 @@ rule plot_embeddings_true:
             {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory (script lives in utils/snakemake_utils/)
-python snakemake_utils/plot_embeddings_dash.py \\
+# Self-anchoring: the app path is absolute, so this runs from any directory.
+python {params.utils_abs}/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -792,9 +1068,18 @@ if admix_mode:
             LAI_dir            = LAI_path,
             r                  = recombination_rate,
             mu                 = mutation_rate,
-            admix_pops         = " ".join(admixed_pops_list),
-            reference_pops_arg = ("--reference_pops " + " ".join(reference_pops_list)) if reference_pops_list is not None else "",
-            pops_arg           = ("--pops " + " ".join(pops_list)) if pops_list is not None else "",
+            # Quoted per element: population names are free-form metadata and may
+            # contain spaces (the chimp panel has one literally named "W x C"),
+            # which an unquoted join would split into separate argv entries and
+            # silently drop.
+            admix_pops         = " ".join(shlex.quote(p) for p in admixed_pops_list),
+            # The spec crosses as one shell-quoted JSON object rather than a list of
+            # names, because a composite group carries per-source individual counts
+            # that cannot be space-joined. Kept a param rather than a spec file:
+            # snakemake re-triggers on param changes, and writing a file at parse
+            # time would fire on --dry-run and on every concurrent cluster job.
+            reference_pops_arg = ("--reference_spec " + shlex.quote(json.dumps(reference_pops_spec))) if reference_pops_spec is not None else "",
+            pops_arg           = ("--pops " + " ".join(shlex.quote(p) for p in pops_list)) if pops_list is not None else "",
             LAI_method         = LAI_method,
             # RFmix: parallelizing this step has been observed to be slower, not
             # faster. GNN/True are per-contig and do benefit from parallelism.
@@ -828,7 +1113,7 @@ if admix_mode:
             ancestry_STT_dir = directory(ancestry_STT_path),
         params:
             LAI_dir    = LAI_path,
-            admix_pops = " ".join(admixed_pops_list),
+            admix_pops = " ".join(shlex.quote(p) for p in admixed_pops_list),
             threshold  = significant_ancestry_threshold,
         shell:
             """
@@ -868,8 +1153,9 @@ rule compute_pdf:
         trees_dir = trees_dir,
         outdir = data_output_path,
         output_name = os.path.basename(pdf_data),
-        max_time = max_time,
-        n_timepoints = n_timepoints,
+        pdf_min_time = pdf_min_time,
+        pdf_max_time = pdf_max_time,
+        pdf_bin_size = pdf_bin_size,
         fraction_samples = fraction_samples,
         num_threads = num_threads,
         admix_args = (f"--LAI_dir {LAI_path} --ancestry_STT_dir {ancestry_STT_path}" if admix_mode else "")
@@ -892,8 +1178,9 @@ rule compute_pdf:
             --input_path {params.trees_dir} \
             --output_path {params.outdir} \
             --output_name {params.output_name} \
-            --max_time {params.max_time} \
-            --n_timepoints {params.n_timepoints} \
+            --pdf_min_time {params.pdf_min_time} \
+            --pdf_max_time {params.pdf_max_time} \
+            --pdf_bin_size {params.pdf_bin_size} \
             --fraction_samples {params.fraction_samples} \
             --pop_labels {input.pop_labels} \
             --num_threads {params.num_threads} \
@@ -914,6 +1201,8 @@ rule compute_rates:
         output_name = rates_data_file_name,
         min_window_size = min_window_size,
         max_window_size = max_window_size,
+        rates_min_time = rates_min_time,
+        rates_max_time = rates_max_time,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
         """
@@ -924,6 +1213,8 @@ rule compute_rates:
             --output_name {params.output_name} \
             --minimum_window_size {params.min_window_size} \
             --maximum_window_size {params.max_window_size} \
+            --rates_min_time {params.rates_min_time} \
+            --rates_max_time {params.rates_max_time} \
             --pop_labels {input.pop_labels} \
             {params.per_haplotype}
         """
@@ -939,7 +1230,7 @@ rule plot_rates:
     params:
         outdir = plot_output_path,
         output_name = rates_plot_file_name,
-        min_time = min_time,
+        min_time = rates_min_time,
         max_rate_plot = max_rate_plot,
         time_scale = time_scale,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
@@ -969,7 +1260,7 @@ rule plot_relative_div:
     params:
         outdir = plot_output_path,
         output_name = relative_div_plot_file_name,
-        min_time = min_time,
+        min_time = rates_min_time,
         time_scale = time_scale,
         per_haplotype = "--per-haplotype" if per_haplotype else ""
     shell:
@@ -985,6 +1276,42 @@ rule plot_relative_div:
             --time_scale {params.time_scale} \
             {params.per_haplotype}
         """
+# Per-population effective size proxy Ne(t) = 1/(2*lambda_pop(t)), from the
+# within-population pairwise rates. The aggregation over pairs happens before the
+# reciprocal (see plot_effective_size.py): 1/x is convex and the rate estimator
+# floors lambda at ~1e-16, so any "reciprocal first" average diverges.
+rule plot_effective_size:
+    input:
+        rates = rates_data,
+        pop_colors = pop_colors,
+        pop_labels = pop_labels,
+        script = plot_effective_size_script
+    output:
+        effective_size_plot
+    params:
+        outdir = plot_output_path,
+        output_name = effective_size_plot_file_name,
+        min_time = rates_min_time,
+        time_scale = time_scale,
+        Ne_scale = Ne_plot_scale,
+        max_Ne = f"--max_Ne_plot {max_Ne_plot}" if str(max_Ne_plot) != "None" else "",
+        gen_time = f"--generation_time {generation_time}" if str(generation_time) != "None" else "",
+        per_haplotype = "--per-haplotype" if per_haplotype else ""
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python {input.script} \
+            --input {input.rates} \
+            --colors {input.pop_colors} \
+            --labels {input.pop_labels} \
+            --output_path {params.outdir} \
+            --output_name {params.output_name} \
+            --min_time {params.min_time} \
+            --time_scale {params.time_scale} \
+            --Ne_scale {params.Ne_scale} \
+            {params.max_Ne} {params.gen_time} {params.per_haplotype}
+        """
+
 # ______________________STT Rules_________________________
 # When smoothing is on, the single compute_embeddings invocation also writes the smoothed embeddings
 # + smoothed reconstructed rates (warm-started from the unsmoothed solution), so both are declared as
@@ -1015,6 +1342,7 @@ rule compute_embeddings:
         n_timepoints_emb = n_timepoints_emb,
         pop_labels = pop_labels,
         per_haplotype = "--per-haplotype" if per_haplotype else "",
+        weighted = "" if unweighted else "--weighted",
         smooth_args = (f"--smooth_output_name {smooth_embeddings_data_file_name} "
                        f"--smooth_reconstructed_rates_output_name {smooth_reconstructed_rates_file_name}"
                        if smoothing_on else "")
@@ -1035,6 +1363,7 @@ rule compute_embeddings:
             --n_timepoints_emb {params.n_timepoints_emb} \
             --pop_labels {params.pop_labels} \
             {params.per_haplotype} \
+            {params.weighted} \
             {params.smooth_args}
         """
 rule plot_embeddings:
@@ -1048,9 +1377,10 @@ rule plot_embeddings:
         embeddings_plot,
         dash_script = dash_launch,
     params:
+        utils_abs = UTILS_DIR_ABS,
         outdir = plot_output_path,
         output_name = embeddings_plot_file_name,
-        min_time = min_time,
+        min_time = embeddings_min_time,
         embeddings_plot_lims = embeddings_plot_lims,
         embeddings_max_time = embeddings_max_time,
         time_scale = time_scale,
@@ -1074,8 +1404,8 @@ rule plot_embeddings:
             {params.per_haplotype}
         cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory (script lives in utils/snakemake_utils/)
-python snakemake_utils/plot_embeddings_dash.py \\
+# Self-anchoring: the app path is absolute, so this runs from any directory.
+python {params.utils_abs}/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1099,7 +1429,7 @@ rule plot_2d_slice:
     params:
         outdir               = plot_output_path,
         output_name          = slice_2d_file_name,
-        min_time             = min_time,
+        min_time             = embeddings_min_time,
         embeddings_max_time  = embeddings_max_time,
         embeddings_plot_lims = embeddings_plot_lims,
     shell:
@@ -1131,9 +1461,10 @@ if smoothing_on:
             smooth_embeddings_plot,
             dash_script = smooth_dash_launch,
         params:
+            utils_abs = UTILS_DIR_ABS,
             outdir = plot_output_path,
             output_name = smooth_embeddings_plot_file_name,
-            min_time = min_time,
+            min_time = embeddings_min_time,
             embeddings_plot_lims = embeddings_plot_lims,
             embeddings_max_time = embeddings_max_time,
             time_scale = time_scale,
@@ -1157,8 +1488,8 @@ if smoothing_on:
                 {params.per_haplotype}
             cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory (script lives in utils/snakemake_utils/)
-python snakemake_utils/plot_embeddings_dash.py \\
+# Self-anchoring: the app path is absolute, so this runs from any directory.
+python {params.utils_abs}/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1183,7 +1514,7 @@ DASHEOF
         params:
             outdir               = plot_output_path,
             output_name          = smooth_slice_2d_file_name,
-            min_time             = min_time,
+            min_time             = embeddings_min_time,
             embeddings_max_time  = embeddings_max_time,
             embeddings_plot_lims = embeddings_plot_lims,
         shell:
@@ -1226,6 +1557,8 @@ if admix_mode:
             pdf_data = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), pdf_data_file_name),
             min_window_size = min_window_size,
             max_window_size = max_window_size,
+            rates_min_time = rates_min_time,
+            rates_max_time = rates_max_time,
             per_haplotype = "--per-haplotype" if per_haplotype else ""
         shell:
             """
@@ -1236,6 +1569,8 @@ if admix_mode:
                 --output_name {params.output_name} \
                 --minimum_window_size {params.min_window_size} \
                 --maximum_window_size {params.max_window_size} \
+                --rates_min_time {params.rates_min_time} \
+                --rates_max_time {params.rates_max_time} \
                 --pop_labels {input.pop_labels} \
                 {params.per_haplotype}
             """
@@ -1251,7 +1586,7 @@ if admix_mode:
         params:
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = rates_plot_file_name,
-            min_time = min_time,
+            min_time = rates_min_time,
             max_rate_plot = max_rate_plot,
             time_scale = time_scale,
             per_haplotype = "--per-haplotype" if per_haplotype else ""
@@ -1282,7 +1617,7 @@ if admix_mode:
         params:
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = relative_div_plot_file_name,
-            min_time = min_time,
+            min_time = rates_min_time,
             time_scale = time_scale,
             per_haplotype = "--per-haplotype" if per_haplotype else ""
         shell:
@@ -1325,6 +1660,7 @@ if admix_mode:
             n_timepoints_emb = n_timepoints_emb,
             pop_labels = lambda wc: os.path.join(ancestry_data_dir(wc.ancestry), "pop_labels.csv"),
             per_haplotype = "--per-haplotype" if per_haplotype else "",
+            weighted = "" if unweighted else "--weighted",
             smooth_args = (f"--smooth_output_name {smooth_embeddings_data_file_name} "
                            f"--smooth_reconstructed_rates_output_name {smooth_reconstructed_rates_file_name}"
                            if smoothing_on else "")
@@ -1345,6 +1681,7 @@ if admix_mode:
                 --n_timepoints_emb {params.n_timepoints_emb} \
                 --pop_labels {params.pop_labels} \
                 {params.per_haplotype} \
+                {params.weighted} \
                 {params.smooth_args}
             """
 
@@ -1359,9 +1696,10 @@ if admix_mode:
             os.path.join(ancestry_STT_path, "{ancestry}", "plots", embeddings_plot_file_name),
             dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plots", dash_launch_file_name),
         params:
+            utils_abs = UTILS_DIR_ABS,
             outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name = embeddings_plot_file_name,
-            min_time = min_time,
+            min_time = embeddings_min_time,
             embeddings_plot_lims = embeddings_plot_lims,
             embeddings_max_time = embeddings_max_time,
             time_scale = time_scale,
@@ -1385,8 +1723,8 @@ if admix_mode:
                 {params.per_haplotype}
             cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory (script lives in utils/snakemake_utils/)
-python snakemake_utils/plot_embeddings_dash.py \\
+# Self-anchoring: the app path is absolute, so this runs from any directory.
+python {params.utils_abs}/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1411,7 +1749,7 @@ DASHEOF
         params:
             outdir               = lambda wc: ancestry_plot_dir(wc.ancestry),
             output_name          = slice_2d_file_name,
-            min_time             = min_time,
+            min_time             = embeddings_min_time,
             embeddings_max_time  = embeddings_max_time,
             embeddings_plot_lims = embeddings_plot_lims,
         shell:
@@ -1473,9 +1811,10 @@ DASHEOF
                 os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_embeddings_plot_file_name),
                 dash_script = os.path.join(ancestry_STT_path, "{ancestry}", "plots", smooth_dash_launch_file_name),
             params:
+                utils_abs = UTILS_DIR_ABS,
                 outdir = lambda wc: ancestry_plot_dir(wc.ancestry),
                 output_name = smooth_embeddings_plot_file_name,
-                min_time = min_time,
+                min_time = embeddings_min_time,
                 embeddings_plot_lims = embeddings_plot_lims,
                 embeddings_max_time = embeddings_max_time,
                 time_scale = time_scale,
@@ -1499,8 +1838,8 @@ DASHEOF
                     {params.per_haplotype}
                 cat > {output.dash_script} << 'DASHEOF'
 #!/bin/bash
-# Run from the utils/ directory (script lives in utils/snakemake_utils/)
-python snakemake_utils/plot_embeddings_dash.py \\
+# Self-anchoring: the app path is absolute, so this runs from any directory.
+python {params.utils_abs}/plot_embeddings_dash.py \\
     {input.embeddings} \\
     --labels {input.pop_labels} \\
     --colors {input.pop_colors} \\
@@ -1525,7 +1864,7 @@ DASHEOF
             params:
                 outdir               = lambda wc: ancestry_plot_dir(wc.ancestry),
                 output_name          = smooth_slice_2d_file_name,
-                min_time             = min_time,
+                min_time             = embeddings_min_time,
                 embeddings_max_time  = embeddings_max_time,
                 embeddings_plot_lims = embeddings_plot_lims,
             shell:
@@ -1619,7 +1958,7 @@ rule plot_embeddings_pyvista:
     params:
         outdir = plot_output_path,
         output_name = embeddings_pyvista_plot_file_name,
-        min_time = min_time,
+        min_time = embeddings_min_time,
         embeddings_plot_lims = embeddings_plot_lims,
         embeddings_max_time = embeddings_max_time,
         time_scale = time_scale
@@ -1654,7 +1993,7 @@ rule bundle_dash:
     params:
         N_max = N_max,
         time_scale = time_scale,
-        min_time = min_time,
+        min_time = embeddings_min_time,
         embeddings_max_time = embeddings_max_time,
         rates_time_stride = rates_time_stride
     shell:
@@ -1946,7 +2285,7 @@ rule plot_embeddings_replicates:
         seeds = " ".join(str(s) for s in seeds),
         outdir = plot_output_path,
         output_name = replicates_panel_file_name,
-        min_time = min_time,
+        min_time = embeddings_min_time,
         embeddings_max_time = embeddings_max_time,
         embeddings_plot_lims = embeddings_plot_lims,
         time_scale = time_scale,
@@ -2049,7 +2388,7 @@ rule plot_2d_slice_replicates:
         seeds       = " ".join(str(s) for s in seeds),
         outdir      = plot_output_path,
         output_name = replicates_2d_slice_file_name,
-        min_time    = min_time,
+        min_time    = embeddings_min_time,
         embeddings_max_time  = embeddings_max_time,
         embeddings_plot_lims = embeddings_plot_lims,
         param_label = param_label,
