@@ -2,9 +2,20 @@
 We recommend cloning the git repo and creating a `conda` environment with the required dependencies from the `environment.yml` file
 ```
 git clone https://github.com/afselim0/structure-thru-time
+cd structure-thru-time
 conda env create -f environment.yml
-conda activate STT
+conda activate CoaSTT_env
+bash utils/misc_utils/install_libstdcxx_hook.sh   # once, then re-activate the env
 ```
+
+The last step installs a conda activation hook that puts the environment's own
+`libstdc++` ahead of the system one. It is only strictly needed on older Linux
+distributions (RHEL/CentOS 8 and similar, e.g. midway3), where the system
+`libstdc++` predates `GLIBCXX_3.4.29`: several pip wheels here are manylinux
+builds that would otherwise load it and make a later `import numpy` fail with
+`GLIBCXX_3.4.29 not found` — typically surfacing as a `snakemake` crash even
+though `python -c "import numpy"` works. Running it on a modern distribution is
+harmless. See `utils/misc_utils/install_libstdcxx_hook.sh` for the full story.
 
 # Repo structure
 ```

@@ -1,3 +1,14 @@
+# After `conda env create -f environment.yml`, run ONCE:
+#     conda activate CoaSTT_env
+#     bash utils/misc_utils/install_libstdcxx_hook.sh
+# On older Linux (RHEL/CentOS 8, e.g. midway3) the system libstdc++ predates
+# GLIBCXX_3.4.29, and the pip wheels below (highspy, cvxpy, osqp, frozenlist, vtk)
+# are manylinux builds with RUNPATH=$ORIGIN only, so they load it instead of the
+# modern libstdcxx-ng installed here. Whichever is imported first wins for the whole
+# process, so `snakemake` then dies on `import numpy` with "GLIBCXX_3.4.29 not found"
+# while a bare `import numpy` works. This cannot be fixed by a pin -- the right
+# library is already installed, it is just not being found -- so the hook prepends
+# $CONDA_PREFIX/lib to LD_LIBRARY_PATH at activation. Harmless on modern distros.
 name: CoaSTT_env
 channels:
   - conda-forge
