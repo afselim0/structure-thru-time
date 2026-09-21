@@ -30,6 +30,7 @@ disable. Rates still exceeding the (post-thin) size limit are dropped with a
 warning unless --force-rates-export is set.
 """
 import argparse
+import math
 import os
 import shutil
 import tempfile
@@ -125,29 +126,47 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
     output_path = r("output_path", "../results")
     version = r("version", 1)
     fraction_samples = r("fraction_samples", 1.0)
-    max_time = r("max_time", 10000)
-    n_timepoints = r("n_timepoints", max_time)
+    pdf_min_time = r("pdf_min_time", 0)
+    pdf_max_time = r("pdf_max_time", 10000)
+    pdf_bin_size = r("pdf_bin_size", 1)
+    # Snap the rate bounds onto the pdf grid exactly as the snakefile does, or
+    # the tags built below name files no run ever produced.
+    def snap(value):
+        steps = (value - pdf_min_time) / pdf_bin_size
+        if abs(steps - round(steps)) <= 1e-9 * max(1.0, abs(steps)):
+            return value
+        snapped = pdf_min_time + math.ceil(steps - 1e-9) * pdf_bin_size
+        return snapped - pdf_bin_size if snapped > pdf_max_time else snapped
+
+    rates_min_time = snap(r("rates_min_time", pdf_min_time))
+    rates_max_time = snap(r("rates_max_time", pdf_max_time))
     min_window_size = r("min_window_size", 50)
     max_window_size = r("max_window_size", 500)
     N_min = r("N_min", 1)
     N_max = r("N_max", N_min + 100000)
-    k = r("k", 1)
+    p = r("p", 1)
     link = r("link", "inverse_distance")
     l1 = r("l1", "None")
     if isinstance(l1, list):
         l1 = ",".join(str(x) for x in l1)
     n_components = r("n_components", 2)
-    n_timepoints_emb = r("n_timepoints_emb", 400)
-    min_time = r("min_time", 1)
-    embeddings_max_time = r("embeddings_max_time", max_time)
+    n_rates_timepoints = round((rates_max_time - rates_min_time) / pdf_bin_size) + 1
+    n_timepoints_emb = r("n_timepoints_emb", n_rates_timepoints)
+    min_time = r("embeddings_min_time", rates_min_time)
+    embeddings_max_time = r("embeddings_max_time", rates_max_time)
     embeddings_plot_lims = r("embeddings_plot_lims", "None")
     time_scale = r("time_scale", "linear")
     pop_colors = r("pop_colors", os.path.join(output_path, "data/pop_colors.csv"))
     pop_labels = r("pop_labels", os.path.join(output_path, "data/pop_labels.csv"))
 
     # --- filename tags (must match Snakefile exactly) -----------------------
-    RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}.V{version}.FS{fraction_samples}.maxT{max_time}.nT{n_timepoints}"
-    STT_TAG = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.k{k}.link{link}.L1[{l1}].nTe{n_timepoints_emb}" + RATES_TAG
+    # This duplicates utils/snakefile's tag construction and has drifted from it
+    # before (a stale ".k{k}" where the snakefile writes ".p{p}", and a hardcoded
+    # n_timepoints_emb default). test_bundle_dash_tags.py pins the two together;
+    # run it after changing either side.
+    PDF_TAG = f".V{version}.FS{fraction_samples}.pdf_minT{pdf_min_time}.pdf_maxT{pdf_max_time}.pdf_bin{pdf_bin_size}"
+    RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}.rates_minT{rates_min_time}.rates_maxT{rates_max_time}" + PDF_TAG
+    STT_TAG = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1}].nTe{n_timepoints_emb}" + RATES_TAG
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
