@@ -167,9 +167,63 @@ Pipeline, in order:
 | Parameter                          | Description                                                                                          | Affected files |
 |-------------------------------------|--------------------------------------------------------------------------------------------------------|----------------|
 | **admixed_pops**                   | List of population names (as they appear in `pop_labels`) to treat as admixed. Setting this activates admixture mode. | ALL (admixture) |
-| **reference_pops**                 | List of population names to use as reference/ancestry labels. If omitted, defaults to every population in `pop_labels` other than `admixed_pops` (and, if `pops` restricts the run, further limited to that set) | ALL (admixture) |
+| **reference_pops**                 | The reference/ancestry panels. Either a plain list of population names, or named **composite** panels built from per-population individual counts (see below). If omitted, defaults to every population in `pop_labels` other than `admixed_pops` (and, if `pops` restricts the run, further limited to that set) | ALL (admixture) |
 | **significant_ancestry_threshold** | Minimum genome-wide ancestry proportion (per reference population) an admixed sample needs to be kept in that reference population's analysis (default: `0.05`) | Local ancestry |
 | **LAI_method**                     | Local ancestry inference method: `RFmix` (default), `GNN`, or `True` | Local ancestry |
+
+### Reference panels (`reference_pops`)
+
+Three spellings, in increasing order of control:
+
+```yaml
+# 1. omitted — every non-admixed population becomes a panel, using all its samples
+# 2. a plain list — one panel per named population, using all its samples
+reference_pops: [Eastern, Central, Western]
+
+# 3. composite panels — each panel is a named group drawn from one or more
+#    populations, at a chosen number of individuals per population
+reference_pops:
+  EastCentral:
+    Eastern: 5
+    Central: 5
+  West:
+    Western: 10
+```
+
+The composite form exists to make panels **size-matched**. Populations rarely have equal
+sample counts, so a panel that takes "all of Eastern" against "all of Western" is unbalanced
+before inference starts. The example above gives two panels of 10 individuals (20 haplotypes)
+each.
+
+- **Counts are diploid individuals.** Both haplotypes of each chosen individual enter the panel.
+- **Selection is deterministic and seedless**: the first *n* individuals by `individual_id`.
+  This is a *systematic* rather than random sample — if `individual_id` order correlates with
+  anything (accession order, sequencing batch), so does the panel. Reorder or renumber
+  `pop_labels.csv` to choose a different subset.
+- **Asking for more individuals than a population has is an error**, not a silent truncation:
+  the point of the counts is balance, and a quiet shortfall would defeat it invisibly.
+- **Panels must be disjoint** — no population may appear in two groups. `GNN` takes an argmax
+  over the panels and `RFmix` assigns one label per individual, so overlapping panels are
+  undefined rather than merely redundant.
+- The group name becomes the ancestry label everywhere downstream (the `<label>_prop` column,
+  the `ancestry_STT/<method>/<label>/` directory, plot legends), so it must match
+  `[A-Za-z0-9_.-]+` and must not end in `_prop`.
+- The two forms can be mixed: a group whose value is left empty means "all samples of the
+  population with that name".
+- **Composite panels are incompatible with `LAI_method: True`**, which is rejected at parse
+  time: ground-truth labels come from msprime census nodes and are always atomic deme names.
+
+Whatever form is used, `{output_path}/LAI/{LAI_method}/reference_panels.csv` records exactly
+which samples ended up in which panel — including what the default resolved to. Checking balance
+is one line:
+
+```bash
+python -c "import pandas as pd; print(pd.read_csv('.../reference_panels.csv').groupby(['ancestry_label','source_population']).size())"
+```
+
+> Changing the set of panel *names* leaves the previous run's `ancestry_STT/<method>/<old_label>/`
+> directories on disk, and they are rediscovered by globbing. Remove
+> `{output_path}/ancestry_STT/{LAI_method}/` when the label set changes.
 
 ### Local ancestry methods (`LAI_method`)
 
@@ -184,10 +238,10 @@ Pipeline, in order:
 Note that in YAML, an unquoted `LAI_method: True` parses as a boolean; the Snakefile coerces it back to the string `"True"`, so both `True` and `"True"` work.
 
 Notes:
-- If `pops` is also set (restricting the whole run to a subset of populations), `admixed_pops` — and `reference_pops` if given explicitly — must be subsets of `pops`.
+- If `pops` is also set (restricting the whole run to a subset of populations), `admixed_pops` — and the source populations of `reference_pops` if given explicitly — must be subsets of `pops`.
 - `RFmix` inference always runs single-threaded regardless of `num_threads`, since parallelizing it has been observed to be slower, not faster. `GNN` and `True` are parallelized across contigs using `num_threads`.
 - Outputs are namespaced by method, so runs using different methods can share one `output_path` without overwriting each other:
-  - `{output_path}/LAI/{LAI_method}/` — per-contig local ancestry calls, plus `total_ancestry_proportions.parquet`.
+  - `{output_path}/LAI/{LAI_method}/` — per-contig local ancestry calls, plus `total_ancestry_proportions.parquet` and `reference_panels.csv` (which samples formed each panel).
   - `{output_path}/ancestry_STT/{LAI_method}/{reference_pop}/{data,plots}/` — one subdirectory per reference population, mirroring the layout of the genome-wide `data/`/`plots/` directories (same rates/embeddings/plot filenames, just nested per method and population).
 - Ground-truth calls are always written to `{output_path}/LAI/True/` during simulation whenever the demography is admixed, regardless of which `LAI_method` the run uses — so they remain available as a reference for comparison against `RFmix`/`GNN` output.
 
