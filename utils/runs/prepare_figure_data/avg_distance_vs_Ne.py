@@ -7,7 +7,7 @@ fitted to the embedding's convex hull, and the link's own inverse of 1/Ne (the
 distance the link maps that rate to, i.e. what a perfect embedding would give).
 
 Note: the exponential link raises a non-finite loss inside
-src/OptimizationFunctions.optimize_timepoint for the larger p (p=2 and p=4) over
+src/OptimizationFunctions.optimize_timepoint_newton for the larger p (p=2 and p=4) over
 part of the Ne range. Those points are recorded with a null distance rather than
 aborting the whole sweep, so the rest of the figure still has its data; the
 plotting script simply draws no point there. This is a pre-existing limitation of
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import add_src_to_path, out_dir, report, write_table
 
 add_src_to_path()
-from OptimizationFunctions import optimize_timepoint, LinkFunction
+from OptimizationFunctions import optimize_timepoint_newton, LinkFunction
 
 FIGURE = "avg_distance_vs_Ne"
 
@@ -71,8 +71,8 @@ def compute_embeddings_panmictic(Ne, link, p, n=N_SAMPLES, N_min=N_MIN, N_max=N_
     R = np.ones((n, n)) * 1 / Ne
     np.fill_diagonal(R, np.nan)
 
-    X, _, _, _ = optimize_timepoint(X_init, R, W_t=None, N_min=N_min, N_max=N_max,
-                                    p=p, link=link)
+    X, _, _, _ = optimize_timepoint_newton(X_init, R, W_t=None, N_min=N_min,
+                                           N_max=N_max, p=p, link=link)
     return X - np.mean(X, axis=0)   # centre the embedding
 
 
@@ -105,7 +105,7 @@ def main():
 
     if failures:
         combos = sorted({(link, p) for link, p, _, _ in failures})
-        print(f"note: optimize_timepoint failed for {len(failures)} of {len(rows)} "
+        print(f"note: optimize_timepoint_newton failed for {len(failures)} of {len(rows)} "
               f"points, in link/p combinations {combos}; their distances are null")
 
     params = pd.DataFrame([

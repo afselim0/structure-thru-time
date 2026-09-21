@@ -55,9 +55,8 @@ def _compute_for_d(d, rates_df, weights_df, output_path, N_min, N_max, p, link, 
     print(f"Computing embeddings with d={d}...")
     LSE = LatentSpaceEmbeddings(rates_df, weights_df=weights_df, N_min=N_min, N_max=N_max, n_components=d,
                                  l1_strengths=l1_penalties)
-    # Exact-Hessian covariances are only implemented for p == 1, but since p can be != 1 here too, keep it off
     X, _ = LSE.compute_embeddings_through_time(
-        p=p, link=link, compute_uncertainty=False, exact_hessian=False
+        p=p, link=link, compute_uncertainty=False
     )
     embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     loss = compute_unpenalized_loss(

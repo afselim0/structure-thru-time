@@ -8,7 +8,7 @@ combination at each of two N_max values, which is what the figure's two blocks o
 panels compare.
 
 Note: the exponential link at the larger p can raise a non-finite loss inside
-src/OptimizationFunctions.optimize_timepoint. Such a combination is skipped with a
+src/OptimizationFunctions.optimize_timepoint_newton. Such a combination is skipped with a
 message rather than aborting the sweep, and the figure leaves its panel empty.
 This is a pre-existing limitation of the optimizer, not of this script.
 """
@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import add_src_to_path, out_dir, report, write_table
 
 add_src_to_path()
-from OptimizationFunctions import optimize_timepoint
+from OptimizationFunctions import optimize_timepoint_newton
 
 FIGURE = "split_different_links"
 
@@ -57,8 +57,8 @@ def compute_embeddings(R, link, p, n_points, N_min=N_MIN, N_max=1e5,
                        init_seed=INIT_SEED):
     np.random.seed(init_seed)
     X_init = np.random.rand(n_points, 2)
-    X, _, _, _ = optimize_timepoint(X_init, R, W_t=None, N_min=N_min, N_max=N_max,
-                                    p=p, link=link)
+    X, _, _, _ = optimize_timepoint_newton(X_init, R, W_t=None, N_min=N_min,
+                                           N_max=N_max, p=p, link=link)
     return X - np.mean(X, axis=0)   # centre the embedding
 
 

@@ -43,11 +43,11 @@ the tolerance ``FTOL_JOINT`` or max iterations ``MAX_ITER_JOINT`` are reached.
 """
 
 FTOL_NEWTON        = 1e-6
-FTOL_JOINT         = 1e-6
+FTOL_JOINT         = 1e-8
 GTOL_JOINT         = 1e-12
 
 MAX_ITER_NEWTON    = 2000
-MAX_ITER_JOINT     = 5000
+MAX_ITER_JOINT     = 4000
 MAXCOR_JOINT       = 20
 
 DEFAULT_WEIGHTS    = 1e6

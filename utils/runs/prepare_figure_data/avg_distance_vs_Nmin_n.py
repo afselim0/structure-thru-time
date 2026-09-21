@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import add_src_to_path, out_dir, report, write_table
 
 add_src_to_path()
-from OptimizationFunctions import optimize_timepoint
+from OptimizationFunctions import optimize_timepoint_newton
 
 FIGURE = "avg_distance_vs_Nmin_n"
 
@@ -40,8 +40,8 @@ def compute_embeddings_panmictic(Ne, link, p, n=50, N_min=1, N_max=1e8, init_see
     R = np.ones((n, n)) * 1 / Ne
     np.fill_diagonal(R, np.nan)
 
-    X, _, _, _ = optimize_timepoint(X_init, R, W_t=None, N_min=N_min, N_max=N_max,
-                                    p=p, link=link)
+    X, _, _, _ = optimize_timepoint_newton(X_init, R, W_t=None, N_min=N_min,
+                                           N_max=N_max, p=p, link=link)
     return X - np.mean(X, axis=0)   # centre the embedding
 
 

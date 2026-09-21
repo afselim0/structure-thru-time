@@ -309,69 +309,42 @@ def test_newton_slice_reduces_loss_and_reaches_tolerance():
     assert np.all(np.isfinite(X_opt))
     assert loss <= f0 + 1e-9 * abs(f0), f"loss increased: {f0:.8g} -> {loss:.8g}"
 
-    _, g = O.compute_loss_gradient(X_opt.ravel(), X_opt.shape, problem)
-    tol = O._newton_slice_tolerance(X0, problem, O.TOL_FACTOR_NEWTON)
-    assert np.max(np.abs(g)) <= tol, (
-        f"|grad| {np.max(np.abs(g)):.3e} above tolerance {tol:.3e} after "
+    # The rule is on the relative loss change, so that is what is asserted: one more
+    # Newton step from the returned point must not move the loss by more than ftol.
+    X_more, loss_more, _, _ = O.optimize_timepoint_newton(
+        X_opt, R_t, W_t, link=link, N_max=np.inf, max_iter=1, ftol=0.0,
+    )
+    dfrac = abs(loss_more - loss) / max(abs(loss_more), 1.0)
+    assert dfrac <= O.FTOL_NEWTON, (
+        f"loss still moving by {dfrac:.3e} > ftol {O.FTOL_NEWTON:.3e} after "
         f"{n_iter} iterations ({message})"
     )
     assert "converged" in message, message
 
 
-def test_newton_beats_lbfgs_on_an_ill_conditioned_slice():
-    """The reason for the change: L-BFGS stalls where Newton converges.
+def test_newton_ftol_is_independent_of_the_warm_start():
+    """The stopping rule must not tighten just because a slice starts near its optimum.
 
-    Not a benchmark -- just a guard that the Newton path really does reach a far deeper
-    gradient than the L-BFGS path it replaces, on a slice with the conditioning that
-    motivated it (p=2 puts curvature ~ d^-2, which is minute at these distances).
-    """
-    X0, R_t, W_t, link = _structured_problem(seed=2, N_min=1.0, p=2.0)
-    problem = {"R": R_t, "W": W_t, "link": link}
-
-    X_n, _, _, _ = O.optimize_timepoint_newton(
-        X0, R_t, W_t, link=link, N_max=np.inf, max_iter=400
-    )
-    X_l, _, _, _ = O.optimize_timepoint(
-        X0, R_t, W_t, link=link, N_max=np.inf
-    )
-    _, g_n = O.compute_loss_gradient(X_n.ravel(), X_n.shape, problem)
-    _, g_l = O.compute_loss_gradient(X_l.ravel(), X_l.shape, problem)
-    gn, gl = np.max(np.abs(g_n)), np.max(np.abs(g_l))
-    assert gn < gl, f"Newton |grad| {gn:.3e} not below L-BFGS {gl:.3e}"
-
-
-def test_newton_slice_tolerance_ignores_the_warm_start():
-    """The tolerance must not tighten just because the slice starts near its optimum.
-
-    That dependence is what ``_resolve_gtol`` has, and it is the mechanism that
-    entrenched the per-slice residual: a slice beginning close to its optimum was
-    permitted to stop close to where it began, handing the remainder to the next slice.
+    A gradient-based tolerance scaled by the gradient at the starting point (the rule used
+    while this stage ran on L-BFGS) collapses under a warm start, which entrenched a
+    per-slice residual and handed it to the next slice.  The relative loss change criterion
+    has no such dependence: it compares consecutive iterates, so the same threshold means
+    the same thing however the slice was started.
     """
     X0, R_t, W_t, link = _structured_problem(seed=3)
-    problem = {"R": R_t, "W": W_t, "link": link}
-    X_opt, _, _, _ = O.optimize_timepoint_newton(
+    X_opt, loss_cold, _, _ = O.optimize_timepoint_newton(
         X0, R_t, W_t, link=link, N_max=np.inf, max_iter=400
     )
 
-    # The old rule keys off the gradient at the starting point, which collapses by many
-    # orders of magnitude once the start is already converged.
-    _, g_cold = O.compute_loss_gradient(X0.ravel(), X0.shape, problem)
-    _, g_warm = O.compute_loss_gradient(X_opt.ravel(), X_opt.shape, problem)
-    old_cold = O._resolve_gtol(g_cold, O.GTOL_FACTOR)
-    old_warm = O._resolve_gtol(g_warm, O.GTOL_FACTOR)
-    assert old_warm < 1e-6 * old_cold, (
-        f"expected the old rule to collapse at a converged start: "
-        f"{old_cold:.3e} -> {old_warm:.3e}"
+    # Restarting from the converged point reaches the same loss, and does so immediately,
+    # rather than being permitted to stop wherever it began.
+    _, loss_warm, n_iter_warm, message = O.optimize_timepoint_newton(
+        X_opt, R_t, W_t, link=link, N_max=np.inf, max_iter=400
     )
-
-    # The new rule anchors to a random configuration at the same spatial scale instead,
-    # so it barely moves between the two starting points.
-    tol_cold = O._newton_slice_tolerance(X0, problem, O.TOL_FACTOR_NEWTON, seed=0)
-    tol_warm = O._newton_slice_tolerance(X_opt, problem, O.TOL_FACTOR_NEWTON, seed=0)
-    assert 1e-2 < tol_warm / tol_cold < 1e2, (
-        f"tolerance moved with the warm start: {tol_cold:.3e} -> {tol_warm:.3e}"
+    assert "converged" in message, message
+    assert abs(loss_warm - loss_cold) <= 1e-8 * max(abs(loss_cold), 1.0), (
+        f"warm restart landed elsewhere: {loss_cold:.10g} -> {loss_warm:.10g}"
     )
-
 
 def test_hessian_rejects_3d_input():
     X, R, W, _, link = _make_problem(seed=7)

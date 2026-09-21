@@ -51,9 +51,8 @@ def _compute_for_p(p, LSE, output_path, link, id_label, input_rates_df, true_rat
     is safe across processes.
     """
     print(f"Computing embeddings with p={p}...")
-    # Exact-Hessian covariances are only implemented for p == 1; this scan sweeps p away from 1
     X, _ = LSE.compute_embeddings_through_time(
-        p=p, link=link, compute_uncertainty=False, exact_hessian=False
+        p=p, link=link, compute_uncertainty=False
     )
     embeddings_df = LSE.get_embeddings_df(id_label=id_label)
     loss = compute_unpenalized_loss(
