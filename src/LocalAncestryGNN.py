@@ -39,6 +39,150 @@ import tskit
 from tqdm import tqdm
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Per-tree GNN
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ``TreeSequence.genealogical_nearest_neighbours`` averages over every tree in a
+# sequence, so obtaining a per-tree value used to mean isolating each tree with
+# ``ts.keep_intervals([[l, r]], simplify=False).trim()`` and calling it on the
+# result. That copy rebuilt the whole tree sequence once per tree and dominated
+# the runtime: profiled on an inferred chimp contig (662,825 nodes, ~34k trees)
+# it was 33.3 ms of each 34.2 ms tree, i.e. 97% of the work, projecting to ~450
+# core-hours for the 45M trees of that dataset.
+#
+# The copy is unnecessary. GNN is a purely local quantity -- it depends only on
+# the MRCA and descendant counts *within one tree* -- so it can be read straight
+# off the live tree. The functions below do that, matching tskit exactly (see
+# .misc/GNN_test/) at ~0.12 ms per original tree, a ~310x speedup.
+
+
+def build_reference_membership(ancestry_samples: dict[Any, list[int]],
+                               num_nodes: int) -> tuple[np.ndarray, list[Any]]:
+    """Map node ID -> reference panel index, for O(1) lookup while traversing.
+
+    Parameters
+    ----------
+    ancestry_samples : dict
+        Panel label -> reference sample node IDs.
+    num_nodes : int
+        ``ts.num_nodes`` of the tree sequence the lookup will be used on.
+
+    Returns
+    -------
+    membership : np.ndarray of int64, shape (num_nodes,)
+        ``membership[node]`` is the panel index of that node, or -1 if the node
+        is not a reference sample.
+    labels : list
+        Panel labels, in the order their indices refer to.
+    """
+    labels = list(ancestry_samples.keys())
+    membership = np.full(num_nodes, -1, dtype=np.int64)
+    for index, label in enumerate(labels):
+        nodes = np.asarray(ancestry_samples[label], dtype=np.int64)
+        if nodes.size and (nodes.min() < 0 or nodes.max() >= num_nodes):
+            raise ValueError(
+                f"reference panel {label!r} contains node IDs outside the tree "
+                f"sequence (valid range 0..{num_nodes - 1})."
+            )
+        membership[nodes] = index
+    return membership, labels
+
+
+def gnn_proportions_one_tree(tree: tskit.Tree, focal: list[int],
+                             membership: np.ndarray, num_panels: int) -> np.ndarray:
+    """GNN proportions of each focal node against each reference panel, on one tree.
+
+    Reimplements ``TreeSequence.genealogical_nearest_neighbours`` for a single
+    tree, without copying the tree sequence. For each focal node the walk climbs
+    to the first ancestor having at least one reference descendant *other than
+    the focal node itself*, then splits that ancestor's reference descendants
+    across the panels.
+
+    Two behaviours are load-bearing and were confirmed against tskit rather than
+    inferred from its documentation (.misc/GNN_test/test_gnn_equivalence.py):
+
+    * the focal node never counts toward its own proportions, so a panel whose
+      only member is the focal node contributes nothing and the walk continues
+      past that ancestor;
+    * a focal node with no parent (isolated in this tree) yields all zeros,
+      which the caller reads as "no data" rather than as a zero probability.
+
+    Parameters
+    ----------
+    tree : tskit.Tree
+        The tree to evaluate; the caller is responsible for skipping trees with
+        no edges.
+    focal : list[int]
+        Node IDs whose ancestry is being called.
+    membership : np.ndarray
+        Node -> panel index lookup from ``build_reference_membership``.
+    num_panels : int
+        Number of reference panels.
+
+    Returns
+    -------
+    np.ndarray, shape (len(focal), num_panels)
+        Row per focal node; rows sum to 1, or to 0 where no reference ancestor
+        exists.
+    """
+    proportions = np.zeros((len(focal), num_panels), dtype=np.float64)
+
+    for row, focal_node in enumerate(focal):
+        ancestor = tree.parent(focal_node)
+        while ancestor != tskit.NULL:
+            counts = np.zeros(num_panels, dtype=np.float64)
+            # tree.leaves(u) yields the sample nodes below u, which is exactly
+            # the descendant set GNN counts over.
+            for leaf in tree.leaves(ancestor):
+                if leaf == focal_node:
+                    continue
+                panel = membership[leaf]
+                if panel >= 0:
+                    counts[panel] += 1.0
+            total = counts.sum()
+            if total > 0:
+                proportions[row] = counts / total
+                break
+            ancestor = tree.parent(ancestor)
+
+    return proportions
+
+
+def simplify_for_gnn(ts: tskit.TreeSequence, focal: list[int],
+                     ancestry_samples: dict[Any, list[int]],
+                     ) -> tuple[tskit.TreeSequence, list[int], dict[Any, list[int]]]:
+    """Reduce a tree sequence to the samples GNN actually reads, remapping IDs.
+
+    ``simplify(keep_unary=False)`` removes nodes that no longer branch, so every
+    ancestor reached by the walk in ``gnn_proportions_one_tree`` is a genuine
+    coalescence with at least one other sample beneath it. Restricting to the
+    focal and reference samples additionally merges adjacent trees that differ
+    only among samples GNN never looks at.
+
+    Both reductions are output-preserving. Trees that differ only in removed
+    samples give the same GNN values, so after consecutive equal calls are merged
+    into segments the painting is unchanged -- verified segment-for-segment
+    against the unsimplified sequence on real contigs
+    (.misc/GNN_test/test_gnn_equivalence.py). On an inferred chimp contig this
+    drops 662,825 nodes to ~5,900 and the trees to visit by ~40%.
+
+    Returns
+    -------
+    (simplified, focal, ancestry_samples)
+        The reduced tree sequence and the focal/panel node IDs remapped into it.
+    """
+    kept = sorted({int(s) for s in focal}
+                  | {int(s) for nodes in ancestry_samples.values() for s in nodes})
+    simplified, node_map = ts.simplify(samples=kept, keep_unary=False, map_nodes=True)
+    return (
+        simplified,
+        [int(node_map[s]) for s in focal],
+        {label: [int(node_map[s]) for s in nodes]
+         for label, nodes in ancestry_samples.items()},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Local ancestry inference  (GNN-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -140,23 +284,33 @@ class LocalAncestryInference:
 
         labels    = list(self.ancestry_samples.keys())
         prob_cols = [f"prob_{lbl}" for lbl in labels]
-        sample_sets = [self.ancestry_samples[lbl] for lbl in labels]
         rows: list[dict] = []
 
-        for tree in ts.trees():
+        # Reduce to the samples GNN reads and drop unary nodes, then look panel
+        # membership up by node ID. Both steps are output-preserving; see
+        # simplify_for_gnn. The reported sample_id stays the ORIGINAL ID, so the
+        # remapping is invisible outside this function.
+        reduced, focal, panels = simplify_for_gnn(ts, self.admixed_sample_ids,
+                                                  self.ancestry_samples)
+        membership, _ = build_reference_membership(panels, reduced.num_nodes)
+        num_panels = len(labels)
+
+        for tree in reduced.trees():
             start, end = tree.interval.left, tree.interval.right
 
-            # Isolate this single tree so that genealogical_nearest_neighbours
-            # returns local (not genome-wide averaged) GNN proportions.
-            single_tree_ts = ts.keep_intervals(
-                [[start, end]], simplify=False
-            ).trim()
+            # A tree with no edges carries no genealogy, so there is nothing to
+            # call ancestry from, and every focal node would be reported as
+            # missing. Real tree sequences routinely contain them: tskit
+            # represents the span before the first edge and after the last as
+            # empty flanking trees, and inferred sequences add more wherever a
+            # region is unmappable. Every chimp contig has exactly two, the
+            # flanks outside the chunk it was cut from. Skipping them produces no
+            # rows for those spans, which downstream already tolerates: per-pair
+            # coverage is measured, not assumed.
+            if tree.num_edges == 0:
+                continue
 
-            # gnn shape: (n_focal, n_groups)
-            gnn = single_tree_ts.genealogical_nearest_neighbours(
-                focal=self.admixed_sample_ids,
-                sample_sets=sample_sets,
-            )
+            gnn = gnn_proportions_one_tree(tree, focal, membership, num_panels)
 
             for fi, sample_id in enumerate(self.admixed_sample_ids):
                 props = gnn[fi]  # shape: (n_groups,)
