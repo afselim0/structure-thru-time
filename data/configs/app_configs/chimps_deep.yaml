@@ -1,0 +1,34 @@
+version: 1
+num_threads: 16
+
+# file paths
+output_path: /project/jnovembre/afselim/structure-thru-time/results/outputs/chimps/no_admix
+trees_dir: /project/jnovembre/afselim/structure-thru-time/data/chimp_data/results/chimp/ts_chunks
+pop_colors: ../data/chimp_data/resources/samples/pop_colors.csv
+pop_labels: ../data/chimp_data/resources/samples/pop_labels.csv
+
+# coal time pdf estimation
+pdf_min_time: 0
+pdf_max_time: 450000
+pdf_bin_size: 20
+
+# rate estimation parameters
+rates_min_time: 4000
+rates_max_time: 400000
+min_window_size: 1000
+max_window_size: 10000
+
+# Embeddings estimation parameters
+link_function: inverse_distance
+N_min: 100
+N_max: 2000000
+l1: [0,0.001]
+n_timepoints_emb: 2000
+
+# Plotting parameters
+max_rate_plot: 0.0001
+max_Ne_plot: 120000
+Ne_plot_scale: linear
+generation_time: 25
+time_scale: log
+

@@ -1,0 +1,30 @@
+version: 1
+num_threads: 4
+
+# file paths
+output_path: /project/jnovembre/afselim/structure-thru-time/results/outputs/HGDP/europe
+trees_dir: /project/jnovembre/afselim/structure-thru-time/data/human_data/results/EUROPE/ts_chunks
+pop_colors: ../data/metadata/batch_pop_colors.csv
+pop_labels: ../data/metadata/wohns_pop_labels.csv
+
+# coal time pdf estimation
+pdf_min_time: 0
+pdf_max_time: 4000
+pdf_bin_size: 2
+
+# rate estimation parameters
+min_window_size: 40
+max_window_size: 200
+
+# Embeddings estimation parameters
+link_function: inverse_distance
+N_min: 200
+N_max: 10000000
+l1: [0,0.005]
+
+# Plotting parameters
+embeddings_min_time: 20
+max_rate_plot: 0.0002
+#embeddings_plot_lims: 10000
+time_scale: log
+
