@@ -18,6 +18,7 @@ REPO_ROOT="$(cd ../.. && pwd)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 SCRIPT_DIR="./plotting_scripts"
 APP_SCRIPTS="mean_coal_rates.py \
+              chimp_dataset.py \
               split_and_sawtooth_singer.py \
               complex_4_pops_singer.py \
               double_SS_2d_singer.py \

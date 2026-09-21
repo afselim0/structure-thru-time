@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 REPO_ROOT="$(cd ../.. && pwd)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 SCRIPT_DIR="./plotting_scripts"
-APP_SCRIPTS="mean_coal_rates.py"   # empirical figures — see generate_app_figs.sh
+APP_SCRIPTS="mean_coal_rates.py chimp_dataset.py"   # empirical figures — see generate_app_figs.sh
 
 mkdir -p sim_figs sim_figs_png
 
