@@ -52,8 +52,10 @@ def main():
     # the plotting parameters the figure takes from the run's config, so the plot
     # script does not have to open a pipeline config of its own
     plot_params = pd.DataFrame([
-        {"parameter": "min_time", "value": config["min_time"]},
-        {"parameter": "max_time", "value": config["max_time"]},
+        # The emitted names stay min_time/max_time: they are this figure's plot-axis
+        # contract with its plotting script, not the pipeline's pdf grid.
+        {"parameter": "min_time", "value": config["embeddings_min_time"]},
+        {"parameter": "max_time", "value": config.get("embeddings_max_time", config["pdf_max_time"])},
         {"parameter": "time_scale", "value": config["time_scale"]},
         {"parameter": "N_max", "value": N_MAX},
     ])

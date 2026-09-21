@@ -116,9 +116,15 @@ def main():
         label_frames.append(pop_labels.assign(demography=demography))
         color_frames.append(pop_colors.assign(demography=demography))
 
+        # Emitted names are this figure's plot-axis contract; the two time limits
+        # now come from the renamed config keys behind them.
+        CONFIG_KEY = {"min_time": "embeddings_min_time", "max_time": "embeddings_max_time"}
         for key in ("min_time", "max_time", "time_scale", "N_min", "N_max", "p"):
+            source = CONFIG_KEY.get(key, key)
+            value = (config[source] if source in config
+                     else config["pdf_max_time"])   # embeddings_max_time defaults to the grid end
             param_rows.append({"demography": demography, "parameter": key,
-                               "value": config[key]})
+                               "value": value})
         param_rows.append({"demography": demography, "parameter": "d", "value": D})
         param_rows.append({"demography": demography, "parameter": "xy_lims",
                            "value": xy_limit(aligned.values())})

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import DEMES_DIR, add_src_to_path, out_dir, report, require, write_table
 
 add_src_to_path()
-from compute_rates_true import compute_true_rates, expand_true_rates
+from compute_rates_true import compute_true_rates, expand_true_rates, rates_time_grid
 from preprocess_demography import preprocess_demography
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
@@ -63,7 +63,7 @@ def main():
 
     require(DEME_FILE)
     pop_labels, _ = preprocess_demography(DEME_FILE, n_samples_per_pop=N_SAMPLES_PER_POP)
-    true_rates = compute_true_rates(DEME_FILE, MAX_TIME, N_TIMEPOINTS)
+    true_rates = compute_true_rates(DEME_FILE, rates_time_grid(0, MAX_TIME, DELTA_T))
     expanded_true_rates = expand_true_rates(true_rates, pop_labels, phased=False)
 
     LSE = LatentSpaceEmbeddings(expanded_true_rates, N_min=N_MIN, N_max=N_MAX)

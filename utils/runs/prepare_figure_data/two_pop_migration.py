@@ -10,11 +10,10 @@ trajectories as two rows of 3D panels.
 The demes files these demographies are written to go into the output directory
 alongside the tables, so the figure's inputs are all in one place.
 
-Note on the time grid: compute_true_rates takes a number of timepoints, not a step
-size. The figure's delta_t of 1 generation over max_time is therefore
-max_time // delta_t + 1 points; the plotting script this replaces passed delta_t
-straight through as the point count, which yielded a single timepoint and made
-LatentSpaceEmbeddings fail. The step size the figure documents is used here.
+Note on the time grid: compute_true_rates takes the time grid itself, built here
+by rates_time_grid from the figure's delta_t. The plotting script this replaces
+passed delta_t straight through as a point count, which yielded a single
+timepoint and made LatentSpaceEmbeddings fail.
 """
 import os
 import sys
@@ -29,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import add_src_to_path, out_dir, report, write_table
 
 add_src_to_path()
-from compute_rates_true import compute_true_rates, expand_true_rates
+from compute_rates_true import compute_true_rates, expand_true_rates, rates_time_grid
 from preprocess_demography import preprocess_demography
 from LatentSpaceEmbeddings import LatentSpaceEmbeddings
 
@@ -87,7 +86,7 @@ def main():
         labels_df, colors_df = pop_labels, pop_colors
 
         for scenario, demes_file in (("early", early_file), ("deep", deep_file)):
-            true_rates = compute_true_rates(demes_file, MAX_TIME, N_TIMEPOINTS)
+            true_rates = compute_true_rates(demes_file, rates_time_grid(0, MAX_TIME, DELTA_T))
             true_rates = expand_true_rates(true_rates, pop_labels, phased=True)
             LSE = LatentSpaceEmbeddings(true_rates, N_min=N_MIN, N_max=N_MAX)
             LSE.compute_embeddings_through_time()

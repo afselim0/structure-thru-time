@@ -12,10 +12,10 @@ sources on the same simulated contigs:
 
 The runs are produced by utils/misc_utils/arg_rates_comparison.py (see
 utils/runs/local_runs/app_runs/arg_rates_comparison_slurm.sh). The analytic truth
-is computed on an np.linspace grid while the estimates use a max_time/n_timepoints
-step, so the two grids differ slightly; align_time_columns matches each estimate
-timepoint to its nearest analytic one, and this script insists the whole grid
-aligns.
+is now computed on the same rates grid as the estimates (compute_rates_true builds
+it with rates_time_grid), so the two agree exactly. align_time_columns is still
+applied -- it also serves the reconstructed-rates path, where the embedding grid is
+genuinely coarser -- and this script insists the whole grid aligns.
 """
 import argparse
 import os
@@ -46,9 +46,11 @@ SOURCES = {
     "singer": "singer",
 }
 # the plotting constants each demography's config carries through to the figure
+# Read straight out of the config, so these are the CONFIG key names; the figure's
+# plotting script reads them back under these same names.
 PARAM_KEYS = ("num_contigs", "contig_length", "n_sim_per_pop", "min_window_size",
-              "max_window_size", "max_time", "n_timepoints", "time_scale",
-              "min_time", "max_rate_plot")
+              "max_window_size", "pdf_max_time", "pdf_bin_size", "time_scale",
+              "embeddings_min_time", "max_rate_plot")
 # seeds are fixed per contig i by the pipeline, not drawn here
 SEED_RULE = "mutations: i+42 (infer_trees.py); simulation: 42+i (simulate_trees.py); SINGER/Relate: i+1"
 
@@ -56,7 +58,8 @@ SEED_RULE = "mutations: i+42 (infer_trees.py); simulation: 42+i (simulate_trees.
 def read_rates(run_root, demography, source):
     """Wide rates for one (demography, source), with float time columns."""
     data_dir = os.path.join(run_root, demography, SOURCES[source], "data")
-    path = (os.path.join(data_dir, "rates_true.parquet") if source == "true"
+    # rates_true carries a tag now, so it is looked up like any other output.
+    path = (find_output_file(data_dir, "rates_true") if source == "true"
             else find_output_file(data_dir, "rates"))
     rates = pd.read_parquet(require(path, f"{demography}/{source} rates"))
     rates.columns = rates.columns.astype(float)
