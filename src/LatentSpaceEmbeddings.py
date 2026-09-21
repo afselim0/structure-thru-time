@@ -43,22 +43,38 @@ class LatentSpaceEmbeddings:
                  n_components:         int                    = 2,
                  l1_strengths:         Optional[dict]         = None,
                  pseudo_huber_factor:  float                  = 1e-3,
-                 default_weights:      float                  = DEFAULT_WEIGHTS,
+                 unweighted:           bool                   = True,
                  link_function:        str                    = "inverse_distance"):
         """Build the rate and weight tensors from long-format rates.
 
         Args:
             rates_df: Pairwise rates, indexed by (sample_1, sample_2), columns time.
             weights_df: Matching loss weights from compute_coal_rate_weights; if
-                None, uniform weights.
+                None, every pair is weighted equally.
             sample_times: Sampling time per sample; non-zero marks an ancient sample.
             N_min, N_max: Link function parameters.
             n_components: Latent dimensionality d.
             l1_strengths: {order: gamma} dimensionless group-fused-lasso strengths.
             pseudo_huber_factor: eps_k = pseudo_huber_factor * median group norm of
                 the stage-1 solution's k-th differences.
-            default_weights: Uniform weight used when weights_df is None; defaults
-                to DEFAULT_WEIGHTS, the same fallback the optimizer applies.
+            unweighted: If True (the default), ignore weights_df entirely and weight
+                every pair equally in both stages.
+
+                The weights are proportional to a pair's surviving lineages, which
+                decays fastest for pairs that coalesce early, i.e. within-population
+                pairs.  In deep time every pair has effectively the same rate, so the
+                loss wants every pair at the same distance -- impossible in d=2, so
+                the optimizer compromises in proportion to the weights and lets the
+                lighter (within-population) pairs give way inward.  That manufactures
+                population clusters where the data says there are none: measured on a
+                two-population split at t=8000, where the true within/between distance
+                ratio is exactly 1.0, weighted gives 0.973 and flat gives 1.004.  The
+                effect is identical whether the rates are real or set equal, so it
+                comes from the weights and not from the data.
+
+                Set False to weight each pair by its loss weight, which carries real
+                information about which pairs are well determined, at the cost of
+                letting that information act on the geometry.
             link_function: Link name.
         """
         # Read the column labels as floats without mutating the caller's DataFrame
@@ -101,6 +117,15 @@ class LatentSpaceEmbeddings:
                 print(f"Ancient samples: {n_ancient} / {self.num_samples}")
 
         # --- Build R and W ---
+        # unweighted drops weights_df here rather than flattening it later, so every
+        # consumer of self.W (both stages, the saturated loss, the Hessian) sees the
+        # same flat tensor and no code path can reintroduce the contrast between pairs.
+        self.unweighted = bool(unweighted)
+        if self.unweighted and weights_df is not None:
+            print("unweighted=True: ignoring the supplied weights; every pair is "
+                  "weighted equally in both stages")
+            weights_df = None
+
         n, T = self.num_samples, self.num_timepoints
         R = np.full((n, n, T), np.nan)
         W = np.full((n, n, T), np.nan)
@@ -117,7 +142,13 @@ class LatentSpaceEmbeddings:
                 W[j, i, :] = w
 
         if weights_df is None:
-            W = np.where(np.isnan(R), np.nan, float(default_weights))
+            # A single constant in place of per-pair weights.  It is DEFAULT_WEIGHTS
+            # rather than 1 so that the loss keeps the scale the tolerances and the
+            # smoothing calibration were set against: the Newton stop uses
+            # max(|f|, 1) as its denominator, and alpha_1 is proportional to the
+            # saturated loss while the penalty side is not, so a uniform rescale of W
+            # would change what a given l1 gamma means.
+            W = np.where(np.isnan(R), np.nan, float(DEFAULT_WEIGHTS))
         elif np.any(np.isfinite(W) & (W <= 0)):
             raise ValueError(
                 f"{int(np.sum(np.isfinite(W) & (W <= 0)))} non-positive weights in "
