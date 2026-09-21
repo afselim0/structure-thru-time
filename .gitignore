@@ -150,3 +150,9 @@ SKILL.md
 settings.json
 # ...but the project's own skills are shared with the repo.
 !/.claude/skills/**
+
+# Per-user cluster settings for the run scripts (--slurm). cluster.yaml.example
+# is tracked and documents every key; each user copies it and fills in their
+# own account, partition and environment paths.
+utils/runs/CoaSTT_runs/slurm.yaml
+utils/runs/.submit/

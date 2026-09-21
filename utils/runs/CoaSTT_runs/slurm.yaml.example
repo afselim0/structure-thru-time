@@ -1,0 +1,76 @@
+# Cluster settings for the CoaSTT run scripts.
+#
+# Copy this file to `slurm.yaml` in the same directory and edit it for your
+# cluster; `slurm.yaml` is gitignored, so your account and paths stay local.
+#
+#     cp slurm.yaml.example slurm.yaml
+#
+# It is read only when a run script is given --slurm; a local run ignores it
+# entirely and needs no conda_* settings (you activate the env yourself).
+# Set COASTT_SLURM_CONFIG to point somewhere else if you keep it outside the
+# repo. The parser is deliberately simple: flat `key: value` pairs, `#`
+# comments, no nesting, no lists. Values may be quoted, and $VAR / ${VAR} are
+# expanded when the setting is used.
+
+# --- Scheduler ------------------------------------------------------------
+
+# The SLURM account jobs are charged to (sbatch --account). Leave empty to let
+# SLURM pick your default account.
+account: pi-jnovembre
+
+# The partition/queue jobs are submitted to (sbatch --partition). Leave empty
+# for the cluster default.
+partition: jnovembre
+
+# Anything else every job should carry, passed verbatim to sbatch. Use it for
+# QoS, constraints, reservations, GPUs, mail options -- whatever your site
+# needs. Split on whitespace, so no argument may contain a space.
+#   sbatch_extra: "--qos=normal --constraint=edr"
+sbatch_extra: ""
+
+# Where job stdout/stderr go. Relative paths resolve against utils/runs/.
+# Created if missing.
+log_dir: job_logs
+
+# --- Environment ----------------------------------------------------------
+#
+# How an array task, which starts from a clean login-less shell, gets into the
+# CoaSTT environment. Two ways, tried in this order:
+#
+#   1. conda_sh + conda_env -- source the conda hook, then `conda activate`.
+#      This is what most clusters want. conda_sh is the profile.d hook inside
+#      your conda/mamba installation; `conda info --base` prints its directory.
+#   2. conda_env alone -- if the hook is missing or unset, a prefix env still
+#      works by putting $conda_env/bin on PATH.
+#
+# If your cluster needs `module load` lines before any of this, put them in
+# pre_activate below.
+
+# Path to the environment (a prefix path, or a bare name if it is a named env
+# in your conda installation).
+conda_env: /project/jnovembre/afselim/CoaSTT_env
+
+# Path to conda's shell hook. Leave empty to fall back to PATH-only activation.
+conda_sh: /project/jnovembre/afselim/miniforge3/etc/profile.d/conda.sh
+
+# Shell run inside the job before the environment is activated, for `module
+# load` and the like. A single line; use `;` to separate commands.
+#   pre_activate: "module load gcc/12.2.0; module load cuda/12.1"
+pre_activate: ""
+
+# --- Working directories --------------------------------------------------
+
+# Root for the private snakemake working directories that --slurm jobs run in.
+#
+# Concurrent snakemake processes sharing a working directory race on
+# .snakemake/iocache -- each deletes the others' latest.pkl -- and a job dies
+# seconds after starting, during DAG construction, with a FileNotFoundError
+# that looks nothing like a workflow error. --nolock does not help: it
+# suppresses the directory lock, not the shared .snakemake state, and there is
+# no flag to relocate that. So each --slurm job gets a directory of symlinks
+# back into the repo: writes still land in the repo, but .snakemake/ is
+# private.
+#
+# These hold only symlinks plus regenerable snakemake state, so keep them on
+# scratch rather than in the repo. $USER and $SCRATCH are expanded at run time.
+workdir_root: $SCRATCH/$USER/coastt_work

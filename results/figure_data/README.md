@@ -12,7 +12,7 @@ anything — all of that has already happened here.
 ## Regenerating
 
 ```
-bash utils/runs/prepare_figure_data/prepare_all_figure_data.sh   # every figure
+bash utils/runs/prepare_all_figure_data.sh   # every figure
 python utils/runs/prepare_figure_data/<figure_name>.py           # just one
 ```
 

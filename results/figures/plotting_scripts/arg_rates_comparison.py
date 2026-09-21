@@ -127,7 +127,10 @@ def panel_rates(ax, d, demography, pair_type, xlabel=True):
     ylabel, floor = CELLS[demography, pair_type]
     ax.set_xscale(param(d, demography, "time_scale", str))
     log_axis(ax, "y")
-    ax.set_xlim(param(d, demography, "min_time"), param(d, demography, "max_time"))
+    # The config keys these come from were renamed (min_time -> embeddings_min_time,
+    # max_time -> pdf_max_time); params.csv carries the config's own key names.
+    ax.set_xlim(param(d, demography, "embeddings_min_time"),
+                param(d, demography, "pdf_max_time"))
     ax.set_ylim(floor, param(d, demography, "max_rate_plot"))
     ax.set_ylabel(ylabel)
     if xlabel:

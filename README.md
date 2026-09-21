@@ -26,7 +26,14 @@ utils/    All executable tooling
   arg_infer_utils/       SINGER / Relate binaries
   data_utils/            Scripts that generate or preprocess files in data/
   misc_utils/            Standalone utilities
-  runs/                  Per-run launch scripts + local/slurm drivers
+  runs/                  Everything that produces results, in pipeline order
+    generate_{sim,app}_results.sh    1. CoaSTT runs      -> results/outputs/
+    prepare_all_figure_data.sh       2. figure tables    -> results/figure_data/
+    generate_{sim,app}_figures.sh    3. figures          -> results/figures/
+    CoaSTT_runs/                     one script per run; each takes --slurm
+      slurm.yaml.example             cluster settings template (copy to slurm.yaml)
+      run_common.sh                  shared local/SLURM body the run scripts source
+    prepare_figure_data/             one script per figure
 data/     Inputs only (.csv and .yaml; plus data/trees/ for tree sequences)
   configs/sim_configs/   Manuscript simulation configs
   configs/app_configs/   Manuscript application (empirical) configs
@@ -39,34 +46,83 @@ results/
   figures/               Manuscript figures and the scripts that draw them
 ```
 
-# Reproducing the manuscript results
-Every simulation result is driven by one config in `data/configs/sim_configs/` and one
-matching launch script in `utils/runs/local_runs/sim_runs/`. To run one:
-```
-bash utils/runs/local_runs/sim_runs/complex_4_pops.sh          # add -n for a dry run
-```
-To run all of them:
-```
-bash utils/runs/generate_sim_results_local.sh                  # sequentially, on this machine
-sbatch utils/runs/generate_sim_results_slurm.sh                # as a SLURM job array
-```
-The `app_` equivalents work the same way once `data/configs/app_configs/` is populated.
-The launch scripts are self-anchoring, so they can be invoked from any directory.
+# Reproducing everything from a fresh clone
 
-# Figures
-Drawing a figure is split in two: a preparation script turns raw run outputs into tidy
-tables, and a plotting script reads only those tables. So the plotting scripts never
-read `results/outputs/`, run the optimizer, or align anything themselves.
-```
-bash utils/runs/prepare_figure_data/prepare_all_figure_data.sh   # tables -> results/figure_data/
-bash results/figures/generate_sim_figs.sh    # simulation figures -> results/figures/sim_figs/
-bash results/figures/generate_app_figs.sh    # application figures -> results/figures/app_figs/
-```
-The tables are already checked in, so the figure scripts can be run on their own; rebuild
-them only after a run changes. A figure whose run is not on this machine fails with
-`missing run: <path>`. Per-figure details are in `results/figure_data/README.md`.
+Five steps, in order. Each reads the previous one's output, and everything lives
+under `utils/runs/`. The drivers are self-anchoring, so they can be invoked from
+any directory.
 
-Figures are written as PDFs; PNG intermediates go to the gitignored `*_figs_png/` directories.
+### 1. Install the environment
+As under [Installations](#installations):
+```
+conda env create -f environment.yml
+conda activate CoaSTT_env
+bash utils/misc_utils/install_libstdcxx_hook.sh   # once, then re-activate the env
+```
+
+### 2. Set up `slurm.yaml`, if you are running on a cluster
+Skip this step to run everything on the local machine.
+
+The run scripts take a `--slurm` flag, and read your account, partition and
+environment from a config file you create once:
+```
+cd utils/runs/CoaSTT_runs
+cp slurm.yaml.example slurm.yaml
+$EDITOR slurm.yaml
+```
+`slurm.yaml.example` documents every key. At minimum set `account`, `partition`
+and `conda_env` (the path to the environment created in step 1); `conda_sh`,
+`pre_activate`, `sbatch_extra`, `log_dir` and `workdir_root` cover the rest of
+what a site may need. `slurm.yaml` is gitignored, so your own settings stay
+local. Nothing else in the repo hard-codes a cluster.
+
+### 3. Run the CoaSTT pipeline
+This is the expensive step — days of compute for the full set. Each run is
+driven by one config in `data/configs/{sim,app}_configs/` and one matching
+script in `utils/runs/CoaSTT_runs/{sim,app}_runs/`.
+```
+bash utils/runs/generate_sim_results.sh            # -> results/outputs/simulations/
+bash utils/runs/generate_app_results.sh            # -> results/outputs/empirical/
+
+bash utils/runs/generate_sim_results.sh --slurm    # the same, as SLURM jobs
+bash utils/runs/generate_app_results.sh --slurm
+```
+Run the sim results before the app results: the SINGER runs infer trees from the
+simulated ones. Add `-n` for a dry run — of snakemake locally, or of the
+submission plan under `--slurm`.
+
+To run a single case, invoke its script directly; the same flags apply:
+```
+bash utils/runs/CoaSTT_runs/sim_runs/complex_4_pops.sh
+bash utils/runs/CoaSTT_runs/sim_runs/complex_4_pops.sh --slurm
+```
+
+### 4. Prepare the figure data
+```
+bash utils/runs/prepare_all_figure_data.sh         # -> results/figure_data/
+```
+Always local: these scripts are light next to the runs that produced their
+inputs. Each turns raw outputs into the tidy tables one figure is drawn from,
+and a report of which succeeded and which failed is written to
+`utils/runs/figure_data.txt`. A figure whose run is not on this machine fails
+with `missing run: <path>`, and the driver carries on with the rest. The tables
+are checked in, so this step is only needed after a run changes. Per-figure
+details are in `results/figure_data/README.md`.
+
+### 5. Draw the figures
+```
+bash utils/runs/generate_sim_figures.sh            # -> results/figures/sim_figs/
+bash utils/runs/generate_app_figures.sh            # -> results/figures/app_figs/
+```
+Also always local. Drawing is deliberately split from preparation: the plotting
+scripts read `results/figure_data/` only, and never touch `results/outputs/`,
+run the optimizer, or align anything themselves. Since the tables are checked
+in, these two can be run on a fresh clone without steps 3 and 4.
+
+Figures are written as PDFs; PNG intermediates go to the gitignored
+`*_figs_png/` directories. Rendering the 3D embedding panels needs Chrome for
+kaleido — on a machine without one, run
+`python -c "from kaleido import get_chrome_sync; print(get_chrome_sync())"` once.
 
 # Basic Usage
 The main input to **CoaSTT** a directory with a list of [tree sequences](https://tskit.dev/software/tskit.html) (inferred or simulated). They should all end with the suffix **.trees**. If the tree sequences are samples from a posterior (singer), each posterior sample should be saved in an different directory. **CoaSTT** can be run on each posterior sample one at a time.
