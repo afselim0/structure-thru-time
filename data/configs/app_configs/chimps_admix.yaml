@@ -8,9 +8,6 @@ pop_colors: ../data/chimp_data/resources/samples/pop_colors.csv
 pop_labels: ../data/chimp_data/resources/samples/pop_labels.csv
 
 # Admix populations
-# "W x C" is a Western x Central hybrid individual, so it is a query sample here
-# rather than a reference panel (left out of admixed_pops it would otherwise
-# become a reference panel of its own, spaces and all, under the default).
 admixed_pops: [NC, "W x C"]
 
 # Reference panels, built to be size-matched: 5 Eastern + 5 Central individuals
@@ -29,8 +26,8 @@ LAI_method: GNN
 
 # coal time pdf estimation
 pdf_min_time: 0
-pdf_max_time: 200000
-pdf_bin_size: 20
+pdf_max_time: 50000
+pdf_bin_size: 50
 
 # rate estimation parameters
 rates_min_time: 400
@@ -41,12 +38,11 @@ max_window_size: 2000
 # Embeddings estimation parameters
 link_function: inverse_distance
 N_min: 100
-N_max: 2000000
-l1: [0,0.001]
+N_max: 10000000
+l1: [0.0001,0.001]
 # n_timepoints_emb: 1000
 
 # Plotting parameters
-# embeddings_min_time: 40
 max_rate_plot: 0.0001
 max_Ne_plot: 120000
 Ne_plot_scale: linear

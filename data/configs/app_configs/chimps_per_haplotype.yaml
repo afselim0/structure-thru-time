@@ -15,16 +15,16 @@ pdf_bin_size: 20
 # rate estimation parameters
 per_haplotype: true
 rates_min_time: 400
-rates_max_time: 40000
+rates_max_time: 400000
 min_window_size: 500
-max_window_size: 10000
+max_window_size: 72000
 
 # Embeddings estimation parameters
 link_function: inverse_distance
 N_min: 100
-N_max: 2000000
-l1: [0,0.001]
-n_timepoints_emb: 1000
+N_max: 10000000
+l1: [0.0001,0.001]
+n_timepoints_emb: 2000
 
 # Plotting parameters
 max_rate_plot: 0.0001

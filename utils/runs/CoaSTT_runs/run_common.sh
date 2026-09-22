@@ -202,7 +202,10 @@ export LD_LIBRARY_PATH="\${CONDA_PREFIX:-$COASTT_CONDA_ENV}/lib\${LD_LIBRARY_PAT
 # ../results, snakemake_utils) all resolve and writes land in the repo, while
 # .snakemake/ stays private to this job. See workdir_root in slurm.yaml for
 # why concurrent jobs cannot share one.
-work="$COASTT_WORKDIR_ROOT/$name"
+# Array tasks share one job name, so the task id has to be in the path or the
+# tasks would rm -rf each other's workdir. Unset for an ordinary job, which
+# then gets the bare name as before.
+work="$COASTT_WORKDIR_ROOT/$name\${SLURM_ARRAY_TASK_ID:+_\$SLURM_ARRAY_TASK_ID}"
 rm -rf "\$work"
 mkdir -p "\$work/utils"
 for item in src data results; do
@@ -242,6 +245,8 @@ coastt_sbatch() {
         --time="$COASTT_TIME"
         --output="$COASTT_LOG_DIR/${name}_%j.out"
         --error="$COASTT_LOG_DIR/${name}_%j.err"
+        # Each array task has its own job id, so %j alone keeps the logs
+        # distinct and non-array log names are unchanged.
     )
     # mem wins over mem_per_cpu when a script asks for a whole-job total.
     if [[ -n "${COASTT_MEM:-}" ]]; then

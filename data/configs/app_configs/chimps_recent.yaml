@@ -22,11 +22,12 @@ max_window_size: 500
 link_function: inverse_distance
 N_min: 100
 N_max: 10000000
-l1: [0.0005,0.001]
-# n_timepoints_emb: 1000
+l1: [0.0001,0.001]
+
+# Replicate optimization seeds; read only by STT_replicates, ignored by STT.
+seeds: [1, 2, 3, 4, 5, 6, 7, 8]
 
 # Plotting parameters
-embeddings_min_time: 50
 max_rate_plot: 0.0001
 max_Ne_plot: 120000
 Ne_plot_scale: linear
