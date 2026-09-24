@@ -20,7 +20,7 @@ cd "$REPO_ROOT/results/figures"
 # resolves as a namespace package only with the repo root on the import path.
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 SCRIPT_DIR="./plotting_scripts"
-APP_SCRIPTS="mean_coal_rates.py chimp_dataset.py"   # empirical figures — see generate_app_figures.sh
+APP_SCRIPTS="arg_rates_comparison.py chimp_dataset.py sim_vs_singer.py double_admix_singer.py"   # empirical figures — see generate_app_figures.sh
 
 mkdir -p sim_figs sim_figs_png
 
