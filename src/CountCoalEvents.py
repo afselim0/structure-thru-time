@@ -24,6 +24,7 @@ part of their span. Each ``{contig}.npy`` of counts therefore has a
 from __future__ import annotations
 
 import os
+import time
 from itertools import combinations
 from pathlib import Path
 from typing import List, Optional
@@ -479,15 +480,11 @@ class CountCoalEvents:
         else:
             # --- Parallel execution via pathos, imap for a live progress bar
             pool = Pool(nodes=num_threads)
-            list(
-                tqdm(
-                    pool.imap(
-                        lambda ts_file: self.count_coal_spans_single_ts(ts_file, coal_counts_dir=coal_counts_dir),
-                        ts_files,
-                    ),
-                    total=len(ts_files),
-                    desc="Counting coalescent segments",
-                )
+            imap_or_raise(
+                pool,
+                lambda ts_file: self.count_coal_spans_single_ts(ts_file, coal_counts_dir=coal_counts_dir),
+                ts_files,
+                "Counting coalescent segments",
             )
             # pathos caches ProcessPool instances by nodes count; close()+join()
             # alone leaves the closed pool in that cache, so a later Pool(nodes=N)
@@ -716,6 +713,64 @@ def read_LAI_df(path):
             "treated as an ancestry panel by the window-intersection logic."
         )
     return called
+
+
+def imap_or_raise(pool, func, items, desc):
+    """Run ``func`` over ``items`` in ``pool``, raising if a worker dies.
+
+    ``pool.imap`` blocks in ``next()`` forever when a worker is killed rather
+    than returning: ``multiprocess.Pool`` quietly replaces the dead process, but
+    the task it was holding is never completed and never re-queued, so the parent
+    waits on a result that cannot arrive. A job in that state keeps its
+    allocation and looks RUNNING indefinitely -- one burned 9.5 hours before it
+    was noticed, its workers idle and its progress bar on 0 while per-contig
+    output files piled up on disk from the tasks that had finished.
+
+    The usual cause is the OOM killer taking a worker: each one holds several GB
+    here, so oversubscribing memory kills children without failing the job.
+
+    Submitting with ``amap`` and polling lets the parent watch the worker roster
+    instead of blocking on a result. A changed roster means a worker died, which
+    is reported with the failing step named rather than left to hang.
+
+    Args:
+        pool: a pathos ``ProcessingPool``.
+        func (callable): applied to each item, in a worker.
+        items (list): work items.
+        desc (str): progress bar label, also used in the error message.
+
+    Returns:
+        list: results, in the order of ``items``.
+
+    Raises:
+        RuntimeError: if a worker process dies before the results are ready.
+    """
+    result = pool.amap(func, items)
+    initial_pids = {worker.pid for worker in pool._serve()._pool}
+
+    with tqdm(total=len(items), desc=desc) as progress:
+        while not result.ready():
+            # _number_left counts task CHUNKS still outstanding, not items, so it
+            # is only a progress signal; the true count comes from the result.
+            done = len(items) - result._number_left * result._chunksize
+            progress.n = max(0, min(done, len(items)))
+            progress.refresh()
+
+            current_pids = {worker.pid for worker in pool._serve()._pool}
+            if current_pids != initial_pids:
+                lost = sorted(initial_pids - current_pids)
+                raise RuntimeError(
+                    f"{desc}: a worker process died (pid {lost}) and its task was "
+                    "lost, so this step would wait forever. The usual cause is the "
+                    "OOM killer: each worker holds the full per-contig count "
+                    "arrays, so peak memory scales with num_threads. Re-run with "
+                    "fewer threads, more memory, or a coarser pdf_bin_size."
+                )
+            time.sleep(0.5)
+        progress.n = len(items)
+        progress.refresh()
+
+    return result.get()
 
 
 def parse_window_edges(LAI_df):
@@ -1132,15 +1187,11 @@ class CountCoalEvents_admix:
         else:
             # --- Parallel execution via pathos, imap for a live progress bar
             pool = Pool(nodes=num_threads)
-            per_contig_coverage = list(
-                tqdm(
-                    pool.imap(
-                        lambda ts_file: self.count_coal_spans_single_ts(ts_file, LAI_dir=LAI_dir),
-                        ts_files,
-                    ),
-                    total=len(ts_files),
-                    desc="Counting per-ancestry coalescent segments",
-                )
+            per_contig_coverage = imap_or_raise(
+                pool,
+                lambda ts_file: self.count_coal_spans_single_ts(ts_file, LAI_dir=LAI_dir),
+                ts_files,
+                "Counting per-ancestry coalescent segments",
             )
             # See the matching comment in CountCoalEvents.count_coal_spans_all_ts:
             # clear() evicts this pool from pathos's process-wide cache so a
