@@ -773,6 +773,53 @@ def imap_or_raise(pool, func, items, desc):
     return result.get()
 
 
+def pad_windows_to_sequence(window_edges, window_idxs, sequence_length):
+    """Extend ancestry windows to span [0, sequence_length] for tskit.
+
+    ``pair_coalescence_counts`` requires its ``windows`` to tile the whole
+    sequence: strictly increasing, starting at 0 and ending at
+    ``sequence_length``. Ancestry windows do not, for two reasons -- a contig cut
+    out of a chromosome keeps the chromosome's coordinate space, so its trees
+    occupy only the middle of it, and spans with no ancestry call are absent
+    entirely.
+
+    Padding is sound because the padded spans hold no trees and therefore no
+    coalescences, so they contribute exactly zero to both the counts and the
+    coverage they are summed into (verified in .misc/GNN_test/). The returned
+    indices are shifted to match, so the padding is never selected for an
+    ancestry label and never enters either total.
+
+    Args:
+        window_edges (np.ndarray): increasing window boundaries from
+            ``parse_window_edges``.
+        window_idxs (np.ndarray): indices into ``window_edges[:-1]`` naming the
+            windows that carry the ancestry label of interest.
+        sequence_length (float): ``ts.sequence_length``.
+
+    Returns:
+        (padded_edges, shifted_idxs): edges spanning ``[0, sequence_length]``,
+        and ``window_idxs`` renumbered into them.
+    """
+    edges = np.asarray(window_edges, dtype=np.float64)
+    if edges[0] < 0 or edges[-1] > sequence_length:
+        raise ValueError(
+            f"ancestry windows [{edges[0]}, {edges[-1]}] fall outside the tree "
+            f"sequence [0, {sequence_length}]."
+        )
+
+    pad_left = edges[0] > 0
+    pad_right = edges[-1] < sequence_length
+    if not (pad_left or pad_right):
+        return edges, np.asarray(window_idxs, dtype=int)
+
+    padded = np.concatenate((
+        [0.0] if pad_left else [],
+        edges,
+        [float(sequence_length)] if pad_right else [],
+    ))
+    return padded, np.asarray(window_idxs, dtype=int) + int(pad_left)
+
+
 def parse_window_edges(LAI_df):
     """Parses the dataframe with local ancestry information to find bp positions where ancestry switches
 
@@ -1093,10 +1140,13 @@ class CountCoalEvents_admix:
                         continue
                     sample_sets = [[admixed_sample]] + [[s] for s in non_admixed_in_label]
                     indexes = [(0, i) for i in range(1, len(sample_sets))]
+                    padded_edges, window_idxs = pad_windows_to_sequence(
+                        window_edges[admixed_sample], window_idxs, ts.sequence_length
+                    )
                     counts_windowed = ts.pair_coalescence_counts(
                         sample_sets=sample_sets,
                         indexes=indexes,
-                        windows=window_edges[admixed_sample],
+                        windows=padded_edges,
                         span_normalise=False,
                         time_windows=time_windows,
                     )
@@ -1127,9 +1177,12 @@ class CountCoalEvents_admix:
                     window_idxs = idxs_dict.get(label, np.array([], dtype=int))
                     if window_idxs.size == 0:
                         continue
+                    padded_edges, window_idxs = pad_windows_to_sequence(
+                        edges, window_idxs, ts.sequence_length
+                    )
                     counts_windowed = ts.pair_coalescence_counts(
                         sample_sets=[[s1], [s2]],
-                        windows=edges,
+                        windows=padded_edges,
                         span_normalise=False,
                         time_windows=time_windows,
                     )

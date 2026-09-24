@@ -133,6 +133,26 @@ def _unique_vcf_names(ts: tskit.TreeSequence, node_ids: list[int]) -> list[str]:
     return result
 
 
+def _with_diploid_individuals(ts: tskit.TreeSequence) -> tskit.TreeSequence:
+    """
+    Inferred tree sequences (e.g. SINGER output) carry no individuals table.
+    Pair consecutive sample nodes (2k, 2k+1) into diploid individual k, the
+    convention of the simulated trees and of pop_labels' individual_id.
+    """
+    if ts.num_individuals > 0:
+        return ts
+    samples = ts.samples()
+    if len(samples) % 2:
+        raise ValueError(f"Cannot pair {len(samples)} sample nodes into diploid individuals.")
+    tables = ts.dump_tables()
+    individual = tables.nodes.individual
+    for k in range(len(samples) // 2):
+        tables.individuals.add_row()
+        individual[samples[2 * k]] = individual[samples[2 * k + 1]] = k
+    tables.nodes.individual = individual
+    return tables.tree_sequence()
+
+
 def write_ts_vcf(ts: tskit.TreeSequence, node_ids: list[int], output_path: str | Path, mutation_rate: float = None) -> None:
     """
     Write a VCF for exactly the individuals owning *node_ids*, using
@@ -617,7 +637,7 @@ def infer_local_ancestry_single_ts(
     if not ts_path.exists():
         raise FileNotFoundError(f"Tree sequence not found: {ts_path}")
 
-    ts = tskit.load(str(ts_path))
+    ts = _with_diploid_individuals(tskit.load(str(ts_path)))
 
     all_reference = {s for grp in ancestry_samples.values() for s in grp}
     overlap = all_reference & set(admixed_sample_ids)
