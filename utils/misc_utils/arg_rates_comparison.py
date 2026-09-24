@@ -41,6 +41,17 @@ DEFAULT_ROOT = "../results/outputs/misc_analyses/arg_rates_comparison"
 # Fixed for the comparison, overriding whatever the tracked config carries.
 CONTIG_LENGTH = 5000000
 N_SIM_PER_POP = 20
+NUM_CONTIGS = 500
+SINGER_BURNIN = 2500
+# 5 samples 500 iterations apart; infer_trees keeps only the last
+SINGER_THINNING = 500
+# min_window_size 40 lets the rates start at 20 generations. Sawtooth max_window_size
+# 6000 gave the lowest error of the sim-tree mean rate against the truth (100-contig
+# runs); the inferred-tree means were flat (within 0.1%) over 1000-16000
+RATE_OVERRIDES = {
+    "split": {"min_window_size": 40, "rates_min_time": 20},
+    "sawtooth": {"min_window_size": 40, "rates_min_time": 20, "max_window_size": 6000},
+}
 
 
 def build_config(demography, stage, root, num_contigs, num_threads):
@@ -54,6 +65,9 @@ def build_config(demography, stage, root, num_contigs, num_threads):
     config["contig_length"] = CONTIG_LENGTH
     config["n_sim_per_pop"] = N_SIM_PER_POP
     config["num_threads"] = num_threads
+    config.update(RATE_OVERRIDES.get(demography, {}))
+    config["burnin"] = SINGER_BURNIN
+    config["thinning_interval"] = SINGER_THINNING
     # sim writes to <root>/<demo>/sim; a method writes to the sibling <root>/<demo>/<method>,
     # which is where the snakefile looks for the simulated trees (sim_trees_dir).
     config["output_path"] = f"{root}/{demography}/{'sim' if stage == 'sim' else stage}"
@@ -67,7 +81,7 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--demography", required=True, choices=DEMOGRAPHIES)
     p.add_argument("--stage", required=True, choices=STAGES)
-    p.add_argument("--num_contigs", type=int, default=100)
+    p.add_argument("--num_contigs", type=int, default=NUM_CONTIGS)
     p.add_argument("--num_threads", type=int, default=24)
     p.add_argument("--root", default=DEFAULT_ROOT,
                    help="run root, relative to utils/ (default: %(default)s)")

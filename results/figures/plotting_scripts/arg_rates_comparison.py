@@ -5,10 +5,16 @@ the analytic truth and the estimate on the true trees.
 
 Panels
   A  population split, split in two stacked sub-panels sharing an x axis:
-     within-population pairs (top) and between-population pairs (bottom)
-                                       <- rates_split_<source>.parquet, mean_rates.parquet
-  B  single sawtooth population (within pairs only)
-                                       <- rates_sawtooth_<source>.parquet, mean_rates.parquet
+     within-population pairs (top) and between-population pairs (bottom); dashed
+     verticals in the bottom sub-panel mark where each inferred-ARG source's
+     between/within mean-rate ratio first reaches 0.5
+                                       <- rates_split_<source>.parquet, mean_rates.parquet,
+                                          ratio_half_times.csv
+  B  single sawtooth population (within pairs only); bottom-left table of the
+     fraction of each true log contrast between consecutive extrema that each
+     inferred ARG retains, each curve read at its own extremum
+                                       <- rates_sawtooth_<source>.parquet, mean_rates.parquet,
+                                          contrast_retained.csv
 
 Which rows of a rates_*.parquet are within- vs between-population pairs comes from
 pairs.csv (one row per pair, in the same order as the parquet rows).
@@ -19,6 +25,7 @@ one time grid per demography, so this script only draws.
 """
 import os
 
+import matplotlib.patches
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
@@ -64,11 +71,12 @@ SOURCE_LABELS = {
 # decades on empty space; the floor is a round 1e-5 so the axis carries decade ticks.
 RATE_FLOOR = 1e-6
 RATE_FLOOR_WITHIN_SPLIT = 1e-5
-CLOUD_KW = dict(lw=0.15, alpha=0.15, zorder=1, rasterized=True)
+CLOUD_KW = dict(lw=0.15, alpha=0.08, zorder=1, rasterized=True)
 # the means overlap heavily wherever the methods agree, and an opaque line simply
 # hides whichever source was drawn before it: draw them translucent so overlaps
 # blend and the truth stays visible under the estimates
 MEAN_KW = dict(lw=1.6, alpha=0.75, zorder=3)
+HALF_TIME_KW = dict(ls="--", lw=1.0, zorder=4)
 
 # the three (demography, pair_type) cells: y label and axis floor for each
 CELLS = {
@@ -86,6 +94,8 @@ def load_data():
     d["mean_rates"] = pd.read_parquet(figure_data(FIGURE, "mean_rates.parquet"))
     d["pairs"] = pd.read_csv(figure_data(FIGURE, "pairs.csv"))
     d["params"] = pd.read_csv(figure_data(FIGURE, "params.csv"))
+    d["half_times"] = pd.read_csv(figure_data(FIGURE, "ratio_half_times.csv"))
+    d["contrast"] = pd.read_csv(figure_data(FIGURE, "contrast_retained.csv"))
     for demography in ("split", "sawtooth"):
         for source in SOURCE_COLORS:
             d["rates"][demography, source] = pd.read_parquet(
@@ -124,6 +134,11 @@ def panel_rates(ax, d, demography, pair_type, xlabel=True):
             continue
         ax.plot(group_mean["time"], group_mean["rate"], color=color, **MEAN_KW)
 
+    if pair_type == "between":
+        half = d["half_times"][d["half_times"]["demography"] == demography]
+        for source, time in zip(half["source"], half["time"]):
+            ax.axvline(time, color=SOURCE_COLORS[source], **HALF_TIME_KW)
+
     ylabel, floor = CELLS[demography, pair_type]
     ax.set_xscale(param(d, demography, "time_scale", str))
     log_axis(ax, "y")
@@ -137,6 +152,31 @@ def panel_rates(ax, d, demography, pair_type, xlabel=True):
         ax.set_xlabel(TIME_LABEL)
     else:
         ax.tick_params(labelbottom=False)
+
+
+TABLE_LABELS = {"tsinfer": "tsinfer", "relate": "Relate", "singer": "SINGER+POLEGON"}
+
+
+def contrast_table(ax, d):
+    """rho per inferred-ARG source (rows) and pair of consecutive extrema (columns)."""
+    c = d["contrast"]
+    pairs = c.drop_duplicates("contrast").sort_values("contrast")
+    x_label, x_cols, y_top, dy = 0.04, [0.48, 0.665, 0.86], 0.235, 0.048
+    kw = dict(transform=ax.transAxes, fontsize=FONT_SIZES["annotation"], zorder=6)
+    ax.add_patch(matplotlib.patches.Rectangle(
+        (0.015, 0.015), 0.95, y_top + 0.03, transform=ax.transAxes, facecolor="white",
+        edgecolor="none", alpha=0.85, zorder=5))
+    ax.text((x_cols[0] + x_cols[-1]) / 2, y_top, r"Log contrast retained, $\rho$", ha="center", va="center", **kw)
+    for x, (_, pair) in zip(x_cols, pairs.iterrows()):
+        ax.text(x, y_top - dy, f"{pair.time_a:,.0f}\u2013{pair.time_b:,.0f}",
+                ha="center", va="center", **kw)
+    for i, source in enumerate(c["source"].drop_duplicates(), start=2):
+        y = y_top - i * dy
+        ax.text(x_label, y, TABLE_LABELS[source], ha="left", va="center",
+                color=SOURCE_COLORS[source], **kw)
+        rows = c[c["source"] == source].sort_values("contrast")
+        for x, rho in zip(x_cols, rows["rho"]):
+            ax.text(x, y, f"{rho:.2f}", ha="center", va="center", **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +205,7 @@ def assemble(d):
     panel_rates(ax_within, d, "split", "within", xlabel=False)
     panel_rates(ax_between, d, "split", "between")
     panel_rates(ax_saw, d, "sawtooth", "within")
+    contrast_table(ax_saw, d)
 
     # one letter per logical panel: A labels the stacked pair, B the sawtooth
     add_panel_label(ax_within, "A", dx=2, dy=13)

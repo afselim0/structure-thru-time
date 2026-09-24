@@ -15,22 +15,26 @@
 # All eight stages run utils/misc_utils/arg_rates_comparison.py, which drives
 # the ordinary snakemake pipeline.
 #
-# NUM_CONTIGS and ROOT can be overridden in the environment.
+# NUM_CONTIGS, ROOT and STAGES can be overridden in the environment. Leaving sim
+# out of STAGES submits the method stages with no dependency, on existing sims:
+#     STAGES=singer bash arg_rates_comparison.sh --slurm
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../run_common.sh"
 
-NUM_CONTIGS="${NUM_CONTIGS:-100}"
+NUM_CONTIGS="${NUM_CONTIGS:-500}"
 ROOT="${ROOT:-../results/outputs/misc_analyses/arg_rates_comparison}"
+STAGES="${STAGES:-sim tsinfer relate singer}"
 
-# stage -> resources. SINGER is the long pole (~9 min/contig on split, ~18 min
-# on sawtooth at 20 diploids/pop), so it gets the widest allocation.
+# stage -> resources, sized for 500 contigs. SINGER is the long pole (~9 min/contig
+# on split, ~18 min on sawtooth at 20 diploids/pop), so it gets the widest allocation.
 stage_resources() {
     case "$1" in
-        sim)     coastt_resources cpus=24 mem_per_cpu=4G time=04:00:00 ;;
-        tsinfer) coastt_resources cpus=24 mem_per_cpu=4G time=06:00:00 ;;
-        relate)  coastt_resources cpus=24 mem_per_cpu=4G time=04:00:00 ;;
-        # measured: 29 min split, ~70 min sawtooth, 22 GB peak
-        singer)  coastt_resources cpus=48 mem_per_cpu=2G time=03:00:00 ;;
+        sim)     coastt_resources cpus=24 mem_per_cpu=4G time=12:00:00 ;;
+        tsinfer) coastt_resources cpus=12 mem_per_cpu=4G time=48:00:00 ;;
+        relate)  coastt_resources cpus=12 mem_per_cpu=4G time=48:00:00 ;;
+        # measured at 100 contigs and 1000 iterations: 29 min split, ~70 min
+        # sawtooth, 22 GB peak; now 5x the contigs and 2.5x the iterations
+        singer)  coastt_resources cpus=48 mem_per_cpu=2G time=48:00:00 ;;
     esac
 }
 
@@ -42,8 +46,8 @@ if [[ $COASTT_SLURM -eq 0 ]]; then
     fi
     cpus="$(nproc 2>/dev/null || echo 12)"
 
-    for demo in split sawtooth; do
-        for stage in sim tsinfer relate singer; do
+    for demo in sawtooth split; do
+        for stage in $STAGES; do
             echo "=== $demo / $stage ==="
             python misc_utils/arg_rates_comparison.py \
                 --demography "$demo" --stage "$stage" \
@@ -64,16 +68,20 @@ submit_stage() {
     [[ -n "$dep" ]] && depflag=(--dependency="afterok:$dep")
 
     coastt_sbatch "arg_rates_${demo}_${stage}" "${depflag[@]}" -- \
-        python "$COASTT_UTILS/misc_utils/arg_rates_comparison.py" \
+        python misc_utils/arg_rates_comparison.py \
             --demography "$demo" --stage "$stage" \
             --num_contigs "$NUM_CONTIGS" --num_threads "$COASTT_CPUS" --root "$ROOT"
 }
 
-for demo in split sawtooth; do
-    sim_jid=$(submit_stage "$demo" sim)
-    echo "submitted $demo sim: job $sim_jid" >&2
-    for stage in tsinfer relate singer; do
+for demo in sawtooth split; do
+    sim_jid=""
+    if [[ " $STAGES " == *" sim "* ]]; then
+        sim_jid=$(submit_stage "$demo" sim)
+        echo "submitted $demo sim: job $sim_jid" >&2
+    fi
+    for stage in $STAGES; do
+        [[ "$stage" == sim ]] && continue
         jid=$(submit_stage "$demo" "$stage" "$sim_jid")
-        echo "submitted $demo $stage: job $jid (afterok:$sim_jid)" >&2
+        echo "submitted $demo $stage: job $jid${sim_jid:+ (afterok:$sim_jid)}" >&2
     done
 done
