@@ -4,7 +4,9 @@
 One contig in, one contig out: for each simulated ``contig_{i}.trees`` the script
 overlays mutations with a fixed seed (i + 42), exports a VCF into a per-contig work
 directory, runs the chosen ARG inference method and writes ``contig_{i}.trees`` into
-the output directory. Nothing else is left in the output directory except the
+the output directory. The exception is Relate, whose branch lengths are re-estimated
+jointly across all contigs under the coalescence rates it infers (EstimatePopulationSize.sh)
+before each contig is converted. Nothing else is left in the output directory except the
 sentinel file, so downstream ``*.trees`` globs only ever see final tree sequences.
 
 Command lines and the fixes they encode (genetic-map units for Relate, calling the
@@ -41,6 +43,8 @@ RELATE_DIR = os.path.join(BIN_ROOT, "relate" + _SUFFIX)
 POLEGON_DIR = os.path.join(BIN_ROOT, "polegon_linux")
 
 SINGER_POLAR = 0.99   # REF is the true ancestral allele in the simulated VCF
+RELATE_NUM_ITER = 5   # Speidel et al. 2019
+RELATE_BINS = "1,5,0.1"   # epochs c(0, 10^seq(1, 5, 0.1)) generations
 
 
 # ----------------------------------------------------------------- helpers
@@ -102,10 +106,22 @@ def infer_tsinfer(mts, i, wd, log, args):
     return out
 
 
+def write_poplabels(mts, path):
+    """Relate .poplabels: one row per diploid, in VCF sample order."""
+    with open(path, "w") as f:
+        f.write("sample population group sex\n")
+        for k, ind in enumerate(mts.individuals()):
+            pop = mts.population(mts.node(ind.nodes[0]).population).metadata.get("name", "pop")
+            f.write(f"tsk_{k} {pop} {pop} NA\n")
+
+
 def infer_relate(mts, i, wd, log, args):
+    """First pass only: topologies and branch lengths under a constant Ne. Branch
+    lengths are re-estimated jointly across contigs by ``relate_redate``."""
     cid = f"contig_{i}"
     vcf_prefix = os.path.join(wd, cid)
     write_vcf(mts, vcf_prefix + ".vcf", str(i))
+    write_poplabels(mts, vcf_prefix + ".poplabels")
     L = mts.sequence_length
     # Genetic map: uniform rate. Rate column is cM/Mb, Map column cumulative cM.
     with open(os.path.join(wd, f"{cid}.map"), "w") as f:
@@ -119,9 +135,38 @@ def infer_relate(mts, i, wd, log, args):
          "--effectiveN", int(round(2 * estimate_Ne(mts, args.mu))),
          "--haps", f"{cid}.haps", "--sample", f"{cid}.sample", "--map", f"{cid}.map",
          "--seed", i + 1, "--output", cid], wd, log)
+    return vcf_prefix
+
+
+def relate_redate(n, root, args):
+    """EstimatePopulationSize.sh over all contigs at once: iterate coalescence-rate
+    estimation and branch-length resampling, then re-date every tree under the final
+    rates (Speidel et al. 2019). Relate's own rate estimates are discarded."""
+    jd = os.path.join(root, "work", "joint")
+    shutil.rmtree(jd, ignore_errors=True)
+    os.makedirs(jd)
+    for i in range(n):
+        for ext in ("anc", "mut"):
+            os.symlink(os.path.join(root, "work", f"contig_{i}", f"contig_{i}.{ext}"),
+                       os.path.join(jd, f"relate_chr{i}.{ext}"))
+    shutil.copy(os.path.join(root, "work", "contig_0", "contig_0.poplabels"),
+                os.path.join(jd, "relate.poplabels"))
+    run([os.path.join(RELATE_DIR, "scripts", "EstimatePopulationSize", "EstimatePopulationSize.sh"),
+         "-i", "relate", "-o", "relate_popsize", "-m", args.mu,
+         "--poplabels", "relate.poplabels", "--years_per_gen", 1, "--bins", RELATE_BINS,
+         "--num_iter", RELATE_NUM_ITER, "--first_chr", 0, "--last_chr", n - 1,
+         "--threads", args.num_threads, "--seed", 1, "--noplot"],
+        jd, os.path.join(root, "logs", "relate_redate.log"))
+    return jd
+
+
+def relate_convert(i, jd, root, args, expect_samples):
+    dest = os.path.join(args.output_path, f"contig_{i}.trees")
+    prefix = os.path.join(jd, f"relate_popsize_chr{i}")
     run([os.path.join(RELATE_DIR, "RelateFileFormats"), "--mode", "ConvertToTreeSequence",
-         "-i", cid, "-o", cid], wd, log)
-    return os.path.join(wd, f"{cid}.trees")
+         "-i", prefix, "-o", prefix], jd, os.path.join(root, "logs", f"contig_{i}.log"))
+    ts = finalize(prefix + ".trees", dest, expect_samples)
+    return f"contig_{i}: {ts.num_trees} trees, {ts.num_samples} samples, re-dated"
 
 
 def _polegon(singer_trees, i, wd, log, mu):
@@ -182,10 +227,7 @@ METHODS = {"tsinfer": infer_tsinfer, "relate": infer_relate, "singer": infer_sin
 
 
 # ----------------------------------------------------------------- driver
-def infer_contig(i, args):
-    dest = os.path.join(args.output_path, f"contig_{i}.trees")
-    if os.path.exists(dest):
-        return f"contig_{i}: exists, skipped"
+def prepare_contig(i, args):
     root = os.path.dirname(os.path.abspath(args.output_path))
     # Absolute: the external binaries are run with cwd set to the work directory,
     # so every path handed to them has to resolve independently of that cwd.
@@ -195,12 +237,45 @@ def infer_contig(i, args):
     shutil.rmtree(wd, ignore_errors=True)   # discard a previous failed attempt
     os.makedirs(wd)
     log = os.path.join(log_dir, f"contig_{i}.log")
-    t0 = time.time()
     mts = mutate(tskit.load(os.path.join(args.sim_dir, f"contig_{i}.trees")), i, args.mu)
+    return wd, log, mts
+
+
+def infer_contig(i, args):
+    dest = os.path.join(args.output_path, f"contig_{i}.trees")
+    if os.path.exists(dest):
+        return f"contig_{i}: exists, skipped"
+    t0 = time.time()
+    wd, log, mts = prepare_contig(i, args)
     ts = finalize(METHODS[args.method](mts, i, wd, log, args), dest, mts.num_samples)
     shutil.rmtree(wd)
     return (f"contig_{i}: {ts.num_trees} trees, {ts.num_samples} samples, "
             f"L={ts.sequence_length:.0f}, {ts.num_sites} sites, {(time.time() - t0) / 60:.1f} min")
+
+
+def relate_first_pass(i, args):
+    wd, log, mts = prepare_contig(i, args)
+    infer_relate(mts, i, wd, log, args)
+    return mts.num_samples
+
+
+def run_relate(n, args):
+    """Relate's re-dating pools all contigs, so it cannot be resumed per contig."""
+    if all(os.path.exists(os.path.join(args.output_path, f"contig_{i}.trees")) for i in range(n)):
+        print("all contigs exist, skipped", flush=True)
+        return
+    root = os.path.dirname(os.path.abspath(args.output_path))
+    idx = range(n)
+    with concurrent.futures.ProcessPoolExecutor(args.num_threads) as ex:
+        samples = list(ex.map(relate_first_pass, idx, [args] * n))
+    print(f"first pass done for {n} contigs; re-dating jointly", flush=True)
+    jd = relate_redate(n, root, args)
+    with concurrent.futures.ProcessPoolExecutor(args.num_threads) as ex:
+        for msg in ex.map(relate_convert, idx, [jd] * n, [root] * n, [args] * n, samples):
+            print(msg, flush=True)
+    shutil.rmtree(jd)
+    for i in idx:
+        shutil.rmtree(os.path.join(root, "work", f"contig_{i}"))
 
 
 def main():
@@ -233,7 +308,9 @@ def main():
           f"{'+polegon' if args.method == 'singer' and args.polegon else ''}", flush=True)
 
     t0 = time.time()
-    if args.num_threads == 1:
+    if args.method == "relate":
+        run_relate(n, args)
+    elif args.num_threads == 1:
         for i in range(n):
             print(infer_contig(i, args), flush=True)
     else:
