@@ -164,6 +164,13 @@ else
         --outdir "${HGDP}/sets"
 fi
 
+# The palette needs only metadata, so it can be built here. The per-set pop_labels.csv
+# cannot: its row order is the VCF's, which does not exist until subset.sh has run. Build
+# those with make_labels.sh once the set inputs are in place.
+python "${ROOT}/scripts/HGDP_color_palette.py" \
+    --metadata "${HGDP}/metadata.tsv" \
+    --outdir "${ROOT}/resources/population_labels_colors"
+
 echo "== 7/7 splitting statphase into per-chromosome GT-only BCFs =="
 bash "${ROOT}/scripts/split_statphase.sh" "$VCF" "${HGDP}/statphase" "$THREADS"
 

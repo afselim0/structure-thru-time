@@ -87,7 +87,7 @@ What each stage actually does, in order:
 | 3 | `make_ancestral.py` | `grch38/ancestral/chr{N}.ancestral.fa.gz` + `chrom.sizes` |
 | 4 | `make_masks.py` | `grch38/mask/chr{N}.mask.bed` — **complemented** to inaccessible |
 | 5 | `make_hapmaps.py` | `grch38/hapmap/chr{N}.hapmap` from the deCODE map |
-| 6 | `make_metadata.py`, `make_sample_sets.py` | `hgdp/metadata.tsv`, `hgdp/sets/*.csv` |
+| 6 | `make_metadata.py`, `make_sample_sets.py`, `HGDP_color_palette.py` | `hgdp/metadata.tsv`, `hgdp/sets/*.csv`, `population_labels_colors/palette.{csv,png}` |
 | 7 | `split_statphase.sh` | `hgdp/statphase/chr{N}.bcf` — GT-only, per chromosome |
 | — | `verify_resources.py` | 200 checks (see *Verification*) |
 
@@ -120,6 +120,42 @@ several draws of the same region would enter that region into the likelihood twi
 refuses two situations that would otherwise pass silently — a draw from inside the burn-in
 implied by `drivers/singer_config.yaml`, and chromosomes disagreeing on which replicate is
 their latest (a killed merge job), which would mix posterior samples of different ages.
+
+**5. `scripts/make_labels.sh`** — writes the files CoaSTT labels and colours a run with, into
+`resources/population_labels_colors/`:
+
+```
+HGDP_color_palette.py   →  global_palette.{csv,png}      region hue + population ramp
+                        →  regional_palette.{csv,png}    discrete within each region
+make_sample_sets.py     →  <SET>_pop_labels.csv          one row per HAPLOTYPE
+                        →  <SET>_pop_colors.csv          population,color
+```
+
+`pop_labels.csv` carries `sample_id` (the tree sequence's own sample/node index),
+`individual_id`, `HGDP_sample_id`, `HGDP_individual_id`, `population` and `region`. Row order
+is the sample order of the tree sequences, taken from each set's `chr1.meta.csv` — the VCF
+order SINGER saw, not the sorted set definition. A tree sequence pairs individual *i* with
+nodes *2i* and *2i+1*, so the two haplotype rows of an individual are consecutive. When
+`results/<SET>/ts_chunks/` exists the order is asserted against a real tree sequence, because a
+wrong order would mislabel every sample rather than raise.
+
+There are TWO palettes, because a plot of all seven regions and a plot of one region need
+different things from colour. `global_palette` is two-level -- seven region anchors, then a
+within-region ramp ordered along the region's principal geographic axis -- so a colour says
+which region a population is in; `ALL_pop_colors.csv` uses it. `regional_palette` instead
+gives each region its own max-separation palette drawn from the whole gamut, since a
+single-region plot has no other region to distinguish from and only needs its populations
+told apart; the seven `<REGION>_pop_colors.csv` use it. Minimum separation within a region
+goes from dE 0.3-3.6 (global) to dE 8.8-37.1 (regional). The same population therefore has a
+different colour in ALL than in its own region's set, by design. Both assign colours in
+geographic order, so a legend still reads west-to-east or south-to-north.
+The global anchors alternate dark and light on purpose — protanopia and deuteranopia collapse
+the red-green axis, so lightness, not hue, is what separates the regions for those viewers.
+East Asia's 18 populations exceed what one hue can hold, so it carries a second anchor
+internally (`REGION_SUBSPLITS`, cut at 33°N); this is palette-internal and the `region` column
+stays `EAST_ASIA` throughout. The script re-checks every anchor on each run and fails if an
+edit breaks the floor of ΔE 6. Both PNGs are always regenerated, including on a failing
+palette, so a retune can be inspected.
 
 ### Before you start: one file must be fetched by hand
 
