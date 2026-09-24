@@ -249,9 +249,13 @@ coastt_sbatch() {
         # distinct and non-array log names are unchanged.
     )
     # mem wins over mem_per_cpu when a script asks for a whole-job total.
+    # `coastt_resources mem_per_cpu=` (empty) asks for neither, leaving the
+    # partition's own default per-CPU memory to apply -- the right thing when
+    # the nodes have a fixed GB-per-CPU ratio and naming a larger figure would
+    # only strand CPUs to satisfy it.
     if [[ -n "${COASTT_MEM:-}" ]]; then
         args+=(--mem="$COASTT_MEM")
-    else
+    elif [[ -n "$COASTT_MEM_PER_CPU" ]]; then
         args+=(--mem-per-cpu="$COASTT_MEM_PER_CPU")
     fi
     [[ -n "$COASTT_ACCOUNT" ]]   && args+=(--account="$COASTT_ACCOUNT")
