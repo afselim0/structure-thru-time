@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "utils", "snakemake_utils"))
 SNAKEFILE = os.path.join(REPO_ROOT, "utils", "snakefile")
 CONFIGS = [
     os.path.join(REPO_ROOT, "data", "configs", "sim_configs", "complex_4_pops.yaml"),
-    os.path.join(REPO_ROOT, "data", "configs", "app_configs", "chimps.yaml"),
+    os.path.join(REPO_ROOT, "data", "configs", "app_configs", "chimps_recent.yaml"),
 ]
 
 
@@ -59,10 +59,25 @@ def _bundle_dash_tags(config_path):
     from bundle_dash import derive_from_config
 
     d = derive_from_config(config_path, base_dir=os.path.join(REPO_ROOT, "utils"))
-    stt = os.path.basename(d["embeddings"])[len("embeddings"):-len(".parquet")]
-    rates = os.path.basename(d["output"])  # dash_bundle<STT_TAG>.zip
+    emb = os.path.basename(d["embeddings"]).removeprefix("smooth_")
+    stt = emb[len("embeddings"):-len(".parquet")]
+    rates = os.path.basename(d["output"])  # dash_bundle[_smooth]<STT_TAG>.zip
     assert rates.startswith("dash_bundle") and rates.endswith(".zip")
     return stt
+
+
+def test_smoothed_runs_bundle_the_smooth_files():
+    """With l1 set, the snakefile writes smooth_embeddings / smooth_reconstructed_rates."""
+    import yaml
+    from bundle_dash import derive_from_config
+
+    for config_path in CONFIGS:
+        cfg = yaml.safe_load(open(config_path)) or {}
+        smoothing_on = str(cfg.get("l1", "None")) != "None"
+        d = derive_from_config(config_path, base_dir=os.path.join(REPO_ROOT, "utils"))
+        for key in ("embeddings", "output"):
+            name = os.path.basename(d[key])
+            assert (name.startswith("smooth_") or "_smooth." in name) == smoothing_on, (config_path, name)
 
 
 def test_stt_tag_matches_the_snakefile():

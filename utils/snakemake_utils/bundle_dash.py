@@ -158,6 +158,7 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
     time_scale = r("time_scale", "linear")
     pop_colors = r("pop_colors", os.path.join(output_path, "data/pop_colors.csv"))
     pop_labels = r("pop_labels", os.path.join(output_path, "data/pop_labels.csv"))
+    per_haplotype = str(r("per_haplotype", "False")).lower() == "true"
 
     # --- filename tags (must match Snakefile exactly) -----------------------
     # This duplicates utils/snakefile's tag construction and has drifted from it
@@ -165,19 +166,22 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
     # n_timepoints_emb default). test_bundle_dash_tags.py pins the two together;
     # run it after changing either side.
     PDF_TAG = f".V{version}.FS{fraction_samples}.pdf_minT{pdf_min_time}.pdf_maxT{pdf_max_time}.pdf_bin{pdf_bin_size}"
-    RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}.rates_minT{rates_min_time}.rates_maxT{rates_max_time}" + PDF_TAG
+    PHASE_TAG = ".perHap" if per_haplotype else ""
+    RATES_TAG = f".minWS{min_window_size}.maxWS{max_window_size}.rates_minT{rates_min_time}.rates_maxT{rates_max_time}{PHASE_TAG}" + PDF_TAG
     STT_TAG = f".d{n_components}.Nmin{N_min}.Nmax{N_max}.p{p}.link{link}.L1[{l1}].nTe{n_timepoints_emb}" + RATES_TAG
+    # With smoothing on, the snakefile writes the smoothed outputs as smooth_<name><SMOOTH_TAG>.
+    smooth = "smooth_" if str(l1) != "None" else ""
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
 
     data = resolve(os.path.join(output_path, "data"))
-    emb = os.path.join(data, f"embeddings{STT_TAG}.parquet")
+    emb = os.path.join(data, f"{smooth}embeddings{STT_TAG}.parquet")
     rates = os.path.join(data, f"rates{RATES_TAG}.parquet")
-    recon = os.path.join(data, f"reconstructed_rates{STT_TAG}.parquet")
-    cov = os.path.join(data, f"covariances{STT_TAG}.parquet")
+    recon = os.path.join(data, f"{smooth}reconstructed_rates{STT_TAG}.parquet")
+    cov = os.path.join(data, f"{smooth}covariances{STT_TAG}.parquet")
 
-    # default output matches the Snakefile `bundle_dash` rule: plots/dash_bundle<TAG>.zip
+    # default output matches the Snakefile bundle_dash / bundle_dash_smooth rules
     plots = resolve(os.path.join(output_path, "plots"))
     return dict(
         embeddings=emb,
@@ -192,7 +196,7 @@ def derive_from_config(config_path, base_dir=THIS_DIR):
         max_time=embeddings_max_time,
         lims=None if str(embeddings_plot_lims) == "None" else embeddings_plot_lims,
         generation_time=None,
-        output=os.path.join(plots, f"dash_bundle{STT_TAG}.zip"),
+        output=os.path.join(plots, f"dash_bundle{'_smooth' if smooth else ''}{STT_TAG}.zip"),
     )
 
 

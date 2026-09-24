@@ -517,6 +517,7 @@ smooth_input_vs_reconstructed_rates_interactive_file_name      = f"smooth_input_
 smooth_true_rates_vs_reconstructed_rates_plot_file_name        = f"smooth_true_rates_vs_reconstructed_rates{SMOOTH_TAG}.png"
 smooth_true_rates_vs_reconstructed_rates_interactive_file_name = f"smooth_true_rates_vs_reconstructed_rates{SMOOTH_TAG}.html"
 smooth_dash_launch_file_name                                    = f"launch_dash_smooth{SMOOTH_TAG}.sh"
+smooth_dash_bundle_file_name                                    = f"dash_bundle_smooth{SMOOTH_TAG}.zip"
 
 # Scan diagnostics file names (one row per swept value, per rates comparison)
 scan_p_file_name                                          = f"scan_p{STT_TAG_NO_P}.csv"
@@ -565,6 +566,7 @@ smooth_input_vs_reconstructed_rates_interactive = os.path.join(plot_output_path,
 smooth_true_rates_vs_reconstructed_rates_plot        = os.path.join(plot_output_path, smooth_true_rates_vs_reconstructed_rates_plot_file_name)
 smooth_true_rates_vs_reconstructed_rates_interactive = os.path.join(plot_output_path, smooth_true_rates_vs_reconstructed_rates_interactive_file_name)
 smooth_dash_launch                            = os.path.join(plot_output_path, smooth_dash_launch_file_name)
+smooth_dash_bundle                            = os.path.join(plot_output_path, smooth_dash_bundle_file_name)
 embeddings_pyvista_plot           = os.path.join(plot_output_path, embeddings_pyvista_plot_file_name)
 dash_launch                       = os.path.join(plot_output_path, dash_launch_file_name)
 dash_launch_true                  = os.path.join(plot_output_path, dash_launch_true_file_name)
@@ -2004,6 +2006,7 @@ rule plot_embeddings_pyvista:
 # Not in STT_targets — run explicitly to package a self-contained, shareable
 # interactive dash bundle (.zip with the app, data, pinned env, and run.sh):
 #   snakemake bundle_dash --configfile <config> --cores 1
+# bundle_dash_smooth does the same for the smoothed embeddings when l1 is set.
 rule bundle_dash:
     input:
         embeddings = embeddings_data,
@@ -2035,6 +2038,38 @@ rule bundle_dash:
             --rates-time-stride {params.rates_time_stride} \
             -o {output}
         """
+if smoothing_on:
+    rule bundle_dash_smooth:
+        input:
+            embeddings = smooth_embeddings_data,
+            rates = rates_data,
+            reconstructed_rates = smooth_reconstructed_rates,
+            pop_colors = pop_colors,
+            pop_labels = pop_labels,
+            script = bundle_dash_script,
+            dash_app = dash_app_script
+        output:
+            smooth_dash_bundle
+        params:
+            N_max = N_max,
+            time_scale = time_scale,
+            min_time = embeddings_min_time,
+            embeddings_max_time = embeddings_max_time,
+            rates_time_stride = rates_time_stride
+        shell:
+            """
+            python {input.script} {input.embeddings} \
+                --labels {input.pop_labels} \
+                --colors {input.pop_colors} \
+                --rates {input.rates} \
+                --reconstructed_rates {input.reconstructed_rates} \
+                --N_max {params.N_max} \
+                --time_scale {params.time_scale} \
+                --min_time {params.min_time} \
+                --max_time {params.embeddings_max_time} \
+                --rates-time-stride {params.rates_time_stride} \
+                -o {output}
+            """
 if demes_file_path and not is_SS_demography: # Ground-truth demographic rates are available (non-SS), so also compare true rates vs reconstructed rates
     rule evaluate_performance:
         input:
