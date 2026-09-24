@@ -20,22 +20,21 @@ recombination_rate: 1.2e-8
 
 # coal time pdf estimation
 pdf_min_time: 0
-pdf_max_time: 5000
+pdf_max_time: 6000
 pdf_bin_size: 2
-# fraction_samples: 1.0
 
 # rate estimation parameters
+rates_min_time: 50
+rates_max_time: 5000
 min_window_size: 100
-max_window_size: 200
+max_window_size: 600
 
 # Embeddings estimation parameters
 N_min: 100
 N_max: 1000000
-p: 1
-# l1: [0,0.05]
+l1: [0.0001,0.001]
 
 # Plotting parameters
-embeddings_min_time: 50
 max_rate_plot: 0.0002
 embeddings_plot_lims: 1000000
 time_scale: log

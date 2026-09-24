@@ -33,7 +33,7 @@ pdf_bin_size: 50
 rates_min_time: 400
 rates_max_time: 40000
 min_window_size: 500
-max_window_size: 2000
+max_window_size: 10000
 
 # Embeddings estimation parameters
 link_function: inverse_distance
