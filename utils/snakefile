@@ -18,6 +18,7 @@ tree_output_path                  = os.path.join(output_path,"trees") # This dir
 trees_dir                         = read_config("trees_dir", default = tree_output_path) # Default is the output path of simulated/inferred trees, unless trees are already inferred
 num_threads                       = read_config("num_threads", default = 1) # Parallelization used in simulation, inference and computation of coalescent pdf
 version                           = read_config("version", default = 1)
+pca_min_maf                       = float(read_config("pca_min_maf", default = 0.05)) # PCA: drop sites below this MAF, so singletons don't dominate the components
 
 # Simulation Parameters
 demes_file_path                   = read_config("demes_file_path", default = "")
@@ -159,6 +160,16 @@ raw_pop_colors                    = read_config("pop_colors", default = "")
 raw_pop_labels                    = read_config("pop_labels", default = "")
 pop_colors                        = os.path.join(output_path, "data/pop_colors.csv")
 pop_labels                        = os.path.join(output_path, "data/pop_labels.csv")
+
+def _num_populations():
+    if demes_file_path:
+        import demes
+        return sum(d.end_time == 0 for d in demes.load(demes_file_path).demes)
+    if raw_pop_labels and os.path.exists(raw_pop_labels):
+        import pandas as pd
+        return pd.read_csv(raw_pop_labels)["population"].nunique()
+    return 0
+effective_size_on                 = _num_populations() <= 10 # Too many populations to read on one Ne plot
 
 # Admixture Parameters
 admixed_pops                      = read_config("admixed_pops", default=None)
@@ -358,8 +369,9 @@ RATES_TAG                         = f".minWS{min_window_size}.maxWS{max_window_s
 TRUE_RATES_TAG                    = f".rates_minT{rates_min_time}.rates_maxT{rates_max_time}.pdf_bin{pdf_bin_size}{PHASE_TAG}"
 # PCA is a genotype GRM over the tree sequences and takes no time argument at all,
 # so it is deliberately NOT tagged with the time grid; doing so only forced
-# pointless recomputes whenever the grid moved.
-PCA_TAG                           = f".V{version}"
+# pointless recomputes whenever the grid moved. min_maf does belong here: it
+# selects which sites enter the GRM, so it changes the components themselves.
+PCA_TAG                           = f".V{version}.maf{pca_min_maf}"
 # STT_TAG (and everything built on it) is penalty-free: it tags the *unsmoothed* embeddings, which
 # are always computed regardless of whether smoothing is requested. Smoothed outputs use SMOOTH_TAG,
 # which is identical but carries the actual L1 penalties.
@@ -471,6 +483,9 @@ else: # The case of using empirical trees
     trees_ready = "trees_ready.txt"
 
 trees_ready                            = os.path.join(trees_dir, trees_ready)
+
+# Simulated trees carry no mutations (simulate_trees.py skips sim_mutations), so PCA has no sites to use
+pca_on                                 = not (trees_dir == tree_output_path and infer_method == "None")
 
 pdf_data_file_name                     = f"coal_pdf{PDF_TAG}.parquet"
 rates_data_file_name                   = f"rates{RATES_TAG}.parquet"
@@ -598,8 +613,9 @@ sim_targets = [sim_finished] + ([] if is_SS_demography else [demography_plot])
 
 STT_targets = [
     pdf_data,
-    pca_data, pca_plot,
-    rates_data, rates_plot, effective_size_plot,
+    *([pca_data, pca_plot] if pca_on else []),
+    rates_data, rates_plot,
+    *([effective_size_plot] if effective_size_on else []),
     embeddings_data, embeddings_plot,
     slice_2d,
     reconstructed_rates, input_vs_reconstructed_rates_plot, input_vs_reconstructed_rates_interactive,
@@ -757,7 +773,8 @@ rule run_pca:
         trees_dir = trees_dir,
         outdir = data_output_path,
         output_name = pca_data_file_name,
-        num_threads = num_threads
+        num_threads = num_threads,
+        min_maf = pca_min_maf
     shell:
         """
         mkdir -p {params.outdir}
@@ -766,7 +783,8 @@ rule run_pca:
             --output_path {params.outdir} \
             --output_name {params.output_name} \
             --pop_labels {input.pop_labels} \
-            --num_threads {params.num_threads}
+            --num_threads {params.num_threads} \
+            --min_maf {params.min_maf}
         """
 
 rule plot_pca:
@@ -1147,6 +1165,13 @@ rule compute_pdf:
         # — under LAI_method='True' it comes from simulate_trees.py and is no
         # rule's declared output, so requiring it here would fail the DAG on a
         # fresh run.
+        # Ordering only: the counting does not read the PCA coordinates. Both
+        # rules fork num_threads workers of their own while scoring as a single
+        # core each, so under --cores all snakemake starts them together and the
+        # two pools share the allocation -- half the cores each, twice the
+        # memory. Requiring the PCA output here holds the counting until PCA has
+        # finished and released its workers.
+        **({"pca_data": pca_data} if pca_on else {}),
         **({"ancestry_STT_dir": ancestry_STT_path} if admix_mode else {}),
         **({"LAI_dir": LAI_path} if admix_mode and LAI_method != "True" else {})
     params:

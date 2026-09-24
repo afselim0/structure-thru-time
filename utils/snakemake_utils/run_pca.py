@@ -11,6 +11,18 @@ principal components are the eigenvectors of G / n_sites. This is exact — it
 is the same decomposition a single-shot PCA on the stacked matrix would give —
 but it costs O(n^2) memory instead of O(sites x n).
 
+Sites below --min_maf are dropped before that scaling, and this matters more
+here than it does for a called-genotype PCA. Unit-variance scaling is the
+EIGENSTRAT convention (1/sqrt(p(1-p)) is the same thing), but it makes every
+site contribute equally to the trace whatever its frequency, so a singleton
+counts as much as a common variant. An ARG's site set is singleton-rich in a
+way an array or a MAF-filtered callset is not — the HGDP tree sequences are
+~53% singletons — and unfiltered, the leading components become a picture of
+private variation: for the 216-sample HGDP set PC2 separated San from Mbuti
+and collapsed every non-African population onto a point. Filtering first
+restores the expected continental structure and is what EIGENSTRAT runs
+effectively rely on.
+
 The alternative of concatenating the chunks and calling TreeSequence.pca() is
 not used, for two reasons: tskit 1.0.3's pca() only implements mode="branch"
 (site mode raises TSK_ERR_UNSUPPORTED_STAT_MODE), which is a different
@@ -38,27 +50,31 @@ from tqdm import tqdm
 
 
 def _chunk_grm(args):
-    """Return (Z^T Z, n_sites_used) for one tree sequence.
-
-    Monomorphic sites carry no information and would divide by a zero standard
-    deviation, so they are dropped rather than scaled.
-    """
-    ts_path, sample_ids = args
+    """Return (Z^T Z, n_sites_used) for one tree sequence."""
+    ts_path, sample_ids, min_maf = args
+    n = len(sample_ids)
     ts = tskit.load(ts_path)
     g = ts.genotype_matrix(samples=sample_ids).astype(np.float32)  # (sites, samples)
     if g.shape[0] == 0:
-        n = len(sample_ids)
         return np.zeros((n, n)), 0
 
-    # A site is monomorphic when it has no variance *across samples*, i.e. along
-    # axis 1 of this (sites, samples) matrix. Such sites carry no information and
-    # would divide by zero when standardised, so drop them first.
-    site_sd = g.std(axis=1)
-    polymorphic = site_sd > 0
-    if not polymorphic.any():
-        n = len(sample_ids)
+    # A sample isolated under the local tree has no genotype there, and tskit
+    # reports that as -1. Left alone those enter the mean, the sd and the GRM as
+    # if they were a third allele; they touch few entries (~0.2%) but a quarter
+    # of all sites. Drop any site carrying one rather than impute: at this site
+    # density the loss is cheap and imputing would invent structure.
+    g = g[~(g < 0).any(axis=1)]
+    if g.shape[0] == 0:
         return np.zeros((n, n)), 0
-    g = g[polymorphic]
+
+    # Genotypes are 0/1, so the row mean is the derived allele frequency. Fold it
+    # to a minor allele frequency, which also catches the monomorphic sites
+    # (maf == 0) that would otherwise divide by a zero standard deviation.
+    freq = g.mean(axis=1)
+    maf = np.minimum(freq, 1.0 - freq)
+    g = g[maf >= max(min_maf, np.nextafter(0.0, 1.0))]
+    if g.shape[0] == 0:
+        return np.zeros((n, n)), 0
 
     # Standardise each site (row) to mean 0 / unit variance across samples, so
     # every site contributes equally to the relatedness matrix.
@@ -66,17 +82,18 @@ def _chunk_grm(args):
     return (z.T @ z).astype(np.float64), g.shape[0]
 
 
-def compute_pca(ts_dir, sample_ids, num_components=2, num_threads=1):
+def compute_pca(ts_dir, sample_ids, num_components=2, num_threads=1, min_maf=0.05):
     """Accumulate the GRM across every tree sequence in ts_dir, then decompose it."""
     ts_paths = sorted(glob.glob(os.path.join(ts_dir, "*.trees")))
     if not ts_paths:
         raise ValueError(f"No .trees files found in {ts_dir}")
-    print(f"running PCA over {len(ts_paths)} tree sequences ({len(sample_ids)} samples)")
+    print(f"running PCA over {len(ts_paths)} tree sequences ({len(sample_ids)} samples), "
+          f"MAF >= {min_maf}")
 
     n = len(sample_ids)
     G = np.zeros((n, n))
     n_sites = 0
-    work = [(p, sample_ids) for p in ts_paths]
+    work = [(p, sample_ids, min_maf) for p in ts_paths]
 
     if num_threads > 1:
         with ProcessPoolExecutor(max_workers=num_threads) as pool:
@@ -91,7 +108,9 @@ def compute_pca(ts_dir, sample_ids, num_components=2, num_threads=1):
             n_sites += s_c
 
     if n_sites == 0:
-        raise ValueError(f"No polymorphic sites found across the tree sequences in {ts_dir}")
+        raise ValueError(
+            f"No sites at MAF >= {min_maf} across the tree sequences in {ts_dir}"
+        )
     G /= n_sites
 
     # G is symmetric PSD, so eigh is both correct and cheaper than an SVD.
@@ -102,7 +121,7 @@ def compute_pca(ts_dir, sample_ids, num_components=2, num_threads=1):
 
     total_variance = np.trace(G)
     explained = eigenvalues / total_variance if total_variance > 0 else np.full(num_components, np.nan)
-    print(f"used {n_sites} polymorphic sites; "
+    print(f"used {n_sites} sites at MAF >= {min_maf}; "
           f"variance explained: {np.round(explained * 100, 2)}%")
 
     pca_df = pd.DataFrame(factors, columns=[f"PC{i + 1}" for i in range(num_components)])
@@ -119,8 +138,13 @@ def main():
                         help="Path to population labels csv (already sliced to the samples used in this run)")
     parser.add_argument("--num_components", type=int, default=2, help="Number of principal components to retain")
     parser.add_argument("--num_threads", type=int, default=1, help="Number of worker processes")
+    parser.add_argument("--min_maf", type=float, default=0.05,
+                        help="Drop sites below this minor allele frequency (0 keeps every "
+                             "polymorphic site, which lets singletons dominate)")
 
     args = parser.parse_args()
+    if not 0.0 <= args.min_maf < 0.5:
+        parser.error(f"--min_maf must be in [0, 0.5), got {args.min_maf}")
     pop_labels = pd.read_csv(args.pop_labels)
     sample_ids = pop_labels["sample_id"].values
 
@@ -130,6 +154,7 @@ def main():
         sample_ids=sample_ids,
         num_components=args.num_components,
         num_threads=args.num_threads,
+        min_maf=args.min_maf,
     )
 
     # The plotting rule reads the explained variance back off these columns for
