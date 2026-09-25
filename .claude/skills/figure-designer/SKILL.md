@@ -1,6 +1,6 @@
 ---
 name: figure-designer
-description: Design, write and review publication-quality manuscript figures for CoaSTT (matplotlib + rendered 3D embedding panels). Use whenever creating or editing a script in results/figures/plotting_scripts/, changing results/figures/plotting_style.py, or when a figure needs fixing, resizing, restyling or reviewing.
+description: Design, write and review publication-quality manuscript figures for CoaSTT (matplotlib, including 3D embedding panels drawn with PlotEmbeddingsMatplotlib). Use whenever creating or editing a script in results/figures/plotting_scripts/, changing results/figures/plotting_style.py, or when a figure needs fixing, resizing, restyling or reviewing.
 ---
 
 # Figure designer
@@ -60,10 +60,10 @@ Before code, write the panel plan and put it in the script's header docstring:
    label + tick labels needs ≈0.5–0.6 in; an x-axis label + ticks ≈0.4 in; a title
    strip ≈0.25 in; a legend strip ≈0.3–0.45 in). The strips must sum exactly to
    the figure size: axes that touch the figure edge lose their labels to the size check.
-3. Raster panels (3D embeddings from `PlotEmbeddings.save_static`) dictate their
-   own aspect ratio: probe it first (`_, ar = plotter.save_static(..., scale=1)`) and
-   derive the panel width from the height (`w = h * ar`) or vice versa. Probe and
-   final render must share `width`/`height`.
+3. 3D embedding panels are ordinary axes of any shape (square is typical):
+   `PlotEmbeddingsMatplotlib` fits the drawing to the axes you give it (see Phase 2),
+   so budget them like any other panel. Their labels are drawn inside the axes, so
+   they need no extra label strips.
 4. Decide the single legend location and what belongs in `params.csv` (time windows,
    chosen timepoints, `N_max`) versus what is a plotting constant at the top of the script.
 
@@ -105,10 +105,27 @@ Conventions inside a script:
 - Demography schematics: `demesdraw.tubes(graph, ax=..., colours=pop_colors_dict, log_time=..., max_time=..., labels="xticks")`
   (API: https://grahamgower.github.io/demesdraw/latest/api.html). Then set the
   y label to `TIME_LABEL` and align its y limits with the neighbouring embedding panel.
-- Raster panels: `place_image(ax, img)`; the axis has no spines/ticks. Text inside
-  the raster (Plotly axis titles) must also read at ≥ 7 pt at final size: raise
-  `width`/`height` in `save_static` to shrink text relative to the plot, or set
-  `font_size`.
+- 3D embedding panels: always `src/PlotEmbeddingsMatplotlib.py` (not the Plotly
+  `PlotEmbeddings.save_static` + `place_image` route, which is legacy):
+  ```python
+  from src.PlotEmbeddingsMatplotlib import PlotEmbeddingsMatplotlib
+  colours = {iid: pop_colors[pop] for iid, pop in pop_labels.items()}   # individual_id -> colour
+  PlotEmbeddingsMatplotlib(emb_df, colours).draw(ax)   # emb_df: individual_id, time, X1, X2
+  ```
+  `draw` fills `ax` exactly, without distortion, by solving for the height of the time
+  axis; fonts come from rcParams (house sizes), spacing is in points. It rotates X1–X2 so
+  the most recent slice's main axis runs across the screen and fits a square floor to
+  the data. Output is fully vector (each individual is one path, ordered by depth), even for
+  hundreds of individuals; never pass `rasterized=True` for a manuscript PDF. Knobs, only when needed:
+  - human data: `generation_time=29` adds a years axis on the right.
+  - small multiples: `show_xy_ticks=False, xy_labels=("", "")` on all panels, time ticks and
+    `time_label` on the leftmost only (`show_time_ticks=False, time_label=""` elsewhere).
+  - panels that must be compared (Procrustes-aligned, see the rule above): pass the same
+    `xy_lim=` (constructor) so floors share a scale, `orient_view=False` so the alignment is
+    kept, and the same numeric `z_aspect=` (draw) if the axes differ in shape. If a common
+    orientation is wanted, apply `orient()` from the module to the concatenated aligned
+    tables in the prep script.
+  - time range: `tmin=`/`tmax=` (constructor); default is the data's positive time range.
 
 ## Phase 3: review (mandatory)
 
@@ -138,17 +155,20 @@ by `save_figure` and anything you could not resolve (e.g. missing figure data).
 - `savefig.pad_inches` is 0: the inch strips *are* the saved page, so every label
   needs a strip to live in. If `save_figure` reports an overflow of a few hundredths
   of an inch, a label is poking out of the figure, not a rounding issue.
-- 3D embedding panels narrower than ~2.5 in cannot carry legible Plotly tick
+- (Legacy Plotly panels, until their scripts are migrated.) 3D embedding panels narrower than ~2.5 in cannot carry legible Plotly tick
   labels (7 pt at final size means ~30 px on a 700 px canvas, which swamps the plot).
   For small multiples hide them (`plotter.fig.update_layout(scene=dict(xaxis=dict(showticklabels=False, title=""), ...))`,
   keep the planes so every panel crops identically) and give the time direction once,
   with a labelled arrow in the row-title strip. See `two_pop_migration.py`.
 - A rotated row title must be shorter than its row is tall; break it into two lines
   (`"Recent\nmigration"`) rather than shrinking it below the title size.
-- Panel letters on raster panels: `add_panel_label(ax, "A", dx=2, dy=0)`; the
-  plot's top-left corner is white in the standard camera.
-- Every render in a figure should share `RENDER_KW` and `xy_lims` so one cheap
+- (Legacy Plotly.) Every render in a figure should share `RENDER_KW` and `xy_lims` so one cheap
   probe (`scale=1`) gives the aspect ratio of all panels.
+- Panel letters on 3D panels: `add_panel_label(ax, "A", dx=2, dy=0)`; the top-left
+  corner holds the top of the time axis, so check it clears the `10^k` label.
+- `PlotEmbeddingsMatplotlib` needs the axes placed before `draw` (it measures the axes to
+  fit); calling `draw` and then resizing the axes breaks the fit.
+- Examples of every option, with renders: `.misc/cleaner_3d_plots/make_examples.py`.
 
 ## Running
 
@@ -159,7 +179,7 @@ python results/figures/plotting_scripts/<figure_name>.py
 ```
 
 `from results.figures.plotting_style import *` needs the repo root on `PYTHONPATH`
-(the `generate_*_figs.sh` drivers set it). 3D panels need kaleido's Chrome; if
+(the `generate_*_figs.sh` drivers set it). Only legacy Plotly 3D panels need kaleido's Chrome; if
 `ChromeNotFoundError` appears run once:
 `SSL_CERT_FILE=$(python -c "import certifi;print(certifi.where())") python -c "from kaleido import get_chrome_sync; print(get_chrome_sync())"`.
 New sim figures are picked up by `generate_sim_figs.sh` automatically; empirical
